@@ -1,0 +1,10 @@
+[
+  {"frame":1,"down":["w","a"]},
+  {"frame":101,"down":["w","a","space"],"pressed":["space"]},
+  {"frame":104,"down":["w","a"]},
+  {"frame":142,"down":["a","s"]},
+  {"frame":182,"down":[]},
+  {"frame":235,"down":["w"]},
+  {"frame":450,"down":["space"],"pressed":["space"]},
+  {"frame":451,"down":[]}
+]

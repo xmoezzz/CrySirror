@@ -32,9 +32,12 @@ pub enum Shake {
 }
 
 impl Ctx<'_> {
-    /// A process name stands for its spawner; `self` for the caller's.
-    fn object(&self, name: u32) -> u32 {
-        let name = if name == sid("self") { self.proc.map_or(name, |p| self.inner.procs[p].name) } else { name };
+    /// Native entity lookup (`sub_710C58`) resolves `self` through the running
+    /// process's entity handle, independently of the process name.
+    pub(super) fn object(&self, name: u32) -> u32 {
+        if name == sid("self") {
+            return self.proc.and_then(|p| self.inner.procs[p].spawner).unwrap_or(0);
+        }
         self.inner.process(name).and_then(|p| self.inner.procs[p].spawner).unwrap_or(name)
     }
     fn object_arg(&self, a: &[u32; MAX_ARGS], n: usize, i: usize) -> u32 {

@@ -32,6 +32,11 @@ impl PreparedFontFace {
             !bytes.is_empty() && bytes.len() <= MAX_FONT_BYTES,
             "font byte limit"
         );
+        // WOFF/WOFF2 sources are decoded to their sfnt once, here.
+        let bytes: Arc<[u8]> = match crate::webfont::decode(&bytes)? {
+            Some(sfnt) => sfnt.into(),
+            None => bytes,
+        };
         let face = rustybuzz::Face::from_slice(&bytes, face_index)
             .context("invalid shaping font face/index")?;
         let families = family_names(&face)?;

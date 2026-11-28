@@ -119,6 +119,7 @@ fn installed_shop_day_and_night_callers() -> Result<()> {
             .collect(),
     };
     let mut vm = Vm {
+        linked_cm3d2: None,
         client: c,
         config: cfg,
         game: None,

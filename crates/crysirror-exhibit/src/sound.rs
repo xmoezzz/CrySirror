@@ -8,7 +8,7 @@ use crysirror_core::{
     path::{Mount, VfsPath},
     service::{
         AudioAsset, AudioParameters, AudioPcm16Gain, AudioPcm16GainUpdate, AudioPreparePhase,
-        AudioRequest, HostServices, PcmBus,
+        AudioRequest, AudioResourceHandle, HostServices, PcmBus,
     },
     state::ClientId,
 };
@@ -232,6 +232,8 @@ pub(super) struct Audio {
     music_pcm16: [u32; 2],
     loop_effect: Option<i32>,
     loading: Option<Pending>,
+    v1_prepared: [Option<AudioResourceHandle>; 2],
+    v1_preparing: Option<(usize, u64)>,
     waiting_end: Option<u32>,
     effect_wait_2011: Option<EffectWait2011>,
     fade: Option<FadeWait>,
@@ -247,6 +249,8 @@ impl Default for Audio {
             music_pcm16: [0; 2],
             loop_effect: None,
             loading: None,
+            v1_prepared: [None; 2],
+            v1_preparing: None,
             waiting_end: None,
             effect_wait_2011: None,
             fade: None,
@@ -277,6 +281,30 @@ pub(super) fn packed_stereo(regs: &Registers, slot: i32, levels: [i32; 2]) -> Re
     }))
 }
 impl Audio {
+    /// cmdExHIBIT 35 initializes one of the two effect objects without
+    /// starting its transport (0x694a0 / 0xa54b0 / 0xbb110).
+    pub fn prepare_v1_effect(&mut self, h: &mut dyn HostServices, c: ClientId, slot: i32, id: i32) -> Result<()> {
+        let channel = effect_channel(slot);
+        let lane = usize::from(channel == 15);
+        let asset = AudioAsset {
+            path: VfsPath::new(Mount::Asset, &format!("res/s/e/{}.wav", crate::v1_services::decimal(id, 3)))?,
+            frame_limit: None,
+        };
+        ensure!(self.v1_preparing.is_none(), "ExHibit effect preparation already active");
+        self.stop(h, c, channel, 0, false)?;
+        self.release_v1_effect(h, c, lane)?;
+        let ticket = h.begin_audio_resource(c, asset, false)?;
+        self.v1_preparing = Some((lane, ticket));
+        Ok(())
+    }
+
+    fn release_v1_effect(&mut self, h: &mut dyn HostServices, c: ClientId, lane: usize) -> Result<()> {
+        if let Some(resource) = self.v1_prepared[lane] {
+            h.release_audio_resource(c, resource)?;
+            self.v1_prepared[lane] = None;
+        }
+        Ok(())
+    }
     pub fn scene_music_level(
         &self,
         h: &mut dyn HostServices,
@@ -307,7 +335,7 @@ impl Audio {
     }
 
     pub fn preparation_pending(&self) -> bool {
-        self.loading.is_some() || self.voice.is_some() || self.environment.preparing()
+        self.v1_preparing.is_some() || self.loading.is_some() || self.voice.is_some() || self.environment.preparing()
     }
     fn finish(&mut self, channel: u32, action: Finish, now: u64) {
         match action {
@@ -326,6 +354,16 @@ impl Audio {
         r: &mut Registers,
         input: InputFrame,
     ) -> Result<bool> {
+        if let Some((lane, ticket)) = self.v1_preparing {
+            let state = h.audio_resource_preparation(c, ticket)?;
+            if state.phase == AudioPreparePhase::Pending {
+                return Ok(false);
+            }
+            h.release_audio_resource_preparation(c, ticket)?;
+            self.v1_preparing = None;
+            ensure!(state.phase == AudioPreparePhase::Ready, "ExHibit effect resource failed: {:?}", state.error);
+            self.v1_prepared[lane] = Some(state.resource.context("missing ExHibit prepared effect")?);
+        }
         if !self.environment.poll(h, c)? {
             return Ok(false);
         }
@@ -582,10 +620,11 @@ impl Audio {
                     return Ok(());
                 }
                 let ch = effect_channel(slot);
+                self.release_v1_effect(h, c, usize::from(ch == 15))?;
                 (
                     ch,
                     id,
-                    format!("res/s/e/{id:03}.wav"),
+                    format!("res/s/e/{}.wav", crate::v1_services::decimal(id, 3)),
                     PcmBus::Sfx,
                     levels,
                     38,

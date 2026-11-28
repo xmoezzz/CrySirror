@@ -71,7 +71,13 @@ pub(crate) fn checkpoint(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value>
     let rb = store_true(vm, "_rollback")?;
     let hard = if rb { hard } else { Value::Bool(false) };
     let l = log(vm)?;
-    py::method_kw(vm, &l, "checkpoint", vec![data], vec![("keep_rollback".into(), keep), ("hard".into(), hard)])?;
+    py::method_kw(
+        vm,
+        &l,
+        "checkpoint",
+        vec![data],
+        vec![("keep_rollback".into(), keep), ("hard".into(), hard)],
+    )?;
     if rb && py::config_bool(vm, "auto_clear_screenshot")? {
         let i = iface(vm)?;
         if !py::is_none(&i) {
@@ -125,20 +131,29 @@ fn rollback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !py::truthy(vm, &force)? {
         let c = ctx(vm)?;
         let rb = py::get_or_none(vm, &c, "rollback")?;
-        if !store_true(vm, "_rollback")? || !py::truthy(vm, &rb)? || !py::config_bool(vm, "rollback_enabled")? {
+        if !store_true(vm, "_rollback")?
+            || !py::truthy(vm, &rb)?
+            || !py::config_bool(vm, "rollback_enabled")?
+        {
             return Ok(Value::None);
         }
     }
     config_set(vm, "skipping", Value::None)?;
     vm.call_method(&l, "complete", Vec::new())?;
     let force_true = matches!(force, Value::Bool(true));
-    py::method_kw(vm, &l, "rollback", vec![checkpoints], vec![
-        ("greedy".into(), greedy),
-        ("label".into(), label),
-        ("force".into(), Value::Bool(force_true)),
-        ("abnormal".into(), abnormal),
-        ("current_label".into(), current_label),
-    ])
+    py::method_kw(
+        vm,
+        &l,
+        "rollback",
+        vec![checkpoints],
+        vec![
+            ("greedy".into(), greedy),
+            ("label".into(), label),
+            ("force".into(), Value::Bool(force_true)),
+            ("abnormal".into(), abnormal),
+            ("current_label".into(), current_label),
+        ],
+    )
 }
 
 fn get_roll_forward(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {

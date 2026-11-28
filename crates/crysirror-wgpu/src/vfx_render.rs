@@ -84,6 +84,9 @@ pub struct RenderStats {
     pub draw_calls: usize,
     pub resources_pending: usize,
     pub texture_bytes: u64,
+    /// Transient coverage texture allocated for this view.
+    pub coverage_layer_bytes: u64,
+    pub coverage_layer_batches: usize,
     pub mesh_bytes: u64,
     pub particle_buffer_bytes: u64,
     /// Per-emitter sorting followed by emitter distance ordering, not OIT.
@@ -98,12 +101,15 @@ struct Uniform {
     view: [[f32; 4]; 4],
     model: [[f32; 4]; 4],
     camera: [f32; 4],
+    emitter_right: [f32; 4],
+    emitter_up: [f32; 4],
     mode: [u32; 4],
     animation: [f32; 4],
     axis: [f32; 4],
     screen: [f32; 4],
     fog_color: [f32; 4],
     fog_params: [f32; 4],
+    coverage: [f32; 4],
 }
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -179,6 +185,9 @@ struct Batch {
 
 /// A submitted frame owns bind-group references; caches retain only used data.
 pub struct VfxRenderer {
+    coverage_layer: Option<CoverageLayer>,
+    composite_pipeline: wgpu::RenderPipeline,
+    color_format: wgpu::TextureFormat,
     particle_layout: wgpu::BindGroupLayout,
     ribbon_layout: wgpu::BindGroupLayout,
     material_layout: wgpu::BindGroupLayout,
@@ -204,6 +213,11 @@ pub struct VfxRenderer {
     stats: RenderStats,
     epoch: Option<u64>,
     store: Option<u64>,
+}
+struct CoverageLayer {
+    size: [u32; 2],
+    view: wgpu::TextureView,
+    bind: wgpu::BindGroup,
 }
 
 fn storage(
@@ -240,6 +254,8 @@ fn blend_index(blend: BlendMode) -> usize {
         BlendMode::Additive => 1,
         BlendMode::Premultiplied => 2,
         BlendMode::Multiply => 3,
+        BlendMode::AdditiveColor => 4,
+        BlendMode::AdditiveCoverageLayer => 5,
     }
 }
 fn is_sorted(blend: BlendMode) -> bool {
@@ -250,6 +266,10 @@ fn blend_state(blend: BlendMode) -> wgpu::BlendState {
     match blend {
         BlendMode::Alpha => wgpu::BlendState::ALPHA_BLENDING,
         BlendMode::Premultiplied => wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
+        BlendMode::AdditiveColor | BlendMode::AdditiveCoverageLayer => {
+            let add = C { src_factor: F::One, dst_factor: F::One, operation: O::Add };
+            wgpu::BlendState { color: add, alpha: add }
+        }
         BlendMode::Additive => wgpu::BlendState {
             color: C {
                 src_factor: F::One,
@@ -280,8 +300,8 @@ fn blend_state(blend: BlendMode) -> wgpu::BlendState {
 impl VfxRenderer {
     pub fn new(d: &wgpu::Device, color: wgpu::TextureFormat, samples: u32) -> Result<Self> {
         ensure!(
-            [1, 4].contains(&samples),
-            "VFX renderer supports single-sample or 4x MSAA targets"
+            matches!(samples, 1 | 2 | 4 | 8),
+            "invalid VFX raster sample count"
         );
         ensure!(
             d.limits().max_storage_buffers_per_shader_stage >= 4,
@@ -333,6 +353,12 @@ impl VfxRenderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+                    count: None,
+                },
             ],
         });
         let shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -376,8 +402,10 @@ impl VfxRenderer {
                 BlendMode::Additive,
                 BlendMode::Premultiplied,
                 BlendMode::Multiply,
+                BlendMode::AdditiveColor,
+                BlendMode::AdditiveCoverageLayer,
             ] {
-                let fragment = ["fs_alpha", "fs_additive", "fs_premultiplied", "fs_multiply"]
+                let fragment = ["fs_alpha", "fs_additive", "fs_premultiplied", "fs_multiply", "fs_additive_color", "fs_additive_color"]
                     [blend_index(blend)];
                 pipelines.push(d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("VFX draw"),
@@ -415,7 +443,7 @@ impl VfxRenderer {
                         bias: Default::default(),
                     }),
                     multisample: wgpu::MultisampleState {
-                        count: samples,
+                        count: if blend == BlendMode::AdditiveCoverageLayer { 1 } else { samples },
                         ..Default::default()
                     },
                     multiview_mask: None,
@@ -493,7 +521,25 @@ impl VfxRenderer {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        let shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("particle coverage composite"),
+            source: wgpu::ShaderSource::Wgsl(crysirror_shaders::wgsl::VFX_COMPOSITE.into()),
+        });
+        let composite_pipeline = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("particle coverage composite"),
+            layout: None,
+            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader, entry_point: Some("fs"), compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState { format: color, blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
+            }),
+            primitive: Default::default(),
+            depth_stencil: Some(wgpu::DepthStencilState { format: wgpu::TextureFormat::Depth32Float, depth_write_enabled: Some(false), depth_compare: Some(wgpu::CompareFunction::Always), stencil: Default::default(), bias: Default::default() }),
+            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
+            multiview_mask: None, cache: None,
+        });
         Ok(Self {
+            color_format: color, composite_pipeline, coverage_layer: None,
             particle_layout,
             ribbon_layout,
             material_layout,
@@ -522,6 +568,7 @@ impl VfxRenderer {
         })
     }
     pub fn clear(&mut self) {
+        self.coverage_layer = None;
         self.batches.clear();
         self.images.clear();
         self.meshes.clear();
@@ -759,18 +806,21 @@ impl VfxRenderer {
         Ok(Some(key))
     }
     fn settings<'a>(&self, e: &'a EmitterFrame) -> Result<(Uniform, Option<&'a str>, BlendMode)> {
+        let emitter_frame = Mat4::from_cols_array_2d(&e.transform);
+        ensure!(emitter_frame.is_finite(), "nonfinite VFX transform");
         let model = if e.space == SimulationSpace::Local {
-            Mat4::from_cols_array_2d(&e.transform)
+            emitter_frame
         } else {
             Mat4::IDENTITY
         };
-        ensure!(model.is_finite(), "nonfinite VFX transform");
         let mut u = Uniform {
             view_projection: self.view.view_projection.to_cols_array_2d(),
             inverse_view_projection: self.view.view_projection.inverse().to_cols_array_2d(),
             view: self.view.view.to_cols_array_2d(),
             model: model.to_cols_array_2d(),
             camera: self.view.camera.extend(1.).to_array(),
+            emitter_right: emitter_frame.x_axis.to_array(),
+            emitter_up: emitter_frame.y_axis.to_array(),
             mode: [0, 0, 1, 1],
             animation: [1., 0., 0., 0.],
             axis: [0., 1., 0., 0.],
@@ -787,6 +837,7 @@ impl VfxRenderer {
                 self.view.fog_max_opacity,
             ],
             fog_params: self.view.fog,
+            coverage: [0.; 4],
         };
         let (texture, blend) = match &e.render {
             RenderSpec::Sprite {
@@ -796,6 +847,7 @@ impl VfxRenderer {
                 frames,
                 fps,
                 soft_distance,
+                triplanar_coverage,
                 blend,
                 facing,
             } => {
@@ -814,6 +866,9 @@ impl VfxRenderer {
                     texture.is_some() || (*columns == 1 && *rows == 1 && *frames == 1),
                     "VFX flipbooks require an image resource"
                 );
+                if let Some(coverage) = triplanar_coverage {
+                    u.coverage = [coverage.scroll[0], coverage.scroll[1], coverage.scroll[2], coverage.scale];
+                }
                 u.mode[2] = *columns;
                 u.mode[3] = *rows;
                 u.animation = [
@@ -833,7 +888,7 @@ impl VfxRenderer {
                             "invalid VFX facing axis"
                         );
                         u.mode[1] = 2;
-                        u.axis = [axis[0], axis[1], axis[2], 0.];
+                        u.axis = emitter_frame.transform_vector3(Vec3::from(*axis)).extend(0.).to_array();
                     }
                 }
                 (texture.as_deref(), *blend)
@@ -863,7 +918,7 @@ impl VfxRenderer {
         };
         Ok((u, texture, blend))
     }
-    fn material(&self, d: &wgpu::Device, key: &str, depth: &wgpu::TextureView) -> wgpu::BindGroup {
+    fn material(&self, d: &wgpu::Device, key: &str, coverage_key: &str, depth: &wgpu::TextureView) -> wgpu::BindGroup {
         d.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("VFX material bind"),
             layout: &self.material_layout,
@@ -879,6 +934,10 @@ impl VfxRenderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(depth),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&self.images[coverage_key].view),
                 },
             ],
         })
@@ -964,6 +1023,13 @@ impl VfxRenderer {
             let Some(image) = self.image(gpu, assets, e.client, path.as_deref())? else {
                 continue;
             };
+            let coverage_image = match &e.render {
+                RenderSpec::Sprite { triplanar_coverage: Some(coverage), .. } => {
+                    let Some(key) = self.image(gpu, assets, e.client, Some(&coverage.texture))? else { continue };
+                    key
+                }
+                _ => image.clone(),
+            };
             ensure!(
                 u.mode[0] != 0
                     || u.animation[3] > 0.5
@@ -971,7 +1037,7 @@ impl VfxRenderer {
                         && self.images[&image].size[1] >= u.mode[3]),
                 "VFX flipbook cells must contain at least one source texel"
             );
-            let material = self.material(&gpu.device, &image, depth);
+            let material = self.material(&gpu.device, &image, &coverage_image, depth);
             let model = Mat4::from_cols_array_2d(&u.model);
             if let RenderSpec::Ribbon {
                 width,
@@ -1146,6 +1212,13 @@ impl VfxRenderer {
             let Some(image) = self.image(gpu, assets, e.client, path.as_deref())? else {
                 continue;
             };
+            let coverage_image = match &e.render {
+                RenderSpec::Sprite { triplanar_coverage: Some(coverage), .. } => {
+                    let Some(key) = self.image(gpu, assets, e.client, Some(&coverage.texture))? else { continue };
+                    key
+                }
+                _ => image.clone(),
+            };
             ensure!(
                 u.mode[0] != 0
                     || u.animation[3] > 0.5
@@ -1181,7 +1254,7 @@ impl VfxRenderer {
                 &u,
                 Some((input.particles, indices, index_offset)),
             );
-            let material = self.material(&gpu.device, &image, depth);
+            let material = self.material(&gpu.device, &image, &coverage_image, depth);
             self.batches.push(Batch {
                 view,
                 material,
@@ -1403,14 +1476,59 @@ impl VfxRenderer {
             RenderSpec::Ribbon { .. } => anyhow::bail!("GPU ribbons require trail history"),
         }
     }
+    /// Render all coverage-layer particles into transparent RGBA before the
+    /// opaque scene is composited. Particle depth compares with the prepass.
+    pub fn render_coverage_layer(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, depth: &wgpu::TextureView) {
+        self.stats.coverage_layer_batches = self.batches.iter().filter(|b| b.blend == BlendMode::AdditiveCoverageLayer).count();
+        if self.stats.coverage_layer_batches == 0 {
+            self.coverage_layer = None;
+            return;
+        }
+        // One additional draw composites all the accumulated batches.
+        self.stats.draw_calls += 1;
+        let size = self.view.viewport;
+        self.stats.coverage_layer_bytes = u64::from(size[0]) * u64::from(size[1]) * u64::from(self.color_format.block_copy_size(None).unwrap_or(0));
+        if self.coverage_layer.as_ref().is_none_or(|layer| layer.size != size) {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("world particle coverage layer"),
+                size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+                mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+                format: self.color_format, usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING, view_formats: &[],
+            });
+            let view = texture.create_view(&Default::default());
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("world particle coverage layer"), layout: &self.composite_pipeline.get_bind_group_layout(0),
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
+            });
+            self.coverage_layer = Some(CoverageLayer { size, view, bind });
+        }
+        let layer = self.coverage_layer.as_ref().unwrap();
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("world particle coverage accumulation"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &layer.view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store } })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment { view: depth, depth_ops: None, stencil_ops: None }),
+            timestamp_writes: None, occlusion_query_set: None, multiview_mask: None,
+        });
+        self.draw_batches(&mut pass, true);
+    }
+
     pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-        for batch in &self.batches {
+        if let Some(layer) = &self.coverage_layer {
+            pass.set_pipeline(&self.composite_pipeline);
+            pass.set_bind_group(0, &layer.bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.draw_batches(pass, false);
+    }
+
+    fn draw_batches<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, layer: bool) {
+        for batch in self.batches.iter().filter(|b| (b.blend == BlendMode::AdditiveCoverageLayer) == layer) {
             let kind = match &batch.shape {
                 Shape::Sprite => 0,
                 Shape::Mesh(_) => 1,
                 Shape::Ribbon(_, _) => 2,
             };
-            pass.set_pipeline(&self.pipelines[kind * 4 + blend_index(batch.blend)]);
+            pass.set_pipeline(&self.pipelines[kind * 6 + blend_index(batch.blend)]);
             pass.set_bind_group(0, &batch.view, &[]);
             pass.set_bind_group(1, &batch.material, &[]);
             let vertices = match &batch.shape {

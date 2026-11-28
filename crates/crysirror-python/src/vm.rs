@@ -173,14 +173,25 @@ pub struct Vm {
     pub exc_state: Option<Value>,
     pub host: Box<dyn Host>,
     pub native_modules: Vec<(&'static str, ModuleInit)>,
+    /// Python 2 `print` softspace of the default stdout.
+    pub stdout_softspace: bool,
+    /// Called once a native or source module has been initialized, before
+    /// the importer returns it (embedders add module-level behavior here).
+    pub module_loaded: Option<fn(&mut Vm, &str, &ObjRef) -> PyResult<()>>,
     /// Frame depth at which a running task may suspend.
     task_base: Option<usize>,
     pub recursion_limit: usize,
     pub native_depth: usize,
+    /// `CRYSIRROR_PY_TRACE_NATIVE`: exceptions record the native functions
+    /// they pass through as `<native>` traceback entries (diagnostics only).
+    pub trace_natives: bool,
     pub dialect_default: crate::Dialect,
     /// Arbitrary engine state reachable from native functions.
     pub ext: RefCell<Vec<Box<dyn Any>>>,
     pub classes: crate::builtins::Classes,
+    /// `gc.garbage` and `gc.callbacks` (lists).
+    pub gc_garbage: ObjRef,
+    pub gc_callbacks: ObjRef,
 }
 
 macro_rules! top {
@@ -199,6 +210,9 @@ impl Vm {
         let builtins = types.new_dict_obj(Dict::new());
         let modules = types.new_dict_obj(Dict::new());
         let builtins_module = new_obj(types.module.clone(), None, Payload::Module("builtins".into(), builtins.clone()));
+        let new_list = |types: &Types| new_obj(types.list.clone(), None, Payload::List(RefCell::new(Vec::new())));
+        let gc_garbage = new_list(&types);
+        let gc_callbacks = new_list(&types);
         let mut vm = Vm {
             types,
             builtins,
@@ -208,12 +222,17 @@ impl Vm {
             exc_state: None,
             host,
             native_modules: Vec::new(),
+            stdout_softspace: false,
+            module_loaded: None,
             task_base: None,
             recursion_limit: 1000,
             native_depth: 0,
+            trace_natives: std::env::var_os("CRYSIRROR_PY_TRACE_NATIVE").is_some(),
             dialect_default: crate::Dialect::Py3,
             ext: RefCell::new(Vec::new()),
             classes: crate::builtins::Classes::default(),
+            gc_garbage,
+            gc_callbacks,
         };
         crate::builtins::install(&mut vm);
         vm
@@ -521,14 +540,20 @@ impl Vm {
             }
             Payload::Builtin(b) => {
                 let func = b.func;
-                if let Some(s) = &b.bound {
+                let r = if let Some(s) = &b.bound {
                     let mut a = Vec::with_capacity(args.len() + 1);
                     a.push(s.clone());
                     a.extend(args);
                     func(self, &a, &kwargs)
                 } else {
                     func(self, &args, &kwargs)
+                };
+                if self.trace_natives {
+                    if let Err(PyErr::Exc(e)) = &r {
+                        crate::ops::add_traceback(self, e, ("<native>".into(), 0, b.name.into()));
+                    }
                 }
+                r
             }
             Payload::Method { func, slf } => {
                 let mut a = Vec::with_capacity(args.len() + 1);
@@ -714,7 +739,13 @@ impl Vm {
     pub fn execute(&mut self, base: usize) -> PyResult<Exit> {
         loop {
             match self.step_loop(base) {
-                Ok(exit) => return Ok(exit),
+                Ok(exit) => {
+                    // Work queued by the last instructions of an outermost run.
+                    if base == 0 && crate::gc::pending_hint() {
+                        crate::gc::safe_point(self);
+                    }
+                    return Ok(exit);
+                }
                 Err(e) => {
                     if self.frames.len() <= base {
                         return Err(e);
@@ -731,6 +762,10 @@ impl Vm {
 
     fn step_loop(&mut self, base: usize) -> PyResult<Exit> {
         loop {
+            // GC safe point: no borrows are held between instructions.
+            if crate::gc::pending_hint() {
+                crate::gc::safe_point(self);
+            }
             let op = {
                 let f = top!(self);
                 let op = f.code.ops[f.ip];
@@ -1356,12 +1391,12 @@ impl Vm {
                 Op::PrintItem | Op::PrintItemTo => {
                     let v = self.pop();
                     let dest = if op == Op::PrintItemTo { Some(self.pop()) } else { None };
-                    let s = crate::ops::str(self, &v)?;
-                    crate::builtins::print_write(self, dest.as_ref(), &s, true)?;
+                    crate::builtins::print_item(self, dest.as_ref(), &v)?;
                 }
                 Op::PrintNewline | Op::PrintNewlineTo => {
                     let dest = if op == Op::PrintNewlineTo { Some(self.pop()) } else { None };
                     crate::builtins::print_write(self, dest.as_ref(), "\n", false)?;
+                    crate::builtins::set_softspace(self, dest.as_ref(), false)?;
                 }
                 Op::PrintExpr => {
                     let v = self.pop();

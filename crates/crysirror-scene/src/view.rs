@@ -465,6 +465,24 @@ impl Default for ColorGrading {
     }
 }
 
+/// Resource quality for the shared raster renderer. Unsupported sample
+/// counts are reduced to the nearest supported count on the active device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RasterQuality {
+    /// Requested raster sample count: 1, 2, 4 or 8.
+    pub samples: u32,
+    /// Edge size in pixels of each cascaded sun shadow map.
+    pub shadow_map_size: u32,
+    /// Maximum anisotropy of the trilinear material sampler, from 1 to 16.
+    pub anisotropy: u16,
+}
+impl Default for RasterQuality {
+    fn default() -> Self {
+        Self { samples: 4, shadow_map_size: 2048, anisotropy: 16 }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Environment {
@@ -506,6 +524,9 @@ pub struct Environment {
     /// Scaled by `intensity` like the environment it replaces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ambient: Option<[f32; 3]>,
+    /// Scene multiplier for diffuse irradiance carried by baked vertex colours.
+    #[serde(default = "one")]
+    pub baked_vertex_scale: f32,
     /// Bloom mix strength (0 disables).
     #[serde(default = "bloom")]
     pub bloom: f32,
@@ -515,6 +536,8 @@ pub struct Environment {
     /// Temporal anti-aliasing (jittered projection + reprojection).
     #[serde(default = "yes")]
     pub temporal_aa: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raster_quality: Option<RasterQuality>,
     /// Maximum distance covered by the cascaded sun shadows.
     #[serde(default = "shadow_distance")]
     pub shadow_distance: f32,
@@ -565,9 +588,11 @@ impl Default for Environment {
             toon_light: None,
             toon_light_camera: false,
             ambient: None,
+            baked_vertex_scale: 1.,
             bloom: bloom(),
             ambient_occlusion: ao(),
             temporal_aa: true,
+            raster_quality: None,
             shadow_distance: shadow_distance(),
             fog: None,
             auto_exposure: None,
@@ -582,6 +607,14 @@ impl Default for Environment {
 }
 impl Environment {
     pub fn validate(&self) -> Result<()> {
+        if let Some(quality) = self.raster_quality {
+            ensure!(
+                matches!(quality.samples, 1 | 2 | 4 | 8)
+                    && matches!(quality.shadow_map_size, 512 | 1024 | 2048 | 4096)
+                    && (1..=16).contains(&quality.anisotropy),
+                "invalid raster quality"
+            );
+        }
         if let Some(g) = &self.grading {
             let r = |x: f32, a: f32, b: f32| x.is_finite() && (a..=b).contains(&x);
             ensure!(g.color_filter.iter().all(|c| r(*c, 0., 16.)) && r(g.contrast, 0., 4.) && r(g.saturation, 0., 4.), "colour grading range");
@@ -606,6 +639,7 @@ impl Environment {
         ensure!(
             self.intensity.is_finite()
                 && (0.0..=1000.).contains(&self.intensity)
+                && (0.0..=1000.).contains(&self.baked_vertex_scale)
                 && self.exposure.is_finite()
                 && (-20.0..=20.).contains(&self.exposure)
                 && self.rotation_degrees.is_finite()

@@ -14,6 +14,11 @@ less_imagedissolve = False
 touch = False
 info = None
 
+import _crysirror_renpy
+if (6, 11) <= _crysirror_renpy.version()[:2] < (6, 13):
+    # The renderer preference 6.11 - 6.12 kept here (00gltest reads it).
+    prefer_renderers = "gl,sw"
+
 
 def get_info():
     global info

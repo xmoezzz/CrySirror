@@ -1,37 +1,46 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Scoped Midori 2011 script-owned state and the literal subset of RNF.
-use crate::{branch::number, registers::Value};
+use crate::{
+    branch::number,
+    native_numbers::integer2011,
+    registers::{Expression, db_operand},
+};
 use anyhow::{Context, Result, bail, ensure};
 use std::collections::BTreeMap;
 
 #[derive(Debug, PartialEq)]
 pub(super) struct DbDefinition {
-    pub table: usize,
+    pub table: i32,
     pub rows: BTreeMap<i32, [i32; 8]>,
 }
 
 impl DbDefinition {
     pub fn parse(table: i32, rows: &[u8]) -> Result<Self> {
-        let table = db_index(table)?;
+        if !(0..8).contains(&table) {
+            return Ok(Self {
+                table,
+                rows: BTreeMap::new(),
+            });
+        }
         ensure!(rows.len() <= 65536, "oversized ExHibit integer table");
         let mut output = BTreeMap::new();
-        for row in rows.split(|&b| b == b'\n') {
-            let row = row.trim_ascii();
+        for row in rows.split(|&b| matches!(b, b'\r' | b'\n')) {
+            let row = row
+                .iter()
+                .position(|&b| !matches!(b, b' ' | b'\t'))
+                .map_or(&[][..], |start| &row[start..]);
             if row.is_empty() || row.starts_with(b";") {
                 continue;
             }
             let mut numbers = row
                 .split(|&b| matches!(b, b',' | b' ' | b'\t'))
                 .filter(|v| !v.is_empty());
-            let key = native_literal(numbers.next().context("missing ExHibit table row key")?)?;
+            let Some(key) = numbers.next() else { continue };
+            let key = integer2011(key);
             let mut values = [0; 8];
             for (destination, source) in values.iter_mut().zip(&mut numbers) {
-                *destination = native_literal(source)?;
+                *destination = integer2011(source);
             }
-            ensure!(
-                numbers.next().is_none(),
-                "unsupported ExHibit table row width"
-            );
             output.insert(key, values);
         }
         Ok(Self {
@@ -43,30 +52,22 @@ impl DbDefinition {
 
 #[derive(Debug, PartialEq)]
 pub(super) struct DbLookup {
-    pub table: usize,
-    pub key: Value,
+    pub table: i32,
+    pub key: Expression,
     pub outputs: [(i32, i32); 8], // source column, destination LocalHolder register
 }
 
 impl DbLookup {
     pub fn parse(raw: &[u8]) -> Result<Self> {
+        Self::parse_with(raw, db_operand)
+    }
+
+    pub fn parse_with(raw: &[u8], operand: impl Fn(&[u8]) -> Result<Expression>) -> Result<Self> {
         let mut fields = raw.split(|&b| b == b',');
-        let table = db_index(native_literal(fields.next().context("missing table")?)?)?;
-        let raw_key = fields.next().context("missing lookup key")?.trim_ascii();
-        let key = match raw_key.split_first() {
-            Some((b'R' | b'r', index)) => {
-                let index = number(index)?;
-                ensure!(index >= 0, "negative ExHibit lookup register");
-                Value::Local(index)
-            }
-            _ => Value::Immediate(native_literal(raw_key)?),
-        };
-        let mut outputs = [(0, 0); 8];
-        for (column, destination) in &mut outputs {
-            *column = native_literal(fields.next().context("missing lookup column")?)?;
-            *destination = native_literal(fields.next().context("missing lookup register")?)?;
-        }
-        ensure!(fields.next().is_none(), "extra ExHibit lookup argument");
+        let mut next = || fields.next().unwrap_or_default();
+        let table = integer2011(next());
+        let key = operand(next())?;
+        let outputs = std::array::from_fn(|_| (integer2011(next()), integer2011(next())));
         Ok(Self {
             table,
             key,
@@ -76,71 +77,64 @@ impl DbLookup {
 }
 
 #[derive(Debug, PartialEq)]
-pub(super) struct SceneDone(pub i32);
-
-impl SceneDone {
-    pub fn parse(raw: &[u8]) -> Result<Self> {
-        // The observed plain-item case (not the parenthesized list/range case):
-        // kind 2, set; native increments scene and falls through to message.
-        let fields: Vec<_> = raw.splitn(4, |&b| b == b',').collect();
-        ensure!(
-            fields.len() == 3 && fields[..2] == [b"2", b"1"],
-            "unsupported ExHibit 2011 done flag"
-        );
-        Ok(Self(number(fields[2])?))
-    }
+pub(super) struct DbWrite {
+    pub table: i32,
+    pub key: Expression,
+    pub values: Vec<(i32, Expression)>,
 }
+impl DbWrite {
+    pub fn parse(raw: &[u8]) -> Result<Self> {
+        Self::parse_with(raw, db_operand)
+    }
 
-fn db_index(table: i32) -> Result<usize> {
-    let table = usize::try_from(table)?;
-    ensure!(table < 8, "unsupported ExHibit integer table index");
-    Ok(table)
+    pub fn parse_with(raw: &[u8], operand: impl Fn(&[u8]) -> Result<Expression>) -> Result<Self> {
+        let mut fields = raw.split(|&b| b == b',');
+        let mut next = || fields.next().unwrap_or_default();
+        let table = integer2011(next());
+        let key = operand(next())?;
+        let mut values = Vec::with_capacity(8);
+        for _ in 0..8 {
+            values.push((integer2011(next()), operand(next())?));
+        }
+        Ok(Self { table, key, values })
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub(super) struct EntryAssignment {
-    index: usize,
-    name: Box<str>,
+    index: i32,
+    name: Box<[u8]>,
 }
 impl EntryAssignment {
-    pub fn parse(raw: &[u8]) -> Result<Self> {
-        let fields: Vec<_> = raw.splitn(6, |b| *b == b',').collect();
-        ensure!(
-            fields.len() == 5 && fields[..3] == [b"30", b"-1", b"2".as_slice()],
-            "unsupported ExHibit 2011 command form"
-        );
-        let index = usize::try_from(number(fields[3])?)?;
-        ensure!(index < 8, "unsupported ExHibit 2011 entry index");
-        let name = std::str::from_utf8(fields[4])?;
-        // Native copies this literal into the table. Restrict the observed
-        // ordinary scenario-name form; it must not become an ambient path.
-        if !name.is_empty() {
-            crate::script_path(name)?;
-        }
+    pub fn parse(count: i32, tail: &[u8]) -> Result<Self> {
+        // splitParam(..., keep_tail=true) leaves the final field intact.
+        let fields = crate::v1_services::args(tail, count, true)?;
         Ok(Self {
-            index,
-            name: name.into(),
+            index: integer2011(fields[0]),
+            name: fields[1].into(),
         })
     }
 }
 
 #[derive(Default)]
-pub(super) struct EntryNames([Box<str>; 8]);
+pub(super) struct EntryNames([Box<[u8]>; 8]);
 impl EntryNames {
     pub fn set(&mut self, assignment: EntryAssignment) {
-        self.0[assignment.index] = assignment.name;
+        if let Some(slot) = self.0.get_mut(assignment.index as usize) {
+            *slot = assignment.name;
+        }
     }
     pub fn count(&self) -> usize {
         self.0.iter().filter(|n| !n.is_empty()).count()
     }
-    /// 0xb17e0, for eventual capture to T207, not an original save.
+    /// 0xb17e0 emits the original name bytes to T207.
     pub fn checkpoint_text(&self) -> Vec<u8> {
-        let mut text = String::from("8");
+        let mut text = vec![b'8'];
         for (i, name) in self.0.iter().enumerate() {
-            use std::fmt::Write;
-            let _ = write!(&mut text, ",{i}.{name}");
+            text.extend([b',', b'0' + i as u8, b'.']);
+            text.extend_from_slice(name);
         }
-        text.into_bytes()
+        text
     }
 }
 
@@ -154,7 +148,7 @@ pub(super) enum RnfWrite {
     Relative(i32, i32),
 }
 
-fn native_literal(bytes: &[u8]) -> Result<i32> {
+pub(super) fn native_literal(bytes: &[u8]) -> Result<i32> {
     let bytes = bytes.trim_ascii();
     if let Some(raw) = bytes.strip_prefix(b"0x") {
         return Ok(u32::from_str_radix(std::str::from_utf8(raw)?, 16)? as i32);
@@ -283,26 +277,64 @@ mod tests {
     }
 
     #[test]
-    fn unfamiliar_integer_table_and_scene_flag_forms_retain_script_pc() -> Result<()> {
-        for (op, index, raw) in [
-            (0x3d, Some(8i32), b"2\t7".as_slice()),
-            (0x3d, Some(1), b"2\t7\n3\tunsupported"),
-            (0x3e, None, b"1,R7,0,9"),
-            (0xbd, None, b"2,1,(1-2)"),
-            (0xbd, None, b"2,0,1"),
+    fn integer_table_writes_evaluate_pairs_and_update_only_existing_rows() -> Result<()> {
+        let records = [
+            (
+                0x3d,
+                Some(2_i32),
+                b";ignored\r300,4,5,bad,7,8,9,10,11,999\r301,77".as_slice(),
+            ),
+            (0x3f, None, b"2,R7 3 +,1,R8 2 *,12,79,3,15,1,17,-1,0,0,999"),
+            (0x3f, None, b"2,302,0,800,-1,0"),
+            (0x3f, None, b"9,300,0,800,-1,0"),
+            (0x3d, Some(-1), b"300,900"),
+            (0x3e, None, b"2,R7 3 +,0,6,1,7,2,8,3,9,7,10"),
+            (0x3e, None, b"2,302,0,6"),
+            (0x3e, None, b"9,300,0,6"),
+        ];
+        let mut data = b"\0DLR".to_vec();
+        for n in [3u32, 12, records.len() as u32] {
+            data.extend(n.to_le_bytes());
+        }
+        for (op, table, fields) in records {
+            data.extend([op, 0, u8::from(table.is_some()), 1]);
+            if let Some(table) = table {
+                data.extend(table.to_le_bytes());
+            }
+            data.extend(fields);
+            data.push(0);
+        }
+        let mut script = Script::new(data, 3)?;
+        let mut regs = crate::native_state_tests::fresh(3)?;
+        regs.set_normal(7, 297)?;
+        regs.set_normal(8, 5)?;
+        for _ in records {
+            let Action::Change(change) = script.next()? else {
+                bail!("expected table change")
+            };
+            regs.change(change)?;
+        }
+        for (reg, expected) in [(6, 4), (7, 17), (8, 0), (9, 15), (10, 11), (0, 4)] {
+            assert_eq!(regs.read(Value::Local(reg))?, expected, "R{reg}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unsupported_integer_table_expression_retains_script_pc() -> Result<()> {
+        for (op, raw) in [
+            (0x3e, b"1,@unsupported(1 7),0,9".as_slice()),
+            (0x3f, b"1,3,0,@unsupported(1 7)"),
         ] {
             let mut data = b"\0DLR".to_vec();
             for n in [3u32, 12, 1] {
                 data.extend(n.to_le_bytes());
             }
-            data.extend([op, 0, u8::from(index.is_some()), 1]);
-            if let Some(index) = index {
-                data.extend(index.to_le_bytes());
-            }
+            data.extend([op, 0, 0, 1]);
             data.extend(raw);
             data.push(0);
             let mut script = Script::new(data, 3)?;
-            assert!(script.next().is_err());
+            assert!(script.next().is_err(), "accepted op {op:#04x} {raw:?}");
             assert_eq!((script.pc, script.remaining), (16, 1));
         }
         Ok(())
@@ -335,11 +367,15 @@ mod tests {
             b"8,0.menu,1.replay,2.,3.,4.,5.,6.,7."
         );
         assert_eq!(entries.count(), 2);
-        entries.set(EntryAssignment::parse(b"30,-1,2,0,")?);
+        entries.set(EntryAssignment::parse(2, b"0,")?);
         assert_eq!(entries.count(), 1);
-        assert!(EntryAssignment::parse(b"30,-1,2,8,escape").is_err());
-        assert!(EntryAssignment::parse(b"30,-1,2,1,../outside").is_err());
-        assert!(EntryAssignment::parse(b"30,0,2,1,name").is_err());
+        entries.set(EntryAssignment::parse(2, b"8,ignored")?);
+        assert_eq!(entries.count(), 1);
+        entries.set(EntryAssignment::parse(2, b"1,\x82\xa0,verbatim")?);
+        assert_eq!(
+            entries.checkpoint_text(),
+            b"8,0.,1.\x82\xa0,verbatim,2.,3.,4.,5.,6.,7."
+        );
         Ok(())
     }
 

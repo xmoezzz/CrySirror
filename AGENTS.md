@@ -67,11 +67,6 @@ Read STATUS.md, docs/ARCHITECTURE.md and docs/NATIVE_ADAPTERS.md before editing.
   implementation specifications or temporary build/agent coordination to
   STATUS.md or HANDOFF logs. An ignored GPU test is not a pass.
 - After API changes, regenerate docs/api and log fingerprint changes (docs/api/README.md).
-- Use [ADR 0105](docs/adr/0105-self-admitted-technical-debt.md) and the
-  [SATD skill](.agents/skills/crysirror-satd/SKILL.md) for every incomplete
-  experiment or implementation. Append history when completing part of the
-  scope or moving code. Delete the record only after full implementation and
-  validation.
 
 ## Engine onboarding skill
 

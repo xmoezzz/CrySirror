@@ -394,7 +394,7 @@ impl Game {
         let mut camera =
             crate::bg::orbit_camera(self.adv_camera.0, self.adv_camera.2, self.adv_camera.1, 35.);
         camera["op"] = json!("set_camera");
-        let light = json!({"op":"set_environment","environment":self.main_light.environment()});
+        let light = json!({"op":"set_environment","environment":self.main_light.environment(&self.settings)});
         h.submit_engine(c, 1, &serde_json::to_vec(&json!({"world":[camera,light]}))?)?;
         let mut vm = self
             .script
@@ -576,6 +576,7 @@ fn installed_awards_categories_cards_and_both_callers() -> Result<()> {
     let packs = ["sound", "sound2"];
     let (_tmp, mut rt, c, mut op, files, _, _) = daily::installed_panel(&packs)?;
     let mut vm = Vm {
+        linked_cm3d2: None,
         client: c,
         config: Config {
             data_dir: op.dir.clone(),

@@ -91,6 +91,10 @@ impl ProbeField {
     /// cells; farther points use the mean of all probes. `None` without
     /// probes.
     pub fn irradiance(&self, p: [f32; 3], n: [f32; 3]) -> Option<[f32; 3]> {
+        self.coefficients(p).map(|sh| evaluate(&sh, n))
+    }
+
+    fn coefficients(&self, p: [f32; 3]) -> Option<[[f32; 3]; 9]> {
         if self.probes.is_empty() {
             return None;
         }
@@ -119,11 +123,32 @@ impl ProbeField {
                 }
             }
             if wsum > 0. {
-                let sh = sum.map(|c| c.map(|v| v / wsum));
-                return Some(evaluate(&sh, n));
+                return Some(sum.map(|c| c.map(|v| v / wsum)));
             }
         }
-        Some(evaluate(&self.mean, n))
+        Some(self.mean)
+    }
+
+    /// Low-frequency incident radiance for a level without a sky image.
+    /// A fixed camera uses its surrounding probes, a roaming camera the
+    /// level mean. The host prefilters this image for specular reflections.
+    pub fn reflection_environment(&self, fixed_eye: Option<[f32; 3]>) -> Option<crysirror_asset::pbr::HdrImage> {
+        use std::f32::consts::{PI, TAU};
+        if self.is_empty() {
+            return None;
+        }
+        let sh = fixed_eye.and_then(|eye| self.coefficients(eye)).unwrap_or(self.mean);
+        let (width, height) = (64, 32);
+        let mut rgb = Vec::with_capacity((width * height) as usize);
+        for y in 0..height {
+            let theta = PI * (y as f32 + 0.5) / height as f32;
+            for x in 0..width {
+                let phi = TAU * ((x as f32 + 0.5) / width as f32 - 0.5);
+                let weights = basis([theta.sin() * phi.cos(), theta.cos(), theta.sin() * phi.sin()]);
+                rgb.push(project(&sh, &weights));
+            }
+        }
+        Some(crysirror_asset::pbr::HdrImage { width, height, rgb })
     }
 }
 
@@ -131,8 +156,13 @@ impl ProbeField {
 /// and Hanrahan: band weights π, 2π/3, π/4).
 fn evaluate(sh: &[[f32; 3]; 9], n: [f32; 3]) -> [f32; 3] {
     use std::f32::consts::PI;
-    let [x, y, z] = n;
-    let basis = [
+    let band = [PI, 2. * PI / 3., 2. * PI / 3., 2. * PI / 3., PI / 4., PI / 4., PI / 4., PI / 4., PI / 4.];
+    let b = basis(n);
+    project(sh, &std::array::from_fn(|k| b[k] * band[k]))
+}
+
+fn basis([x, y, z]: [f32; 3]) -> [f32; 9] {
+    [
         0.282_095,
         0.488_603 * y,
         0.488_603 * z,
@@ -142,9 +172,11 @@ fn evaluate(sh: &[[f32; 3]; 9], n: [f32; 3]) -> [f32; 3] {
         0.315_392 * (3. * z * z - 1.),
         1.092_548 * x * z,
         0.546_274 * (x * x - y * y),
-    ];
-    let band = [PI, 2. * PI / 3., 2. * PI / 3., 2. * PI / 3., PI / 4., PI / 4., PI / 4., PI / 4., PI / 4.];
-    std::array::from_fn(|ch| (0..9).map(|k| sh[k][ch] * basis[k] * band[k]).sum::<f32>().max(0.))
+    ]
+}
+
+fn project(sh: &[[f32; 3]; 9], weights: &[f32; 9]) -> [f32; 3] {
+    std::array::from_fn(|ch| (0..9).map(|k| sh[k][ch] * weights[k]).sum::<f32>().max(0.))
 }
 
 /// Engine material of a baked primitive: the base-colour image and the
@@ -163,7 +195,7 @@ pub fn baked_material(base_color: Option<usize>, layer: Option<&Layer>) -> crysi
         occlusion_texture: layer.and_then(|l| l.mask).and_then(|m| m.0),
         metallic_factor: 0.,
         roughness_factor: 1.,
-        effect: Some(crysirror_scene::effect::ShaderEffect::BakedVertexIrradiance { intensity: INTENSITY, slope_layer, mask_layer }),
+        effect: Some(crysirror_scene::effect::ShaderEffect::BakedVertexIrradiance { intensity: 1., slope_layer, mask_layer }),
         ..Default::default()
     }
 }
@@ -218,6 +250,23 @@ pub fn bake(field: &ProbeField, m: &[f32; 16], positions: &[[f32; 3]], normals: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indoor_reflection_uses_local_unconvolved_directional_colour() {
+        let mut field = ProbeField::default();
+        assert!(field.reflection_environment(None).is_none());
+        let mut warm = [[0.; 3]; 9];
+        warm[0] = [2., 1., 0.];
+        warm[1] = [0.5, 0., 0.];
+        let mut cold = [[0.; 3]; 9];
+        cold[0] = [0., 0., 8.];
+        field.add([Probe { position: [0.; 3], sh: warm }, Probe { position: [100.; 3], sh: cold }]);
+        let image = field.reflection_environment(Some([0.; 3])).unwrap();
+        let lower = image.rgb[(image.height as usize - 1) * image.width as usize];
+        assert!(image.rgb[0][0] > lower[0] && lower[0] > 0.);
+        assert!(image.rgb.iter().all(|c| (c[1] - 0.282095).abs() < 1e-5 && c[2] == 0.));
+        assert!(field.reflection_environment(None).unwrap().rgb[0][2] > 1.);
+    }
 
     #[test]
     fn constant_probe_gives_constant_irradiance() {

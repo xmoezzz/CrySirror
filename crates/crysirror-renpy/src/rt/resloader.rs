@@ -45,13 +45,43 @@ fn names(vm: &mut Vm) -> Rc<Names> {
 
 /// The actual (name, common) of a game-relative file, if it exists.
 pub fn resolve(vm: &mut Vm, name: &str) -> Option<(String, bool)> {
+    if let Some(r) = renamed(vm, name) {
+        return resolve(vm, &r);
+    }
     names(vm).map.get(&name.to_lowercase()).cloned()
 }
 
+/// `config.renamed_files` (8.6): files Ren'Py itself renamed, by
+/// lower-case name; the new name is used in place of the old one.
+fn renamed(vm: &mut Vm, name: &str) -> Option<String> {
+    let map = cfg(vm, "renamed_files");
+    let o = map.obj()?;
+    let k = vm.types.new_str(&name.to_lowercase());
+    let v = ops::dict_get(vm, o, &k).ok()??;
+    v.as_str().map(str::to_owned).filter(|r| !r.eq_ignore_ascii_case(name))
+}
+
+/// Files the game changed under `config.gamedir`, and names reaching
+/// outside it (`../characters/x`): Some(contents) decides the lookup.
+fn base_lookup(vm: &mut Vm, name: &str) -> Option<Option<Vec<u8>>> {
+    let rel = super::basedir::relative(&format!("game/{name}"))?;
+    if let Some(c) = super::boot::changed_base_file(vm, &rel) {
+        return Some(c);
+    }
+    (!rel.starts_with("game/")).then(|| super::boot::base_file(vm, &rel))
+}
+
 pub fn read(vm: &mut Vm, name: &str) -> Option<Vec<u8>> {
+    if let Some(c) = base_lookup(vm, name) {
+        return c;
+    }
     let (n, common) = resolve(vm, name)?;
     let r = rt(vm);
-    if common { r.files.common_read(&n) } else { r.files.read(&n) }
+    if common {
+        r.files.common_read(&n)
+    } else {
+        r.files.read(&n)
+    }
 }
 
 fn cfg(vm: &mut Vm, name: &str) -> Value {
@@ -60,7 +90,10 @@ fn cfg(vm: &mut Vm, name: &str) -> Value {
 
 fn check_backslash(vm: &mut Vm, name: &str) -> PyResult<()> {
     if name.contains('\\') && py::config_bool(vm, "reject_backslash").unwrap_or(true) {
-        return Err(py::error(vm, format!("Backslash in filename, use '/' instead: '{name}'")));
+        return Err(py::error(
+            vm,
+            format!("Backslash in filename, use '/' instead: '{name}'"),
+        ));
     }
     Ok(())
 }
@@ -69,13 +102,25 @@ fn check_backslash(vm: &mut Vm, name: &str) -> PyResult<()> {
 fn prefixes(vm: &mut Vm, tl: bool, directory: Option<&str>) -> PyResult<Vec<String>> {
     let language = if tl {
         let p = py::import_attr(vm, "renpy.game", "preferences").unwrap_or(Value::None);
-        let l = if py::is_none(&p) { Value::None } else { py::get_or_none(vm, &p, "language")? };
-        if py::is_none(&l) { None } else { Some(py::string(vm, &l)?) }
+        let l = if py::is_none(&p) {
+            Value::None
+        } else {
+            py::get_or_none(vm, &p, "language")?
+        };
+        if py::is_none(&l) {
+            None
+        } else {
+            Some(py::string(vm, &l)?)
+        }
     } else {
         None
     };
     let tld = cfg(vm, "tl_directory");
-    let tld = if py::is_none(&tld) { "tl".to_owned() } else { py::string(vm, &tld)? };
+    let tld = if py::is_none(&tld) {
+        "tl".to_owned()
+    } else {
+        py::string(vm, &tld)?
+    };
     let sp = cfg(vm, "search_prefixes");
     let sp: Vec<String> = if py::is_none(&sp) {
         vec![String::new()]
@@ -170,7 +215,11 @@ fn f_load(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let tl = arg_or(&args[1..], kw, 1, "tl", Value::Bool(true));
     check_backslash(vm, &name)?;
     let name = normalize(&name);
-    let dir = if py::is_none(&directory) { None } else { Some(py::string(vm, &directory)?) };
+    let dir = if py::is_none(&directory) {
+        None
+    } else {
+        Some(py::string(vm, &directory)?)
+    };
     let tl = py::truthy(vm, &tl)?;
     for p in prefixes(vm, tl, dir.as_deref())? {
         if let Some(f) = load_core(vm, &format!("{p}{name}"))? {
@@ -181,6 +230,9 @@ fn f_load(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 fn loadable_core(vm: &mut Vm, name: &str) -> PyResult<bool> {
+    if let Some(c) = base_lookup(vm, name) {
+        return Ok(c.is_some());
+    }
     let cache = py::import_attr(vm, MODULE, "loadable_cache")?;
     let k = vm.types.new_str(&name.to_lowercase());
     if let Some(v) = ops::dict_get(vm, cache.obj().unwrap(), &k)? {
@@ -215,7 +267,11 @@ fn f_loadable(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let tl = arg_or(&args[1..], kw, 0, "tl", Value::Bool(true));
     let directory = arg_or(&args[1..], kw, 1, "directory", Value::None);
     let tl = py::truthy(vm, &tl)?;
-    let dir = if py::is_none(&directory) { None } else { Some(py::string(vm, &directory)?) };
+    let dir = if py::is_none(&directory) {
+        None
+    } else {
+        Some(py::string(vm, &directory)?)
+    };
     Ok(Value::Bool(loadable(vm, &name, tl, dir.as_deref())?))
 }
 
@@ -227,7 +283,11 @@ fn f_loadable_core(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn dir_of(vm: &mut Vm, common: bool) -> PyResult<String> {
     let d = cfg(vm, if common { "commondir" } else { "gamedir" });
     if py::is_none(&d) {
-        return Ok(if common { "renpy/common".into() } else { "game".into() });
+        return Ok(if common {
+            "renpy/common".into()
+        } else {
+            "game".into()
+        });
     }
     py::string(vm, &d)
 }
@@ -240,7 +300,9 @@ fn f_transfn(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     match resolve(vm, name) {
         Some((n, common)) => {
             let d = dir_of(vm, common)?;
-            Ok(vm.types.new_str(&format!("{}/{n}", d.trim_end_matches('/'))))
+            Ok(vm
+                .types
+                .new_str(&format!("{}/{n}", d.trim_end_matches('/'))))
         }
         None => Err(py::error(vm, format!("Couldn't find file '{name}'."))),
     }
@@ -249,23 +311,38 @@ fn f_transfn(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn f_get_path(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let name = py::string(vm, &args[0])?;
     let d = dir_of(vm, false)?;
-    Ok(vm.types.new_str(&format!("{}/{}", d.trim_end_matches('/'), name.trim_start_matches('/'))))
+    Ok(vm.types.new_str(&format!(
+        "{}/{}",
+        d.trim_end_matches('/'),
+        name.trim_start_matches('/')
+    )))
 }
 
 fn f_get_prefixes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let tl = arg_or(args, kw, 0, "tl", Value::Bool(true));
     let directory = arg_or(args, kw, 1, "directory", Value::None);
     let tl = py::truthy(vm, &tl)?;
-    let dir = if py::is_none(&directory) { None } else { Some(py::string(vm, &directory)?) };
+    let dir = if py::is_none(&directory) {
+        None
+    } else {
+        Some(py::string(vm, &directory)?)
+    };
     let p = prefixes(vm, tl, dir.as_deref())?;
-    Ok(vm.types.new_list(p.iter().map(|s| vm.types.new_str(s)).collect()))
+    Ok(vm
+        .types
+        .new_list(p.iter().map(|s| vm.types.new_str(s)).collect()))
 }
 
 fn f_check_name(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let name = py::string(vm, &args[0])?;
     check_backslash(vm, &name)?;
-    if py::config_bool(vm, "reject_relative").unwrap_or(false) && name.split('/').any(|p| p == "." || p == "..") {
-        return Err(py::error(vm, format!("Filenames may not contain relative directories like '.' and '..': '{name}'")));
+    if py::config_bool(vm, "reject_relative").unwrap_or(false)
+        && name.split('/').any(|p| p == "." || p == "..")
+    {
+        return Err(py::error(
+            vm,
+            format!("Filenames may not contain relative directories like '.' and '..': '{name}'"),
+        ));
     }
     Ok(Value::None)
 }
@@ -289,7 +366,9 @@ fn f_get_hash(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if let Some(v) = ops::dict_get(vm, cache.obj().unwrap(), &args[0])? {
         return Ok(v);
     }
-    let h = read(vm, &normalize(&name)).map(|d| adler32(&d, 0)).unwrap_or(0);
+    let h = read(vm, &normalize(&name))
+        .map(|d| adler32(&d, 0))
+        .unwrap_or(0);
     ops::setitem(vm, &cache, args[0].clone(), Value::Int(h as i64))?;
     Ok(Value::Int(h as i64))
 }
@@ -361,10 +440,26 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
         ],
     );
     let set = |vm: &Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
-    for n in ["archives", "archive_handlers", "file_open_callbacks", "scandirfiles_callbacks", "game_files", "common_files", "apks", "game_apks", "split_apks"] {
+    for n in [
+        "archives",
+        "archive_handlers",
+        "file_open_callbacks",
+        "scandirfiles_callbacks",
+        "game_files",
+        "common_files",
+        "apks",
+        "game_apks",
+        "split_apks",
+    ] {
         set(vm, n, vm.types.new_list(Vec::new()));
     }
-    for n in ["loadable_cache", "hash_cache", "lower_map", "remote_files", "auto_mtimes"] {
+    for n in [
+        "loadable_cache",
+        "hash_cache",
+        "lower_map",
+        "remote_files",
+        "auto_mtimes",
+    ] {
         set(vm, n, py::dict(vm));
     }
     set(vm, "needs_autoreload", vm.types.new_set(Default::default()));

@@ -3,6 +3,7 @@
 use super::*;
 use crate::tjs::{TjsState, retail::activities};
 use crysirror_unity::reader::Reader;
+pub(super) mod performance;
 
 #[derive(Clone, Default)]
 pub(super) struct Layout {

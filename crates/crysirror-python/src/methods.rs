@@ -551,18 +551,19 @@ pub fn install(vm: &mut Vm) {
     m(vm, &t, "__init__", oserror_init);
     let t = vm.types.exc("SyntaxError");
     m(vm, &t, "__init__", syntaxerror_init);
+    let t = vm.types.exc("ImportError");
+    m(vm, &t, "__init__", importerror_init);
+    // Raised natively without `__init__`: the attributes default to None.
+    for n in ["msg", "name", "path", "name_from"] {
+        vm.types.set_attr(&t, n, Value::None);
+    }
 
     let t = vm.types.module.clone();
     static_m(vm, &t, "__new__", module_new);
     m(vm, &t, "__init__", module_init);
     m(vm, &t, "__repr__", d_repr);
 
-    let t = vm.types.weakref.clone();
-    static_m(vm, &t, "__new__", weakref_new);
-    m(vm, &t, "__init__", noop);
-    m(vm, &t, "__call__", weakref_call);
-    m(vm, &t, "__hash__", weakref_hash);
-    m(vm, &t, "__eq__", weakref_eq);
+    crate::modules::weakref::install_type(vm);
 
     let t = vm.types.cell.clone();
     m(vm, &t, "__repr__", d_repr);
@@ -2155,6 +2156,27 @@ fn oserror_init(vm: &mut Vm, a: &[Value], k: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
+/// `ImportError(*args, name=None, path=None)`; `msg` is the sole argument.
+fn importerror_init(vm: &mut Vm, a: &[Value], k: Kw) -> PyResult<Value> {
+    let mut name = Value::None;
+    let mut path = Value::None;
+    for (key, v) in k {
+        match &**key {
+            "name" => name = v.clone(),
+            "path" => path = v.clone(),
+            other => return Err(vm.type_error(format!("'{other}' is an invalid keyword argument for ImportError()"))),
+        }
+    }
+    exc_init(vm, a, &[])?;
+    if let Value::Obj(o) = &a[0] {
+        let msg = if a.len() == 2 { a[1].clone() } else { Value::None };
+        ops::set_raw_attr(vm, o, "msg", msg);
+        ops::set_raw_attr(vm, o, "name", name);
+        ops::set_raw_attr(vm, o, "path", path);
+    }
+    Ok(Value::None)
+}
+
 fn syntaxerror_init(vm: &mut Vm, a: &[Value], k: Kw) -> PyResult<Value> {
     exc_init(vm, a, k)?;
     if let Value::Obj(o) = &a[0] {
@@ -2186,42 +2208,6 @@ fn module_init(vm: &mut Vm, a: &[Value], _k: Kw) -> PyResult<Value> {
         ops::set_raw_attr(vm, o, "__doc__", a.get(2).cloned().unwrap_or(Value::None));
     }
     Ok(Value::None)
-}
-
-fn weakref_new(vm: &mut Vm, a: &[Value], _k: Kw) -> PyResult<Value> {
-    arg_count(vm, "ref", a, 2, 3)?;
-    let Value::Obj(target) = &a[1] else {
-        return Err(vm.type_error(format!("cannot create weak reference to '{}' object", ops::type_name(vm, &a[1]))));
-    };
-    let cls = a[0].obj().cloned().unwrap();
-    Ok(Value::Obj(new_obj(cls, None, Payload::WeakRef(Rc::downgrade(target), a.get(2).cloned().unwrap_or(Value::None)))))
-}
-
-fn weakref_call(_vm: &mut Vm, a: &[Value], _k: Kw) -> PyResult<Value> {
-    match a[0].payload() {
-        Some(Payload::WeakRef(w, _)) => Ok(w.upgrade().map(Value::Obj).unwrap_or(Value::None)),
-        _ => Ok(Value::None),
-    }
-}
-
-fn weakref_hash(vm: &mut Vm, a: &[Value], _k: Kw) -> PyResult<Value> {
-    let target = weakref_call(vm, a, &[])?;
-    if target.is_none() {
-        return Err(vm.type_error("weak object has gone away"));
-    }
-    Ok(Value::Int(ops::hash(vm, &target)?))
-}
-
-fn weakref_eq(vm: &mut Vm, a: &[Value], _k: Kw) -> PyResult<Value> {
-    let x = weakref_call(vm, &a[..1], &[])?;
-    let y = match a[1].payload() {
-        Some(Payload::WeakRef(..)) => weakref_call(vm, &a[1..2], &[])?,
-        _ => return Ok(vm.types.not_implemented.clone()),
-    };
-    if x.is_none() || y.is_none() {
-        return Ok(Value::Bool(a[0].is(&a[1])));
-    }
-    Ok(Value::Bool(ops::eq(vm, &x, &y)?))
 }
 
 // ---- namespace proxy ----

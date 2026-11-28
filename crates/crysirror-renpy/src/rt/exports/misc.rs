@@ -17,7 +17,9 @@ fn script(vm: &mut Vm) -> PyResult<Value> {
 // scriptexports ----------------------------------------------------------------------------------------
 
 fn has_label(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    Ok(Value::Bool(super::super::nodes::find(vm, &args[0])?.is_some()))
+    Ok(Value::Bool(
+        super::super::nodes::find(vm, &args[0])?.is_some(),
+    ))
 }
 
 fn get_all_labels(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
@@ -80,7 +82,10 @@ fn unlocked<R>(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> PyResult<R>) -> PyResult<
 fn load_module(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let ip = super::context::is_init_phase(vm, &[], &[])?;
     if !py::truthy(vm, &ip)? {
-        return Err(py::error(vm, "Module loading is only allowed in init code."));
+        return Err(py::error(
+            vm,
+            "Module loading is only allowed in init code.",
+        ));
     }
     let lm = py::import_attr(vm, "renpy.exports", "loaded_modules")?;
     if ops::set_contains(vm, &lm, &args[0])? {
@@ -142,7 +147,10 @@ fn load_language(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn include_module(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let ip = super::context::is_init_phase(vm, &[], &[])?;
     if !py::truthy(vm, &ip)? {
-        return Err(py::error(vm, "Module loading is only allowed in init code."));
+        return Err(py::error(
+            vm,
+            "Module loading is only allowed in init code.",
+        ));
     }
     let sc = script(vm)?;
     vm.call_method(&sc, "include_module", vec![args[0].clone()])
@@ -202,9 +210,17 @@ fn reload_script(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
         let n0 = ops::getitem(vm, &sn, Value::Int(0))?;
         py::dict_set(vm, &session, prefix, n0)?;
         let scope = py::get(vm, &s, "scope")?;
-        let a = vm.call_method(&scope, "get", vec![py::s(vm, "_args"), vm.types.new_tuple(Vec::new())])?;
+        let a = vm.call_method(
+            &scope,
+            "get",
+            vec![py::s(vm, "_args"), vm.types.new_tuple(Vec::new())],
+        )?;
         py::dict_set(vm, &session, &format!("{prefix}_args"), a)?;
-        let k = vm.call_method(&scope, "get", vec![py::s(vm, "_kwargs"), vm.types.new_dict()])?;
+        let k = vm.call_method(
+            &scope,
+            "get",
+            vec![py::s(vm, "_kwargs"), vm.types.new_dict()],
+        )?;
         py::dict_set(vm, &session, &format!("{prefix}_kwargs"), k)?;
         Ok(())
     };
@@ -229,7 +245,11 @@ fn quit(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         vm.call(&f, vec![py::s(vm, "quit")], Vec::new())?;
     }
     let c = py::import_attr(vm, "renpy.game", "QuitException")?;
-    let e = vm.call(&c, Vec::new(), vec![("relaunch".into(), relaunch), ("status".into(), status)])?;
+    let e = vm.call(
+        &c,
+        Vec::new(),
+        vec![("relaunch".into(), relaunch), ("status".into(), status)],
+    )?;
     Err(PyErr::Exc(e.obj().cloned().unwrap()))
 }
 
@@ -266,11 +286,17 @@ fn glob_match(pat: &str, s: &str) -> bool {
 
 fn expand_predict(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let d = &args[0];
-    let Some(s) = d.as_str().map(|s| s.to_owned()) else { return Ok(vm.types.new_list(vec![d.clone()])) };
+    let Some(s) = d.as_str().map(|s| s.to_owned()) else {
+        return Ok(vm.types.new_list(vec![d.clone()]));
+    };
     if !s.contains('*') {
         return Ok(vm.types.new_list(vec![d.clone()]));
     }
-    let l = if s.contains('.') { ex(vm, "list_files", vec![Value::Bool(false)], Vec::new())? } else { ex(vm, "list_images", Vec::new(), Vec::new())? };
+    let l = if s.contains('.') {
+        ex(vm, "list_files", vec![Value::Bool(false)], Vec::new())?
+    } else {
+        ex(vm, "list_images", Vec::new(), Vec::new())?
+    };
     let mut rv = Vec::new();
     for i in py::items(vm, &l)? {
         if glob_match(&s, &py::string(vm, &i)?) {
@@ -362,7 +388,10 @@ fn invoke_in_thread(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn invoke_in_main_thread(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let ip = super::context::is_init_phase(vm, &[], &[])?;
     if py::truthy(vm, &ip)? {
-        return Err(py::error(vm, "invoke_in_main_thread may not be called during the init phase."));
+        return Err(py::error(
+            vm,
+            "invoke_in_main_thread may not be called during the init phase.",
+        ));
     }
     let i = py::import_attr(vm, "renpy.display", "interface")?;
     let q = py::get(vm, &i, "invoke_queue")?;
@@ -403,9 +432,13 @@ fn get_filename_line(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
                 let n = s.arena.get(id);
                 (n.filename.to_string(), n.linenumber)
             };
-            Ok(vm.types.new_tuple(vec![py::s(vm, &f), Value::Int(l as i64)]))
+            Ok(vm
+                .types
+                .new_tuple(vec![py::s(vm, &f), Value::Int(l as i64)]))
         }
-        None => Ok(vm.types.new_tuple(vec![py::s(vm, "unknown"), Value::Int(0)])),
+        None => Ok(vm
+            .types
+            .new_tuple(vec![py::s(vm, "unknown"), Value::Int(0)])),
     }
 }
 
@@ -448,7 +481,14 @@ fn write_log(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let mut s = crysirror_python::ops::str(vm, &args[0])?.to_string();
     if args.len() > 1 {
         let t = vm.types.new_tuple(args[1..].to_vec());
-        let r = ops::binary_op(vm, &args[0], &t, crysirror_python::ast::BinOp::Mod, false, false)?;
+        let r = ops::binary_op(
+            vm,
+            &args[0],
+            &t,
+            crysirror_python::ast::BinOp::Mod,
+            false,
+            false,
+        )?;
         s = crysirror_python::ops::str(vm, &r)?.to_string();
     }
     super::super::link::diagnostic(vm, s);
@@ -464,7 +504,12 @@ fn notify(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn display_notify(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     ex(vm, "hide_screen", vec![py::s(vm, "notify")], Vec::new())?;
-    ex(vm, "show_screen", vec![py::s(vm, "notify")], vec![("message".into(), args[0].clone())])?;
+    ex(
+        vm,
+        "show_screen",
+        vec![py::s(vm, "notify")],
+        vec![("message".into(), args[0].clone())],
+    )?;
     if let Ok(f) = py::import_attr(vm, "renpy.text.extras", "filter_alt_text") {
         let t = vm.call(&f, vec![args[0].clone()], Vec::new())?;
         if let Ok(tts) = py::import(vm, "renpy.display.tts") {
@@ -481,7 +526,11 @@ fn confirm(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let n = vm.call(&ret, vec![Value::Bool(false)], Vec::new())?;
     let layout = py::get(vm, &store, "layout")?;
     let ys = py::get(vm, &layout, "yesno_screen")?;
-    vm.call(&ys, vec![args[0].clone()], vec![("yes".into(), y), ("no".into(), n)])?;
+    vm.call(
+        &ys,
+        vec![args[0].clone()],
+        vec![("yes".into(), y), ("no".into(), n)],
+    )?;
     ui(vm, "interact", Vec::new(), Vec::new())
 }
 

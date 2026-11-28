@@ -17,6 +17,7 @@ const MAX_FILES: usize = 1 << 20;
 #[derive(Clone, Debug, Default)]
 pub struct GameFiles {
     by_name: HashMap<String, String>,
+    csv_paths: Vec<String>,
     /// Full paths under `menu/` (`GetList("menu", AllFile)`).
     pub menu_files: Vec<String>,
 }
@@ -31,6 +32,12 @@ impl GameFiles {
     pub fn index(storage: &dyn ClientStorage, archives: &[String]) -> Result<Self> {
         let mut files = Self::default();
         for root in archives {
+            if let Some(suffix) = root.rsplit('/').next().and_then(|name| name.strip_prefix("csv_"))
+                && !suffix.rsplit_once('_').is_some_and(|(_, n)| matches!(n, "2" | "3"))
+                && !files.csv_paths.iter().any(|old| old == suffix)
+            {
+                files.csv_paths.push(suffix.to_owned());
+            }
             let mut pending = vec![root.clone()];
             while let Some(dir) = pending.pop() {
                 for name in storage.list(Mount::Asset, &dir).with_context(|| format!("list game archive directory {dir:?}"))? {
@@ -56,6 +63,10 @@ impl GameFiles {
     pub fn path(&self, name: &str) -> Option<&str> {
         let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
         self.by_name.get(&base.to_ascii_lowercase()).map(String::as_str)
+    }
+
+    pub(crate) fn csv_paths(&self) -> &[String] {
+        &self.csv_paths
     }
 
     /// Every indexed file name (lower case) with extension `ext` (`.nei`).

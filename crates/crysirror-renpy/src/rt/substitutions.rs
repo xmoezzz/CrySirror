@@ -13,7 +13,9 @@ use crysirror_python::{ObjRef, PyResult, Value, Vm, builtins::Kw, ops};
 const MODULE: &str = "renpy.substitutions";
 
 fn at_least(vm: &Vm, major: u32, minor: u32) -> bool {
-    super::state::try_rt(vm).map(|r| r.profile.at_least(major, minor)).unwrap_or(true)
+    super::state::try_rt(vm)
+        .map(|r| r.profile.at_least(major, minor))
+        .unwrap_or(true)
 }
 
 /// (literal, field, conversion, format) pieces.
@@ -34,8 +36,17 @@ fn parse_old(s: &str) -> Result<Vec<Field>, String> {
     let mut conversion: Option<String> = None;
     let mut depth = 0;
     let mut st = St::Literal;
-    let emit = |out: &mut Vec<Field>, literal: &mut String, value: &mut String, format: &mut String, conversion: &mut Option<String>| {
-        out.push((std::mem::take(literal), Some(std::mem::take(value)), conversion.take(), Some(std::mem::take(format))));
+    let emit = |out: &mut Vec<Field>,
+                literal: &mut String,
+                value: &mut String,
+                format: &mut String,
+                conversion: &mut Option<String>| {
+        out.push((
+            std::mem::take(literal),
+            Some(std::mem::take(value)),
+            conversion.take(),
+            Some(std::mem::take(format)),
+        ));
     };
     for c in s.chars() {
         match st {
@@ -66,7 +77,13 @@ fn parse_old(s: &str) -> Result<Vec<Field>, String> {
                     value.push(c);
                 }
                 ']' => {
-                    emit(&mut out, &mut literal, &mut value, &mut format, &mut conversion);
+                    emit(
+                        &mut out,
+                        &mut literal,
+                        &mut value,
+                        &mut format,
+                        &mut conversion,
+                    );
                     st = St::Literal;
                 }
                 ':' => st = St::Format,
@@ -78,7 +95,13 @@ fn parse_old(s: &str) -> Result<Vec<Field>, String> {
             },
             St::Format => match c {
                 ']' => {
-                    emit(&mut out, &mut literal, &mut value, &mut format, &mut conversion);
+                    emit(
+                        &mut out,
+                        &mut literal,
+                        &mut value,
+                        &mut format,
+                        &mut conversion,
+                    );
                     st = St::Literal;
                 }
                 '!' => {
@@ -89,7 +112,13 @@ fn parse_old(s: &str) -> Result<Vec<Field>, String> {
             },
             St::Conversion => {
                 if c == ']' {
-                    emit(&mut out, &mut literal, &mut value, &mut format, &mut conversion);
+                    emit(
+                        &mut out,
+                        &mut literal,
+                        &mut value,
+                        &mut format,
+                        &mut conversion,
+                    );
                     st = St::Literal;
                 } else {
                     conversion.get_or_insert_with(String::new).push(c);
@@ -98,7 +127,10 @@ fn parse_old(s: &str) -> Result<Vec<Field>, String> {
         }
     }
     if st != St::Literal {
-        return Err(format!("String {} ends with an open format operation.", py_repr(s)));
+        return Err(format!(
+            "String {} ends with an open format operation.",
+            py_repr(s)
+        ));
     }
     if !literal.is_empty() {
         out.push((literal, None, None, None));
@@ -107,7 +139,11 @@ fn parse_old(s: &str) -> Result<Vec<Field>, String> {
 }
 
 fn py_repr(s: &str) -> String {
-    if s.contains('\'') && !s.contains('"') { format!("\"{s}\"") } else { format!("'{}'", s.replace('\'', "\\'")) }
+    if s.contains('\'') && !s.contains('"') {
+        format!("\"{s}\"")
+    } else {
+        format!("'{}'", s.replace('\'', "\\'"))
+    }
 }
 
 const FLAGS: &str = "rstiqulc!";
@@ -207,7 +243,12 @@ fn parse_new(s: &str) -> Result<Vec<Field>, String> {
             }
             St::Conversion => {
                 if ch == ']' {
-                    out.push((std::mem::take(&mut lit), expr.take(), Some(sub(cut, p)), fmt.take()));
+                    out.push((
+                        std::mem::take(&mut lit),
+                        expr.take(),
+                        Some(sub(cut, p)),
+                        fmt.take(),
+                    ));
                     cut = p + 1;
                     st = St::Literal;
                 } else if ch == ':' {
@@ -225,7 +266,12 @@ fn parse_new(s: &str) -> Result<Vec<Field>, String> {
             }
             St::Format => {
                 if ch == ']' {
-                    out.push((std::mem::take(&mut lit), expr.take(), conv.take(), Some(sub(cut, p))));
+                    out.push((
+                        std::mem::take(&mut lit),
+                        expr.take(),
+                        conv.take(),
+                        Some(sub(cut, p)),
+                    ));
                     cut = p + 1;
                     st = St::Literal;
                 } else if conv.is_none() && ch == '!' {
@@ -238,7 +284,10 @@ fn parse_new(s: &str) -> Result<Vec<Field>, String> {
         }
     }
     if st != St::Literal {
-        return Err(format!("String {} ends with an open format operation.", py_repr(s)));
+        return Err(format!(
+            "String {} ends with an open format operation.",
+            py_repr(s)
+        ));
     }
     if cut as isize <= size {
         lit.push_str(&sub(cut, c.len()));
@@ -267,7 +316,11 @@ impl Scope {
         if self.0.len() == 1 {
             return vm.exc_msg("KeyError", format!("'{key}'"));
         }
-        let kind = if at_least(vm, 8, 2) { "KeyError" } else { "NameError" };
+        let kind = if at_least(vm, 8, 2) {
+            "KeyError"
+        } else {
+            "NameError"
+        };
         vm.exc_msg(kind, format!("Name '{key}' is not defined."))
     }
 }
@@ -287,7 +340,9 @@ fn get_field(vm: &mut Vm, field: &str, scope: &Scope) -> PyResult<Value> {
             obj = py::get(vm, &obj, &r[..e])?;
             rest = &r[e..];
         } else if let Some(r) = rest.strip_prefix('[') {
-            let Some(e) = r.find(']') else { return Err(vm.exc_msg("ValueError", "Missing ']' in format string")) };
+            let Some(e) = r.find(']') else {
+                return Err(vm.exc_msg("ValueError", "Missing ']' in format string"));
+            };
             let key = &r[..e];
             let k = match key.parse::<i64>() {
                 Ok(i) => Value::Int(i),
@@ -296,7 +351,10 @@ fn get_field(vm: &mut Vm, field: &str, scope: &Scope) -> PyResult<Value> {
             obj = ops::getitem(vm, &obj, k)?;
             rest = &r[e + 1..];
         } else {
-            return Err(vm.exc_msg("ValueError", "Only '.' or '[' may follow ']' in format field specifier"));
+            return Err(vm.exc_msg(
+                "ValueError",
+                "Only '.' or '[' may follow ']' in format field specifier",
+            ));
         }
     }
     Ok(obj)
@@ -321,13 +379,22 @@ fn convert(vm: &mut Vm, value: Value, conv: &str, scope: &Scope) -> PyResult<Val
     if !at_least(vm, 7, 4) {
         let mut value = value;
         if conv.contains('r') {
-            { let t = ops::repr(vm, &value)?; value = vm.types.new_str(&t); }
+            {
+                let t = ops::repr(vm, &value)?;
+                value = vm.types.new_str(&t);
+            }
         } else if conv.contains('s') {
-            { let t = to_str(vm, &value)?; value = vm.types.new_str(&t); }
+            {
+                let t = to_str(vm, &value)?;
+                value = vm.types.new_str(&t);
+            }
         }
         if conv.contains('t') {
             let s = to_str(vm, &value)?;
-            { let t = translate_string(vm, &s)?; value = vm.types.new_str(&t); }
+            {
+                let t = translate_string(vm, &s)?;
+                value = vm.types.new_str(&t);
+            }
         }
         if conv.contains('q') {
             let s = to_str(vm, &value)?;
@@ -340,15 +407,24 @@ fn convert(vm: &mut Vm, value: Value, conv: &str, scope: &Scope) -> PyResult<Val
     }
     let new = at_least(vm, 8, 2);
     if !new && conv.chars().any(|c| !"rstqulci!".contains(c)) {
-        return Err(vm.exc_msg("ValueError", "Unknown symbols in conversion specifier, this must use only the \"rstqulci\"."));
+        return Err(vm.exc_msg(
+            "ValueError",
+            "Unknown symbols in conversion specifier, this must use only the \"rstqulci\".",
+        ));
     }
     let mut conv: String = conv.to_owned();
     let mut value = value;
     if conv.contains('r') {
-        { let t = ops::repr(vm, &value)?; value = vm.types.new_str(&t); }
+        {
+            let t = ops::repr(vm, &value)?;
+            value = vm.types.new_str(&t);
+        }
         conv = conv.replace('r', "");
     } else if conv.contains('s') {
-        { let t = to_str(vm, &value)?; value = vm.types.new_str(&t); }
+        {
+            let t = to_str(vm, &value)?;
+            value = vm.types.new_str(&t);
+        }
         conv = conv.replace('s', "");
     }
     if conv.is_empty() || (new && conv.chars().all(|c| c == '!')) {
@@ -407,7 +483,11 @@ fn interpolate_old(vm: &mut Vm, s: &str, scope: &Scope) -> PyResult<String> {
             }
         }
         let spec = fmt.unwrap_or_default();
-        let spec = if spec.contains('[') { interpolate_old(vm, &spec, scope)? } else { spec };
+        let spec = if spec.contains('[') {
+            interpolate_old(vm, &spec, scope)?
+        } else {
+            spec
+        };
         rv.push_str(&format_value(vm, &v, &spec)?);
     }
     Ok(rv)
@@ -415,7 +495,9 @@ fn interpolate_old(vm: &mut Vm, s: &str, scope: &Scope) -> PyResult<String> {
 
 fn is_simple_name(s: &str) -> bool {
     let mut c = s.chars();
-    c.next().is_some_and(|f| f.is_ascii_alphabetic() || f == '_') && c.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    c.next()
+        .is_some_and(|f| f.is_ascii_alphabetic() || f == '_')
+        && c.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 /// The 8.2+ `interpolate`.
@@ -428,7 +510,9 @@ fn interpolate_new(vm: &mut Vm, s: &str, scope: &Scope) -> PyResult<String> {
         let Some(expr) = expr else { continue };
         let mut conv = match conv {
             None => String::new(),
-            Some(c) if c.is_empty() => return Err(vm.exc_msg("ValueError", "conversion specifier cannot be empty")),
+            Some(c) if c.is_empty() => {
+                return Err(vm.exc_msg("ValueError", "conversion specifier cannot be empty"));
+            }
             Some(c) => c,
         };
         let mut code = expr.trim().to_owned();
@@ -463,7 +547,11 @@ fn interpolate_new(vm: &mut Vm, s: &str, scope: &Scope) -> PyResult<String> {
         } else {
             get_field(vm, &code, scope)?
         };
-        let value = if conv.is_empty() { value } else { convert(vm, value, &conv, scope)? };
+        let value = if conv.is_empty() {
+            value
+        } else {
+            convert(vm, value, &conv, scope)?
+        };
         rv.push_str(&format_value(vm, &value, &fmt.take().unwrap_or_default())?);
     }
     Ok(rv)
@@ -484,7 +572,13 @@ fn eval_in(vm: &mut Vm, code: &str, scope: &Scope) -> PyResult<Value> {
 
 /// `substitute(s, scope=None, force=False, translate=True)` ->
 /// (text, changed).
-pub fn substitute(vm: &mut Vm, s: &Value, scope: &Value, force: bool, translate: bool) -> PyResult<(Value, bool)> {
+pub fn substitute(
+    vm: &mut Vm,
+    s: &Value,
+    scope: &Value,
+    force: bool,
+    translate: bool,
+) -> PyResult<(Value, bool)> {
     let mut text = to_str(vm, s)?;
     if translate {
         text = translate_string(vm, &text)?;
@@ -509,11 +603,16 @@ pub fn substitute(vm: &mut Vm, s: &Value, scope: &Value, force: bool, translate:
     }
     dicts.push(super::python::store_dict(vm, "store")?);
     let scope = Scope(dicts);
-    let r = if new { interpolate_new(vm, &text, &scope) } else { interpolate_old(vm, &text, &scope) };
+    let r = if new {
+        interpolate_new(vm, &text, &scope)
+    } else {
+        interpolate_old(vm, &text, &scope)
+    };
     let out = match r {
         Ok(o) => o,
         Err(e) => {
-            let predicting = py::import_attr(vm, "renpy.display.predict", "predicting").unwrap_or(Value::Bool(false));
+            let predicting = py::import_attr(vm, "renpy.display.predict", "predicting")
+                .unwrap_or(Value::Bool(false));
             if at_least(vm, 7, 0) && py::truthy(vm, &predicting)? {
                 return Ok((py::s(vm, " "), true));
             }
@@ -535,17 +634,24 @@ fn f_substitute(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn pieces_value(vm: &mut Vm, p: Vec<Field>) -> Value {
     let opt = |vm: &Vm, s: Option<String>| s.map(|s| vm.types.new_str(&s)).unwrap_or(Value::None);
-    let items = p.into_iter().map(|(l, e, c, f)| {
-        let l = vm.types.new_str(&l);
-        let (e, c, f) = (opt(vm, e), opt(vm, c), opt(vm, f));
-        vm.types.new_tuple(vec![l, e, c, f])
-    }).collect();
+    let items = p
+        .into_iter()
+        .map(|(l, e, c, f)| {
+            let l = vm.types.new_str(&l);
+            let (e, c, f) = (opt(vm, e), opt(vm, c), opt(vm, f));
+            vm.types.new_tuple(vec![l, e, c, f])
+        })
+        .collect();
     vm.types.new_list(items)
 }
 
 fn f_parse(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let s = py::string(vm, &args[0])?;
-    let r = if at_least(vm, 8, 2) { parse_new(&s) } else { parse_old(&s) };
+    let r = if at_least(vm, 8, 2) {
+        parse_new(&s)
+    } else {
+        parse_old(&s)
+    };
     match r {
         Ok(p) => Ok(pieces_value(vm, p)),
         Err(e) => Err(vm.exc_msg("ValueError", e)),
@@ -562,7 +668,11 @@ fn scope_of(vm: &mut Vm, v: &Value) -> PyResult<Scope> {
 fn f_interpolate(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let s = py::string(vm, &args[0])?;
     let scope = scope_of(vm, &args[1])?;
-    let r = if at_least(vm, 8, 2) { interpolate_new(vm, &s, &scope)? } else { interpolate_old(vm, &s, &scope)? };
+    let r = if at_least(vm, 8, 2) {
+        interpolate_new(vm, &s, &scope)?
+    } else {
+        interpolate_old(vm, &s, &scope)?
+    };
     Ok(vm.types.new_str(&r))
 }
 
@@ -597,8 +707,28 @@ fn md_contains(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[("substitute", f_substitute), ("parse", f_parse), ("interpolate", f_interpolate), ("convert", f_convert)]);
-    let md = py::class(vm, MODULE, "MultipleDict", &[], &[("__init__", md_init), ("__getitem__", md_getitem), ("__contains__", md_contains)], &[])?;
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("substitute", f_substitute),
+            ("parse", f_parse),
+            ("interpolate", f_interpolate),
+            ("convert", f_convert),
+        ],
+    );
+    let md = py::class(
+        vm,
+        MODULE,
+        "MultipleDict",
+        &[],
+        &[
+            ("__init__", md_init),
+            ("__getitem__", md_getitem),
+            ("__contains__", md_contains),
+        ],
+        &[],
+    )?;
     crysirror_python::modules::set(vm, &m, "MultipleDict", Value::Obj(md));
     crysirror_python::modules::set(vm, &m, "update_translations", Value::Bool(false));
     Ok(m)

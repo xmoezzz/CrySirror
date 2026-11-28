@@ -24,15 +24,11 @@ pub const TAG: i64 = 2;
 pub const PARAGRAPH: i64 = 3;
 pub const DISPLAYABLE: i64 = 4;
 
-const SPLIT_NONE: u8 = 0;
-const SPLIT_BEFORE: u8 = 1;
-const SPLIT_INSTEAD: u8 = 2;
-const SPLIT_IGNORE: u8 = 3;
-const RUBY_NONE: u8 = 0;
-const RUBY_TOP: u8 = 1;
-const RUBY_BOTTOM: u8 = 2;
-const RUBY_ALT: u8 = 3;
-const MAX_WIDTH: f64 = 8192.;
+#[allow(unused_imports)]
+use super::textsupport::{
+    MAX_WIDTH, RUBY_ALT, RUBY_BOTTOM, RUBY_NONE, RUBY_TOP, Rel, SPLIT_BEFORE, SPLIT_IGNORE,
+    SPLIT_INSTEAD, SPLIT_NONE,
+};
 
 // Tokenizer --------------------------------------------------------------------------------
 
@@ -44,6 +40,15 @@ pub enum Token {
     Displayable(Value),
 }
 
+thread_local! {
+    static KEEP_DANGLING: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// 8.6 emits a dangling `【` that earlier releases drop.
+fn keep_dangling() -> bool {
+    KEEP_DANGLING.with(|k| k.get())
+}
+
 pub fn tokenize(s: &str, lenticular: bool) -> Result<Vec<Token>, String> {
     let mut rv = Vec::new();
     if s.is_empty() {
@@ -51,7 +56,7 @@ pub fn tokenize(s: &str, lenticular: bool) -> Result<Vec<Token>, String> {
     }
     let finish = |buf: &str, rv: &mut Vec<Token>| {
         if lenticular && buf.contains('【') {
-            rv.extend(lenticular_bracket_ruby(buf));
+            rv.extend(lenticular_bracket_ruby(buf, keep_dangling()));
         } else {
             rv.push(Token::Text(buf.to_owned()));
         }
@@ -114,7 +119,7 @@ pub fn tokenize(s: &str, lenticular: bool) -> Result<Vec<Token>, String> {
     Ok(rv)
 }
 
-fn lenticular_bracket_ruby(s: &str) -> Vec<Token> {
+pub(crate) fn lenticular_bracket_ruby(s: &str, keep_dangling: bool) -> Vec<Token> {
     let mut rv = Vec::new();
     let mut buf = String::new();
     let mut state = 0;
@@ -159,7 +164,7 @@ fn lenticular_bracket_ruby(s: &str) -> Vec<Token> {
             }
         }
     }
-    if !buf.is_empty() {
+    if !buf.is_empty() || (keep_dangling && state == 1) {
         match state {
             0 => rv.push(Token::Text(buf)),
             1 => rv.push(Token::Text(format!("【{buf}"))),
@@ -173,7 +178,7 @@ fn lenticular_bracket_ruby(s: &str) -> Vec<Token> {
     rv
 }
 
-fn tokens_to_py(vm: &mut Vm, tokens: &[Token]) -> Value {
+pub(crate) fn tokens_to_py(vm: &mut Vm, tokens: &[Token]) -> Value {
     let items = tokens
         .iter()
         .map(|t| {
@@ -208,7 +213,7 @@ fn lenticular(vm: &mut Vm) -> bool {
     py::config_bool(vm, "lenticular_bracket_ruby").unwrap_or(false)
 }
 
-fn f_tokenize(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+pub(crate) fn f_tokenize(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let s = py::string(vm, &args.first().cloned().unwrap_or(Value::None))?;
     let l = lenticular(vm);
     let t = tokenize(&s, l).map_err(|e| py::error(vm, e))?;
@@ -254,7 +259,11 @@ fn take_style(vm: &mut Vm, seg: &mut Seg, style: &Value, text_cps: f64) -> PyRes
     let g = |vm: &mut Vm, n: &str| py::get(vm, style, n);
     let font = g(vm, "font")?;
     let fmap = py::config(vm, "font_name_map")?;
-    seg.font = if py::is_none(&fmap) { font.clone() } else { vm.call_method(&fmap, "get", vec![font.clone(), font])? };
+    seg.font = if py::is_none(&fmap) {
+        font.clone()
+    } else {
+        vm.call_method(&fmap, "get", vec![font.clone(), font])?
+    };
     let size = g(vm, "size")?;
     seg.size = py::f64_of(vm, &size)?;
     let b = g(vm, "bold")?;
@@ -279,7 +288,11 @@ fn take_style(vm: &mut Vm, seg: &mut Seg, style: &Value, text_cps: f64) -> PyRes
     }
     seg.hyperlink = 0;
     let k = g(vm, "kerning")?;
-    seg.kerning = if py::is_none(&k) { 0. } else { py::f64_of(vm, &k)? };
+    seg.kerning = if py::is_none(&k) {
+        0.
+    } else {
+        py::f64_of(vm, &k)?
+    };
     seg.outline_color = None;
     let sc = g(vm, "slow_cps")?;
     if matches!(sc, Value::Bool(true)) {
@@ -309,11 +322,32 @@ struct Segmented {
     has_ruby: bool,
 }
 
-fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: &HashMap<i64, Value>, cps: f64) -> PyResult<Segmented> {
+fn segment(
+    vm: &mut Vm,
+    tokens: &[Token],
+    style: &Value,
+    text: &Value,
+    renders: &HashMap<i64, Value>,
+    cps: f64,
+) -> PyResult<Segmented> {
     let text_cps = text_cps_pref(vm);
     let mut base = Seg {
-        font: Value::None, size: 22., bold: false, italic: false, underline: 0, strikethrough: false, color: None, black_color: None,
-        hyperlink: 0, kerning: 0., cps, ruby_top: RUBY_NONE, ruby_bottom: false, outline_color: None, ignore: false, vertical: false,
+        font: Value::None,
+        size: 22.,
+        bold: false,
+        italic: false,
+        underline: 0,
+        strikethrough: false,
+        color: None,
+        black_color: None,
+        hyperlink: 0,
+        kerning: 0.,
+        cps,
+        ruby_top: RUBY_NONE,
+        ruby_bottom: false,
+        outline_color: None,
+        ignore: false,
+        vertical: false,
     };
     take_style(vm, &mut base, style, text_cps)?;
     let mut tss = vec![base];
@@ -322,7 +356,11 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
     let mut targets: Vec<Value> = Vec::new();
     let mut has_ruby = false;
     let mask = py::get_or_none(vm, text, "mask")?;
-    let mask = if py::is_none(&mask) { None } else { Some(py::string(vm, &mask)?) };
+    let mask = if py::is_none(&mask) {
+        None
+    } else {
+        Some(py::string(vm, &mask)?)
+    };
     let fill_empty = |line: &mut Vec<Piece>, tss: &Vec<Seg>| {
         if !line.iter().any(|p| matches!(p, Piece::Text(..))) {
             line.push(Piece::Text(tss.last().unwrap().clone(), "\u{200b}".into()));
@@ -337,22 +375,34 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
                     paragraphs.push(std::mem::take(&mut line));
                 }
                 Token::Text(s) => {
-                    let s = match &mask { Some(m) => m.repeat(s.chars().count()), None => s.clone() };
+                    let s = match &mask {
+                        Some(m) => m.repeat(s.chars().count()),
+                        None => s.clone(),
+                    };
                     line.push(Piece::Text(tss.last().unwrap().clone(), s));
                 }
                 Token::Displayable(d) => {
-                    let (w, h) = renders.get(&d.id()).map(super::layout::size).unwrap_or((0., 0.));
+                    let (w, h) = renders
+                        .get(&d.id())
+                        .map(super::layout::size)
+                        .unwrap_or((0., 0.));
                     line.push(Piece::Disp(tss.last().unwrap().clone(), d.clone(), w, h));
                 }
                 Token::Tag(text_tag) => {
-                    let (tag, value) = text_tag.split_once('=').map(|(a, b)| (a.to_owned(), b.to_owned())).unwrap_or((text_tag.clone(), String::new()));
+                    let (tag, value) = text_tag
+                        .split_once('=')
+                        .map(|(a, b)| (a.to_owned(), b.to_owned()))
+                        .unwrap_or((text_tag.clone(), String::new()));
                     let push = |tss: &mut Vec<Seg>| {
                         let n = tss.last().unwrap().clone();
                         tss.push(n);
                     };
                     let need = |vm: &mut Vm| -> PyResult<()> {
                         if value.is_empty() {
-                            return Err(py::error(vm, format!("empty value supplied for tag {tag:?}")));
+                            return Err(py::error(
+                                vm,
+                                format!("empty value supplied for tag {tag:?}"),
+                            ));
                         }
                         Ok(())
                     };
@@ -363,9 +413,17 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
                             let k = vm.types.new_str(closed);
                             let takes = vm.call_method(&tt, "get", vec![k, Value::Bool(true)])?;
                             if !ops::truthy(vm, &takes)? {
-                                return Err(py::error(vm, format!("{{/{closed}}} isn't valid, since the {closed} text tag doesn't take a close tag.")));
+                                return Err(py::error(
+                                    vm,
+                                    format!(
+                                        "{{/{closed}}} isn't valid, since the {closed} text tag doesn't take a close tag."
+                                    ),
+                                ));
                             }
-                            return Err(py::error(vm, format!("{text_tag:?} closes a text tag that isn't open.")));
+                            return Err(py::error(
+                                vm,
+                                format!("{text_tag:?} closes a text tag that isn't open."),
+                            ));
                         }
                         return Ok(());
                     }
@@ -378,12 +436,16 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
                         }
                         "space" => {
                             need(vm)?;
-                            let w: f64 = value.parse().map_err(|_| vm.value_error(format!("invalid space {value:?}")))?;
+                            let w: f64 = value
+                                .parse()
+                                .map_err(|_| vm.value_error(format!("invalid space {value:?}")))?;
                             line.push(Piece::Space(tss.last().unwrap().clone(), w, 0.));
                         }
                         "vspace" => {
                             need(vm)?;
-                            let h: f64 = value.parse().map_err(|_| vm.value_error(format!("invalid vspace {value:?}")))?;
+                            let h: f64 = value
+                                .parse()
+                                .map_err(|_| vm.value_error(format!("invalid vspace {value:?}")))?;
                             if !line.is_empty() {
                                 paragraphs.push(std::mem::take(&mut line));
                             }
@@ -399,7 +461,11 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
                             let funcs = sty(vm, text, "hyperlink_functions")?;
                             let styler = ops::getitem(vm, &funcs, Value::Int(0))?;
                             let v = vm.types.new_str(&value);
-                            let hls = if !py::is_none(&styler) { vm.call(&styler, vec![v.clone()], Vec::new())? } else { style.clone() };
+                            let hls = if !py::is_none(&styler) {
+                                vm.call(&styler, vec![v.clone()], Vec::new())?
+                            } else {
+                                style.clone()
+                            };
                             let old_prefix = py::get(vm, &hls, "prefix")?;
                             targets.push(v.clone());
                             let link = targets.len() as i64;
@@ -408,7 +474,9 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
                             let arg = py::import_attr(vm, "renpy.display.focus", "argument")?;
                             let p = if !ops::truthy(vm, &sensitive)? {
                                 "insensitive_"
-                            } else if py::same(&focused, text) && matches!(arg, Value::Int(a) if a == link) {
+                            } else if py::same(&focused, text)
+                                && matches!(arg, Value::Int(a) if a == link)
+                            {
                                 "hover_"
                             } else {
                                 "idle_"
@@ -438,7 +506,11 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
                         }
                         "u" => {
                             push(&mut tss);
-                            let n = if value.is_empty() { 1 } else { value.parse().unwrap_or(1) };
+                            let n = if value.is_empty() {
+                                1
+                            } else {
+                                value.parse().unwrap_or(1)
+                            };
                             tss.last_mut().unwrap().underline = n;
                         }
                         "s" => {
@@ -464,7 +536,11 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
                         "font" => {
                             let fmap = py::config(vm, "font_name_map")?;
                             let v = vm.types.new_str(&value);
-                            let f = if py::is_none(&fmap) { v.clone() } else { vm.call_method(&fmap, "get", vec![v.clone(), v])? };
+                            let f = if py::is_none(&fmap) {
+                                v.clone()
+                            } else {
+                                vm.call_method(&fmap, "get", vec![v.clone(), v])?
+                            };
                             push(&mut tss);
                             tss.last_mut().unwrap().font = f;
                         }
@@ -473,16 +549,28 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
                             push(&mut tss);
                             let ts = tss.last_mut().unwrap();
                             if value.starts_with('+') || value.starts_with('-') {
-                                ts.size += value.parse::<f64>().map_err(|_| vm.value_error("invalid size"))?;
+                                ts.size += value
+                                    .parse::<f64>()
+                                    .map_err(|_| vm.value_error("invalid size"))?;
                             } else if let Some(m) = value.strip_prefix('*') {
-                                ts.size = (m.parse::<f64>().map_err(|_| vm.value_error("invalid size"))? * ts.size).trunc();
+                                ts.size = (m
+                                    .parse::<f64>()
+                                    .map_err(|_| vm.value_error("invalid size"))?
+                                    * ts.size)
+                                    .trunc();
                             } else {
-                                ts.size = value.parse::<f64>().map_err(|_| vm.value_error("invalid size"))?;
+                                ts.size = value
+                                    .parse::<f64>()
+                                    .map_err(|_| vm.value_error("invalid size"))?;
                             }
                         }
                         "color" | "outlinecolor" => {
                             need(vm)?;
-                            let c = super::color::parse_hex(&value).ok_or_else(|| vm.value_error(format!("Color string {value:?} must be in hex format.")))?;
+                            let c = super::color::parse_hex(&value).ok_or_else(|| {
+                                vm.value_error(format!(
+                                    "Color string {value:?} must be in hex format."
+                                ))
+                            })?;
                             push(&mut tss);
                             if tag == "color" {
                                 tss.last_mut().unwrap().color = Some(c);
@@ -512,7 +600,15 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
                             tss.last_mut().unwrap().kerning = value.parse().unwrap_or(0.);
                         }
                         "rt" | "art" => {
-                            let rs = sty(vm, text, if tag == "rt" { "ruby_style" } else { "altruby_style" })?;
+                            let rs = sty(
+                                vm,
+                                text,
+                                if tag == "rt" {
+                                    "ruby_style"
+                                } else {
+                                    "altruby_style"
+                                },
+                            )?;
                             push(&mut tss);
                             let mut ts = tss.pop().unwrap();
                             let vert = ts.vertical;
@@ -550,7 +646,10 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
                         }
                         "instance" => push(&mut tss),
                         "shader" => {
-                            return Err(py::error(vm, "The shader tag was given, but text shaders are not in use. Consider adding \"define config.default_textshader = 'typewriter'\" to your game."));
+                            return Err(py::error(
+                                vm,
+                                "The shader tag was given, but text shaders are not in use. Consider adding \"define config.default_textshader = 'typewriter'\" to your game.",
+                            ));
                         }
                         t if t.starts_with("axis:") => push(&mut tss),
                         t if t.starts_with('#') => {}
@@ -564,45 +663,36 @@ fn segment(vm: &mut Vm, tokens: &[Token], style: &Value, text: &Value, renders: 
             if done {
                 break;
             }
-            let all = vm.call_method(text, "get_all_text", Vec::new()).ok().and_then(|v| ops::repr(vm, &v).ok()).map(|s| s.to_string()).unwrap_or_default();
-            let tt = match t { Token::Tag(s) => s.clone(), _ => String::new() };
-            let msg = vm.types.new_string(format!("While processing text tag {{{tt}}} in {all}.:"));
-            let _ = py::import(vm, "renpy.game").and_then(|g| py::set(vm, &g, "exception_info", msg));
+            let all = vm
+                .call_method(text, "get_all_text", Vec::new())
+                .ok()
+                .and_then(|v| ops::repr(vm, &v).ok())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let tt = match t {
+                Token::Tag(s) => s.clone(),
+                _ => String::new(),
+            };
+            let msg = vm
+                .types
+                .new_string(format!("While processing text tag {{{tt}}} in {all}.:"));
+            let _ =
+                py::import(vm, "renpy.game").and_then(|g| py::set(vm, &g, "exception_info", msg));
             return Err(e);
         }
     }
     fill_empty(&mut line, &tss);
     paragraphs.push(line);
-    Ok(Segmented { paragraphs, hyperlink_targets: targets, has_ruby })
+    Ok(Segmented {
+        paragraphs,
+        hyperlink_targets: targets,
+        has_ruby,
+    })
 }
 
 // Glyphs -------------------------------------------------------------------------------------
 
-#[derive(Clone, Debug)]
-pub struct G {
-    ch: char,
-    x: f64,
-    y: f64,
-    ascent: f64,
-    line_spacing: f64,
-    width: f64,
-    advance: f64,
-    split: u8,
-    ruby: u8,
-    time: f64,
-    hyperlink: i64,
-    piece: usize,
-    font: Option<Font>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Line {
-    y: f64,
-    height: f64,
-    glyphs: std::ops::Range<usize>,
-    eop: bool,
-    max_time: f64,
-}
+pub use super::textsupport::{Glyph as G, Line};
 
 pub struct TextLayout {
     width: f64,
@@ -625,16 +715,34 @@ pub struct TextLayout {
 }
 
 fn piece_glyphs(vm: &mut Vm, piece: &Piece, index: usize, pending: &mut bool) -> PyResult<Vec<G>> {
-    let mk = |ch: char, ascent: f64, ls: f64, w: f64, adv: f64, hyperlink: i64, font: Option<Font>| G {
-        ch, x: 0., y: 0., ascent, line_spacing: ls, width: w, advance: adv, split: SPLIT_NONE, ruby: RUBY_NONE, time: 0., hyperlink, piece: index, font,
-    };
+    let mk =
+        |ch: char, ascent: f64, ls: f64, w: f64, adv: f64, hyperlink: i64, font: Option<Font>| G {
+            ch,
+            x: 0.,
+            y: 0.,
+            ascent,
+            line_spacing: ls,
+            width: w,
+            advance: adv,
+            split: SPLIT_NONE,
+            ruby: RUBY_NONE,
+            time: 0.,
+            hyperlink,
+            piece: index,
+            font,
+            ..G::default()
+        };
     let mut rv = match piece {
         Piece::Text(seg, s) => {
             if seg.ignore {
                 return Ok(Vec::new());
             }
             let mut out = Vec::new();
-            let parts: Vec<(Value, String)> = if seg.font.obj().is_some_and(|o| o.class_name() == "FontGroup") {
+            let parts: Vec<(Value, String)> = if seg
+                .font
+                .obj()
+                .is_some_and(|o| o.class_name() == "FontGroup")
+            {
                 font::fontgroup_segment(vm, &seg.font, s)?
             } else {
                 vec![(seg.font.clone(), s.clone())]
@@ -645,12 +753,28 @@ fn piece_glyphs(vm: &mut Vm, piece: &Piece, index: usize, pending: &mut bool) ->
                     Lookup::Pending => {
                         *pending = true;
                         for c in text.chars() {
-                            out.push(mk(c, seg.size * 0.8, seg.size * 1.2, 0., 0., seg.hyperlink, None));
+                            out.push(mk(
+                                c,
+                                seg.size * 0.8,
+                                seg.size * 1.2,
+                                0.,
+                                0.,
+                                seg.hyperlink,
+                                None,
+                            ));
                         }
                     }
                     Lookup::Ready(f) => {
                         for (c, m) in f.glyphs(vm, &text)? {
-                            out.push(mk(c, m.ascent, m.line_spacing, m.width, m.advance + seg.kerning, seg.hyperlink, Some(f.clone())));
+                            out.push(mk(
+                                c,
+                                m.ascent,
+                                m.line_spacing,
+                                m.width,
+                                m.advance + seg.kerning,
+                                seg.hyperlink,
+                                Some(f.clone()),
+                            ));
                         }
                     }
                 }
@@ -664,13 +788,25 @@ fn piece_glyphs(vm: &mut Vm, piece: &Piece, index: usize, pending: &mut bool) ->
                 return Ok(Vec::new());
             }
             let caret = d.obj().is_some_and(|o| o.class_name() == "CaretBlink");
-            vec![mk('\u{fffc}', 0., *h, *w, if caret { 0. } else { *w }, seg.hyperlink, None)]
+            vec![mk(
+                '\u{fffc}',
+                0.,
+                *h,
+                *w,
+                if caret { 0. } else { *w },
+                seg.hyperlink,
+                None,
+            )]
         }
         Piece::Start | Piece::End => Vec::new(),
     };
     let ruby = match piece {
         Piece::Text(s, _) | Piece::Disp(s, ..) => {
-            if s.ruby_bottom { RUBY_BOTTOM } else { s.ruby_top }
+            if s.ruby_bottom {
+                RUBY_BOTTOM
+            } else {
+                s.ruby_top
+            }
         }
         _ => RUBY_NONE,
     };
@@ -682,383 +818,6 @@ fn piece_glyphs(vm: &mut Vm, piece: &Piece, index: usize, pending: &mut bool) ->
     Ok(rv)
 }
 
-fn annotate_western(gs: &mut [G]) {
-    for g in gs {
-        if g.ruby != RUBY_NONE {
-            continue;
-        }
-        g.split = if g.ch == '\0' { SPLIT_BEFORE } else if g.ch == ' ' || g.ch == '\u{200b}' { SPLIT_INSTEAD } else { SPLIT_NONE };
-    }
-}
-
-fn annotate_anywhere(gs: &mut [G]) {
-    for g in gs {
-        if g.ruby != RUBY_NONE {
-            continue;
-        }
-        g.split = if g.ch == ' ' || g.ch == '\u{200b}' { SPLIT_INSTEAD } else { SPLIT_BEFORE };
-    }
-}
-
-/// UAX #14 opportunities: a break before glyph i becomes SPLIT_INSTEAD on
-/// the preceding run of spaces, or SPLIT_BEFORE otherwise. Closing
-/// punctuation is SPLIT_IGNORE, as upstream.
-fn annotate_unicode(gs: &mut [G], no_ideographs: bool) {
-    if gs.is_empty() {
-        return;
-    }
-    let s: String = gs.iter().map(|g| if g.ch == '\0' { '\u{fffc}' } else { g.ch }).collect();
-    let mut char_starts = Vec::new();
-    for (i, _) in s.char_indices() {
-        char_starts.push(i);
-    }
-    let mut opp = vec![false; gs.len() + 1];
-    for (pos, kind) in unicode_linebreak::linebreaks(&s) {
-        if pos >= s.len() {
-            continue;
-        }
-        let idx = char_starts.binary_search(&pos).unwrap_or_else(|i| i);
-        if idx < gs.len() && kind == unicode_linebreak::BreakOpportunity::Allowed {
-            opp[idx] = true;
-        }
-    }
-    for g in gs.iter_mut() {
-        g.split = SPLIT_NONE;
-    }
-    for i in 1..gs.len() {
-        let c = gs[i].ch;
-        let class = unicode_linebreak::break_property(c as u32);
-        use unicode_linebreak::BreakClass as B;
-        if matches!(class, B::ClosePunctuation | B::CloseParenthesis) {
-            gs[i].split = SPLIT_IGNORE;
-            continue;
-        }
-        if no_ideographs && matches!(class, B::Ideographic | B::HangulLvSyllable | B::HangulLvtSyllable | B::HangulLJamo | B::HangulVJamo | B::HangulTJamo) {
-            let prev_alpha = !matches!(gs[i - 1].ch, ' ');
-            if prev_alpha {
-                continue;
-            }
-        }
-        if !opp[i] {
-            continue;
-        }
-        // Spaces before the break absorb it.
-        if gs[i - 1].ch == ' ' {
-            let mut j = i - 1;
-            while j > 0 && gs[j - 1].ch == ' ' {
-                j -= 1;
-            }
-            gs[j].split = SPLIT_INSTEAD;
-        } else {
-            gs[i].split = SPLIT_BEFORE;
-        }
-    }
-    gs[0].split = SPLIT_NONE;
-    let mut old = RUBY_NONE;
-    for g in gs.iter_mut() {
-        if g.ch == '\0' {
-            g.split = SPLIT_BEFORE;
-        }
-        if g.ruby == RUBY_TOP || g.ruby == RUBY_ALT || (g.ruby == RUBY_BOTTOM && old == RUBY_BOTTOM) {
-            g.split = SPLIT_NONE;
-        }
-        old = g.ruby;
-    }
-}
-
-fn linebreak_greedy(gs: &mut [G], first: f64, rest: f64) {
-    let mut width = first;
-    let mut split_g: Option<usize> = None;
-    let (mut x, mut splitx, mut ignored) = (0f64, 0f64, 0f64);
-    for i in 0..gs.len() {
-        let g = &gs[i];
-        if g.ruby == RUBY_TOP || g.ruby == RUBY_ALT {
-            continue;
-        }
-        if g.split == SPLIT_IGNORE {
-            ignored += g.advance;
-            continue;
-        }
-        if x > width && split_g.is_some() {
-            x = splitx;
-            split_g = None;
-            width = rest;
-        }
-        let adv = gs[i].advance;
-        x += adv + ignored;
-        splitx += adv + ignored;
-        ignored = 0.;
-        match gs[i].split {
-            SPLIT_INSTEAD => {
-                if let Some(s) = split_g {
-                    gs[s].split = SPLIT_NONE;
-                }
-                split_g = Some(i);
-                splitx = 0.;
-            }
-            SPLIT_BEFORE => {
-                if let Some(s) = split_g {
-                    gs[s].split = SPLIT_NONE;
-                }
-                split_g = Some(i);
-                splitx = adv;
-            }
-            _ => {}
-        }
-    }
-    if x > width {
-        split_g = None;
-    }
-    if let Some(s) = split_g {
-        gs[s].split = SPLIT_NONE;
-    }
-}
-
-/// Knuth-Plass wrapping (`texwrap.linebreak_tex`).
-fn linebreak_tex(gs: &mut [G], first: f64, rest: f64, subtitle: bool) {
-    if gs.is_empty() {
-        return;
-    }
-    struct Word {
-        glyph: usize,
-        start: f64,
-        end: f64,
-    }
-    let mut words = Vec::new();
-    let mut start_x = 0.;
-    let mut start_glyph = 0usize;
-    let mut x = gs[0].advance;
-    let mut ignored = 0.;
-    for i in 1..gs.len() {
-        let g = &gs[i];
-        if g.ruby == RUBY_TOP || g.ruby == RUBY_ALT {
-            continue;
-        }
-        if g.split == SPLIT_INSTEAD {
-            words.push(Word { glyph: start_glyph, start: start_x, end: x });
-            start_x = x + g.advance;
-            start_glyph = i;
-        } else if g.split == SPLIT_BEFORE {
-            words.push(Word { glyph: start_glyph, start: start_x, end: x });
-            start_x = x;
-            start_glyph = i;
-        }
-        if g.split == SPLIT_IGNORE {
-            ignored += g.advance;
-        } else {
-            x += g.advance + ignored;
-            ignored = 0.;
-        }
-    }
-    x += ignored;
-    words.push(Word { glyph: start_glyph, start: start_x, end: x });
-    let n = words.len();
-    let mut scores = vec![0f64; n + 1];
-    let mut splits = vec![0usize; n + 1];
-    for j in 1..=n {
-        let jx = words[j - 1].end;
-        let mut min = f64::INFINITY;
-        let mut split = j - 1;
-        let mut i = j;
-        while i > 0 {
-            i -= 1;
-            let mut score = scores[i] + 100000.;
-            let width = jx - words[i].start;
-            let lw = if i == 0 { first } else { rest };
-            if width > lw {
-                if i < j - 1 {
-                    break;
-                }
-                score += 100000. * (width - lw);
-            } else if subtitle || j != n {
-                score += (lw - width) * (lw - width);
-            }
-            if score < min {
-                min = score;
-                split = i;
-            }
-        }
-        scores[j] = min;
-        splits[j] = split;
-    }
-    let mut end = n;
-    while end > 0 {
-        let start = splits[end];
-        for w in &words[start + 1..end] {
-            gs[w.glyph].split = SPLIT_NONE;
-        }
-        end = start;
-    }
-}
-
-fn place_horizontal(gs: &mut [G], first_indent: f64, rest_indent: f64) -> f64 {
-    let mut x = first_indent;
-    let mut maxx = 0f64;
-    let mut old: Option<usize> = None;
-    for i in 0..gs.len() {
-        if gs[i].ruby == RUBY_TOP || gs[i].ruby == RUBY_ALT {
-            continue;
-        }
-        if gs[i].split == SPLIT_IGNORE {
-            gs[i].split = SPLIT_NONE;
-        }
-        if gs[i].split != SPLIT_NONE {
-            if let Some(o) = old {
-                gs[o].advance = gs[o].width;
-            }
-        }
-        if gs[i].split == SPLIT_INSTEAD {
-            x = rest_indent;
-            continue;
-        } else if gs[i].split == SPLIT_BEFORE {
-            x = rest_indent;
-        }
-        gs[i].x = (x + 0.5).floor();
-        maxx = maxx.max(x + gs[i].width).max(x + gs[i].advance);
-        x = (x + gs[i].advance).min(MAX_WIDTH);
-        old = Some(i);
-    }
-    maxx
-}
-
-fn place_vertical(gs: &mut [G], base: usize, y0: f64, spacing: f64, leading: f64, ruby_leading: f64) -> (Vec<Line>, f64) {
-    let mut rv = Vec::new();
-    if gs.is_empty() {
-        return (rv, y0);
-    }
-    let n = gs.len();
-    let (mut pos, mut sol) = (0usize, 0usize);
-    let (mut ascent, mut ls) = (0f64, 0f64);
-    let mut y = y0 + leading;
-    loop {
-        let end_line = pos >= n || gs[pos].split != SPLIT_NONE;
-        if end_line {
-            let mut has_ruby = false;
-            for g in gs[sol..pos].iter_mut() {
-                if g.ruby == RUBY_TOP || g.ruby == RUBY_ALT {
-                    has_ruby = true;
-                    continue;
-                }
-                if g.ascent != 0. {
-                    g.y = y + ascent;
-                } else {
-                    g.y = y;
-                    g.ascent = ascent;
-                }
-            }
-            let mut line_leading = leading;
-            if has_ruby {
-                y += ruby_leading;
-                line_leading += ruby_leading;
-                for g in gs[sol..pos].iter_mut() {
-                    if g.ruby != RUBY_TOP && g.ruby != RUBY_ALT {
-                        g.y += ruby_leading;
-                    }
-                }
-            }
-            rv.push(Line { y: y - line_leading, height: line_leading + ls + spacing, glyphs: base + sol..base + pos, eop: false, max_time: 0. });
-            y += ls + spacing + leading;
-            sol = pos;
-            ascent = 0.;
-            ls = 0.;
-            if pos < n && gs[pos].split == SPLIT_INSTEAD {
-                sol += 1;
-                pos += 1;
-                if pos >= n {
-                    break;
-                }
-                continue;
-            }
-        }
-        if pos >= n {
-            break;
-        }
-        ascent = ascent.max(gs[pos].ascent);
-        ls = ls.max(gs[pos].line_spacing);
-        pos += 1;
-    }
-    if let Some(l) = rv.last_mut() {
-        l.eop = true;
-    }
-    (rv, y - leading)
-}
-
-fn align_and_justify(gs: &mut [G], lines: &[Line], width: f64, text_align: f64, justify: bool) {
-    if !justify && text_align == 0. {
-        return;
-    }
-    for l in lines {
-        let mut spaces = 0;
-        let mut max_x = 0f64;
-        for g in &gs[l.glyphs.clone()] {
-            if g.ruby == RUBY_TOP || g.ruby == RUBY_ALT {
-                continue;
-            }
-            if g.ch == ' ' {
-                spaces += 1;
-            }
-            max_x = (g.x + g.width).trunc();
-        }
-        if max_x >= MAX_WIDTH {
-            continue;
-        }
-        if justify && spaces > 0 && !l.eop {
-            let per = (width - max_x) / spaces as f64;
-            let mut off = 0.5;
-            for g in &mut gs[l.glyphs.clone()] {
-                if g.ruby == RUBY_TOP || g.ruby == RUBY_ALT {
-                    continue;
-                }
-                if g.ch == ' ' {
-                    off += per;
-                }
-                g.x += off.trunc();
-            }
-        } else {
-            let off = ((width - max_x) * text_align).trunc();
-            for g in &mut gs[l.glyphs.clone()] {
-                if g.ruby != RUBY_TOP && g.ruby != RUBY_ALT {
-                    g.x += off;
-                }
-            }
-        }
-    }
-}
-
-fn place_ruby(gs: &mut [G], ruby_offset: f64, alt_offset: f64) {
-    let n = gs.len();
-    let (mut min_x, mut max_x, mut y) = (0f64, 0f64, 0f64);
-    let mut last = RUBY_NONE;
-    let mut pos = 0;
-    while pos < n {
-        let r = gs[pos].ruby;
-        if r == RUBY_NONE || r == RUBY_BOTTOM {
-            if r == RUBY_NONE || last != RUBY_BOTTOM {
-                min_x = gs[pos].x;
-            }
-            max_x = gs[pos].x + gs[pos].width;
-            y = gs[pos].y;
-            last = r;
-            pos += 1;
-            continue;
-        }
-        let start = pos;
-        last = r;
-        while pos < n && gs[pos].ruby == last {
-            pos += 1;
-        }
-        let mut width: f64 = gs[start..pos].iter().map(|g| g.advance).sum();
-        width -= gs[pos - 1].advance;
-        width += gs[pos - 1].width;
-        let mut x = (max_x + min_x) / 2. - width / 2.;
-        for g in &mut gs[start..pos] {
-            g.x = (x + 0.5).floor();
-            g.y = y + if g.ruby == RUBY_TOP { ruby_offset } else { alt_offset };
-            x += g.advance;
-        }
-    }
-}
-
 fn piece_cps(p: &Piece) -> f64 {
     match p {
         Piece::Text(s, _) | Piece::Space(s, ..) | Piece::Disp(s, ..) => s.cps,
@@ -1068,10 +827,17 @@ fn piece_cps(p: &Piece) -> f64 {
 
 fn opt_f(vm: &mut Vm, text: &Value, n: &str) -> PyResult<f64> {
     let v = sty(vm, text, n)?;
-    if py::is_none(&v) { Ok(0.) } else { py::f64_of(vm, &v) }
+    if py::is_none(&v) {
+        Ok(0.)
+    } else {
+        py::f64_of(vm, &v)
+    }
 }
 
-fn figure_outlines(vm: &mut Vm, text: &Value) -> PyResult<(Vec<(f64, Option<[u8; 4]>, f64, f64)>, f64, f64, f64, f64)> {
+fn figure_outlines(
+    vm: &mut Vm,
+    text: &Value,
+) -> PyResult<(Vec<(f64, Option<[u8; 4]>, f64, f64)>, f64, f64, f64, f64)> {
     let outlines_v = sty(vm, text, "outlines")?;
     let ds = sty(vm, text, "drop_shadow")?;
     let has_o = ops::truthy(vm, &outlines_v)?;
@@ -1081,7 +847,11 @@ fn figure_outlines(vm: &mut Vm, text: &Value) -> PyResult<(Vec<(f64, Option<[u8;
     }
     let mut outlines = Vec::new();
     if has_ds {
-        let list = if matches!(ds.payload(), Some(crysirror_python::Payload::List(_))) { py::items(vm, &ds)? } else { vec![ds.clone()] };
+        let list = if matches!(ds.payload(), Some(crysirror_python::Payload::List(_))) {
+            py::items(vm, &ds)?
+        } else {
+            vec![ds.clone()]
+        };
         let dsc = sty(vm, text, "drop_shadow_color")?;
         let c = color_opt(vm, &dsc)?;
         for d in list {
@@ -1093,7 +863,12 @@ fn figure_outlines(vm: &mut Vm, text: &Value) -> PyResult<(Vec<(f64, Option<[u8;
         for o in py::items(vm, &outlines_v)? {
             let o = py::items(vm, &o)?;
             let c = color_opt(vm, &o[1])?;
-            outlines.push((py::f64_of(vm, &o[0])?, c, py::f64_of(vm, &o[2])?, py::f64_of(vm, &o[3])?));
+            outlines.push((
+                py::f64_of(vm, &o[0])?,
+                c,
+                py::f64_of(vm, &o[2])?,
+                py::f64_of(vm, &o[3])?,
+            ));
         }
     }
     let (mut l, mut r, mut t, mut b) = (0f64, 0f64, 0f64, 0f64);
@@ -1108,10 +883,26 @@ fn figure_outlines(vm: &mut Vm, text: &Value) -> PyResult<(Vec<(f64, Option<[u8;
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_layout(vm: &mut Vm, text: &Value, tokens: &[Token], width: f64, height: f64, renders: &HashMap<i64, Value>, splits_from: Option<&TextLayout>) -> PyResult<TextLayout> {
+fn build_layout(
+    vm: &mut Vm,
+    text: &Value,
+    tokens: &[Token],
+    width: f64,
+    height: f64,
+    renders: &HashMap<i64, Value>,
+    splits_from: Option<&TextLayout>,
+) -> PyResult<TextLayout> {
+    let rel = Rel::of(vm);
     let width = width.min(32767.);
     let height = height.min(32767.);
-    let mut cps = { let v = sty(vm, text, "slow_cps")?; if py::is_none(&v) || matches!(v, Value::Bool(true)) { text_cps_pref(vm) } else { py::f64_of(vm, &v)? } };
+    let mut cps = {
+        let v = sty(vm, text, "slow_cps")?;
+        if py::is_none(&v) || matches!(v, Value::Bool(true)) {
+            text_cps_pref(vm)
+        } else {
+            py::f64_of(vm, &v)?
+        }
+    };
     let mul = sty(vm, text, "slow_cps_multiplier")?;
     if !py::is_none(&mul) {
         cps *= py::f64_of(vm, &mul)?;
@@ -1123,8 +914,22 @@ fn build_layout(vm: &mut Vm, text: &Value, tokens: &[Token], width: f64, height:
     let first_indent0 = opt_f(vm, text, "first_indent")?;
     let rest_indent = opt_f(vm, text, "rest_indent")?;
     let mut first_indent = first_indent0;
-    let language = { let v = sty(vm, text, "language")?; if py::is_none(&v) { "unicode".to_owned() } else { py::string(vm, &v)? } };
-    let layout_mode = { let v = sty(vm, text, "layout")?; if py::is_none(&v) { "tex".to_owned() } else { py::string(vm, &v)? } };
+    let language = {
+        let v = sty(vm, text, "language")?;
+        if py::is_none(&v) {
+            "unicode".to_owned()
+        } else {
+            py::string(vm, &v)?
+        }
+    };
+    let layout_mode = {
+        let v = sty(vm, text, "layout")?;
+        if py::is_none(&v) {
+            "tex".to_owned()
+        } else {
+            py::string(vm, &v)?
+        }
+    };
     let line_spacing = opt_f(vm, text, "line_spacing")?;
     let line_leading = opt_f(vm, text, "line_leading")?;
     let ruby_line_leading = opt_f(vm, text, "ruby_line_leading")?;
@@ -1136,10 +941,15 @@ fn build_layout(vm: &mut Vm, text: &Value, tokens: &[Token], width: f64, height:
     let mut y = 0f64;
     let mut gt = 0f64;
     let mut pending = false;
-    let mut started = !seg.paragraphs.iter().flatten().any(|p| matches!(p, Piece::Start));
+    let mut started = !seg
+        .paragraphs
+        .iter()
+        .flatten()
+        .any(|p| matches!(p, Piece::Start));
     let mut ended = false;
     let mut end_index = None;
-    let split_info: Option<Vec<u8>> = splits_from.map(|l| l.glyphs.iter().map(|g| g.split).collect());
+    let split_info: Option<Vec<u8>> =
+        splits_from.map(|l| l.glyphs.iter().map(|g| g.split).collect());
     let mut split_cursor = 0usize;
     for para in seg.paragraphs {
         let base = glyphs.len();
@@ -1162,18 +972,27 @@ fn build_layout(vm: &mut Vm, text: &Value, tokens: &[Token], width: f64, height:
                 split_cursor += 1;
             }
         } else {
+            use super::textsupport as ts;
             match language.as_str() {
-                "unicode" | "eastasian" | "thaic90" | "japanese-loose" | "japanese-normal" | "japanese-strict" => annotate_unicode(&mut pg, false),
-                "korean-with-spaces" => annotate_unicode(&mut pg, true),
-                "western" => annotate_western(&mut pg),
-                "anywhere" => annotate_anywhere(&mut pg),
+                "unicode" | "eastasian" | "thaic90" => {
+                    ts::annotate_unicode(rel, &mut pg, false, 0)
+                }
+                "korean-with-spaces" => ts::annotate_unicode(rel, &mut pg, true, 0),
+                "japanese-loose" => ts::annotate_unicode(rel, &mut pg, false, 1),
+                "japanese-normal" => ts::annotate_unicode(rel, &mut pg, false, 2),
+                "japanese-strict" => ts::annotate_unicode(rel, &mut pg, false, 3),
+                "western" => ts::annotate_western(&mut pg),
+                "anywhere" if rel.since_pair(5, 0) => ts::annotate_anywhere(&mut pg),
                 other => return Err(py::error(vm, format!("Unknown language: {other}"))),
             }
+            let tex = super::texwrap::linebreak_tex;
             match layout_mode.as_str() {
-                "tex" => linebreak_tex(&mut pg, w - first_indent, w - rest_indent, false),
-                "subtitle" | "tex-subtitle" => linebreak_tex(&mut pg, w - first_indent, w - rest_indent, true),
-                "greedy" => linebreak_greedy(&mut pg, w - first_indent, w - rest_indent),
-                "nobreak" => pg.iter_mut().for_each(|g| g.split = SPLIT_NONE),
+                "tex" => tex(rel, &mut pg, w - first_indent, w - rest_indent, false),
+                "subtitle" | "tex-subtitle" => {
+                    tex(rel, &mut pg, w - first_indent, w - rest_indent, true)
+                }
+                "greedy" => ts::linebreak_greedy(&mut pg, w - first_indent, w - rest_indent),
+                "nobreak" => ts::linebreak_nobreak(&mut pg),
                 other => return Err(py::error(vm, format!("Unknown layout: {other}"))),
             }
         }
@@ -1203,9 +1022,17 @@ fn build_layout(vm: &mut Vm, text: &Value, tokens: &[Token], width: f64, height:
                 g.time = gt;
             }
         }
-        let wline = place_horizontal(&mut pg, first_indent, rest_indent);
+        let wline = super::textsupport::place_horizontal(&mut pg, 0., first_indent, rest_indent);
         maxx = maxx.max(wline);
-        let (mut l, ny) = place_vertical(&mut pg, base, y, line_spacing, line_leading, ruby_line_leading);
+        let (mut l, ny) = super::textsupport::place_vertical(
+            rel,
+            &mut pg,
+            base,
+            y,
+            line_spacing,
+            line_leading,
+            ruby_line_leading,
+        );
         y = ny;
         glyphs.extend(pg);
         lines.append(&mut l);
@@ -1229,7 +1056,7 @@ fn build_layout(vm: &mut Vm, text: &Value, tokens: &[Token], width: f64, height:
     maxx = maxx.ceil();
     let text_align = opt_f(vm, text, "text_align")?;
     let justify = style_b(vm, text, "justify")?;
-    align_and_justify(&mut glyphs, &lines, maxx, text_align, justify);
+    super::textsupport::align_and_justify(&mut glyphs, &lines, maxx, text_align, justify);
     let adjust = sty(vm, text, "adjust_spacing")?;
     if let (Some(sf), true) = (splits_from, ops::truthy(vm, &adjust)?) {
         let tx = sf.size.0 - sf.xborder;
@@ -1240,12 +1067,7 @@ fn build_layout(vm: &mut Vm, text: &Value, tokens: &[Token], width: f64, height:
             Some("vertical") => dx = 0.,
             _ => {}
         }
-        if maxx > 0. && y > 0. {
-            for g in glyphs.iter_mut() {
-                g.x += (dx * g.x / maxx).trunc();
-                g.y += (dy * g.y / y).trunc();
-            }
-        }
+        super::textsupport::adjust_glyph_spacing(rel, &mut glyphs, &mut lines, dx, dy, maxx, y);
         maxx = tx;
         y = ty;
     }
@@ -1254,41 +1076,31 @@ fn build_layout(vm: &mut Vm, text: &Value, tokens: &[Token], width: f64, height:
         let ro = py::get(vm, &rs, "yoffset")?;
         let ars = sty(vm, text, "altruby_style")?;
         let ao = py::get(vm, &ars, "yoffset")?;
-        let ro = if py::is_none(&ro) { 0. } else { py::f64_of(vm, &ro)? };
-        let ao = if py::is_none(&ao) { 0. } else { py::f64_of(vm, &ao)? };
-        place_ruby(&mut glyphs, ro, ao);
+        let ro = if py::is_none(&ro) {
+            0.
+        } else {
+            py::f64_of(vm, &ro)?
+        };
+        let ao = if py::is_none(&ao) {
+            0.
+        } else {
+            py::f64_of(vm, &ao)?
+        };
+        let surf = (maxx + xborder, y + yborder);
+        super::textsupport::place_ruby(rel, &mut glyphs, ro, ao, surf)
+            .map_err(|e| py::error(vm, e))?;
     }
-    let baseline = glyphs.iter().find(|g| g.ascent != 0.).map(|g| g.y + yoffset).unwrap_or(0.);
-    let mut max_time = 0f64;
-    for l in lines.iter_mut() {
-        let m = glyphs[l.glyphs.clone()].iter().map(|g| g.time).fold(0f64, f64::max);
-        l.max_time = m;
-        max_time = max_time.max(m);
-    }
-    let mut hyperlinks = Vec::new();
-    if !seg.hyperlink_targets.is_empty() {
-        for l in &lines {
-            let mut cur = 0i64;
-            let (mut minx, mut mx, mut ht) = (1e6f64, 0f64, 86400f64);
-            for g in &glyphs[l.glyphs.clone()] {
-                if cur != 0 && g.hyperlink != cur {
-                    hyperlinks.push((cur, minx, l.y, mx - minx, l.height, ht));
-                    minx = 1e6;
-                    mx = 0.;
-                    ht = 86400.;
-                }
-                cur = g.hyperlink;
-                if cur != 0 {
-                    minx = minx.min(g.x);
-                    mx = mx.max(g.x + g.width.trunc());
-                    ht = ht.min(g.time);
-                }
-            }
-            if cur != 0 {
-                hyperlinks.push((cur, minx, l.y, mx - minx, l.height, ht));
-            }
-        }
-    }
+    let baseline = glyphs
+        .iter()
+        .find(|g| g.ascent != 0.)
+        .map(|g| g.y + yoffset)
+        .unwrap_or(0.);
+    let max_time = super::textsupport::max_times(&glyphs, &mut lines);
+    let hyperlinks = if seg.hyperlink_targets.is_empty() {
+        Vec::new()
+    } else {
+        super::textsupport::hyperlink_areas(&glyphs, &lines)
+    };
     Ok(TextLayout {
         width,
         height,
@@ -1346,7 +1158,15 @@ pub fn text_tick() {
 
 // Rendering ------------------------------------------------------------------------------------
 
-fn glyph_json(g: &G, seg: &Seg, x: f64, y: f64, override_color: Option<[u8; 4]>, outline: f64, default_color: [u8; 4]) -> Option<J> {
+fn glyph_json(
+    g: &G,
+    seg: &Seg,
+    x: f64,
+    y: f64,
+    override_color: Option<[u8; 4]>,
+    outline: f64,
+    default_color: [u8; 4],
+) -> Option<J> {
     if g.ch == '\0' || g.ch == '\u{fffc}' || g.ch == '\u{200b}' {
         return None;
     }
@@ -1358,8 +1178,17 @@ fn glyph_json(g: &G, seg: &Seg, x: f64, y: f64, override_color: Option<[u8; 4]>,
                 return None;
             }
             let [sx, sy, sw, sh] = cell.rect;
-            let rect = [x + cell.offset[0] * scale, y - g.ascent + cell.offset[1] * scale, sw * scale, sh * scale];
-            let tint = if override_color.is_some() { color } else { [255; 4] };
+            let rect = [
+                x + cell.offset[0] * scale,
+                y - g.ascent + cell.offset[1] * scale,
+                sw * scale,
+                sh * scale,
+            ];
+            let tint = if override_color.is_some() {
+                color
+            } else {
+                [255; 4]
+            };
             Some(json!({
                 "character": g.ch.to_string(),
                 "baseline": [x as f32, y as f32],
@@ -1371,7 +1200,9 @@ fn glyph_json(g: &G, seg: &Seg, x: f64, y: f64, override_color: Option<[u8; 4]>,
                 }
             }))
         }
-        Some(Font::Outline { alias, size, bold, .. }) => {
+        Some(Font::Outline {
+            alias, size, bold, ..
+        }) => {
             let mut style = serde_json::Map::new();
             if seg.underline != 0 {
                 style.insert("underline".into(), json!(true));
@@ -1404,7 +1235,14 @@ fn glyph_json(g: &G, seg: &Seg, x: f64, y: f64, override_color: Option<[u8; 4]>,
     }
 }
 
-fn render_layout(vm: &mut Vm, this: &Value, layout: &TextLayout, rv: &RenderData, st: f64, slow: bool) -> PyResult<Vec<render::Blit>> {
+fn render_layout(
+    vm: &mut Vm,
+    this: &Value,
+    layout: &TextLayout,
+    rv: &RenderData,
+    st: f64,
+    slow: bool,
+) -> PyResult<Vec<render::Blit>> {
     let mut blits = Vec::new();
     let default_color = [255u8, 255, 255, 255];
     let (w, h) = layout.size;
@@ -1420,21 +1258,57 @@ fn render_layout(vm: &mut Vm, this: &Value, layout: &TextLayout, rv: &RenderData
             if slow && g.time > st {
                 continue;
             }
-            let Piece::Text(seg, _) = &layout.pieces[g.piece] else { continue };
-            let oc = if color.is_some() { seg.outline_color.or(*color) } else { None };
-            if let Some(j) = glyph_json(g, seg, g.x + layout.xoffset + xo, g.y + layout.yoffset + yo, oc, *o, default_color) {
+            let Piece::Text(seg, _) = &layout.pieces[g.piece] else {
+                continue;
+            };
+            let oc = if color.is_some() {
+                seg.outline_color.or(*color)
+            } else {
+                None
+            };
+            if let Some(j) = glyph_json(
+                g,
+                seg,
+                g.x + layout.xoffset + xo,
+                g.y + layout.yoffset + yo,
+                oc,
+                *o,
+                default_color,
+            ) {
                 glyphs.push(j);
             }
         }
         if glyphs.is_empty() {
             continue;
         }
-        let first_font = glyphs.iter().find_map(|g| g.get("font").and_then(|f| f.as_str()).map(str::to_owned)).unwrap_or_else(|| "default".into());
-        let first_size = glyphs.iter().find_map(|g| g.get("size").and_then(|s| s.as_f64())).unwrap_or(22.);
+        let first_font = glyphs
+            .iter()
+            .find_map(|g| g.get("font").and_then(|f| f.as_str()).map(str::to_owned))
+            .unwrap_or_else(|| "default".into());
+        let first_size = glyphs
+            .iter()
+            .find_map(|g| g.get("size").and_then(|s| s.as_f64()))
+            .unwrap_or(22.);
         let run = json!({"kind": "glyph_run", "font": first_font, "size": first_size as f32, "color": default_color, "glyphs": glyphs});
-        let t = new_texture(vm, Texture { kind: TexKind::Glyphs(Rc::new(run)), width: w.max(1.), height: h.max(1.), crop: None, full: None, opaque: false });
+        let t = new_texture(
+            vm,
+            Texture {
+                kind: TexKind::Glyphs(Rc::new(run)),
+                width: w.max(1.),
+                height: h.max(1.),
+                crop: None,
+                full: None,
+                opaque: false,
+            },
+        );
         let source = render::source_of(vm, &t)?;
-        blits.push(render::Blit { source, x: 0., y: 0., focus: false, main: true });
+        blits.push(render::Blit {
+            source,
+            x: 0.,
+            y: 0.,
+            focus: false,
+            main: true,
+        });
     }
     let _ = (this, rv);
     Ok(blits)
@@ -1443,13 +1317,35 @@ fn render_layout(vm: &mut Vm, this: &Value, layout: &TextLayout, rv: &RenderData
 // Text displayable ------------------------------------------------------------------------------
 
 fn text_items(vm: &mut Vm, v: &Value) -> PyResult<Vec<Value>> {
-    if matches!(v.payload(), Some(crysirror_python::Payload::List(_))) { py::items(vm, v) } else { Ok(vec![v.clone()]) }
+    if matches!(v.payload(), Some(crysirror_python::Payload::List(_))) {
+        py::items(vm, v)
+    } else {
+        Ok(vec![v.clone()])
+    }
 }
 
 fn t_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["text", "slow", "scope", "substitute", "slow_done", "replaces", "mask", "tokenized"];
-    let mut vals = vec![Value::None, Value::None, Value::None, Value::None, Value::None, Value::None, Value::None, Value::Bool(false)];
+    let names = [
+        "text",
+        "slow",
+        "scope",
+        "substitute",
+        "slow_done",
+        "replaces",
+        "mask",
+        "tokenized",
+    ];
+    let mut vals = vec![
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::Bool(false),
+    ];
     for (i, v) in args[1..].iter().enumerate().take(names.len()) {
         vals[i] = v.clone();
     }
@@ -1467,7 +1363,10 @@ fn t_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let items = text_items(vm, &text)?;
         let mut ok = true;
         for i in &items {
-            if i.as_str().is_none() && !super::core::is_displayable(vm, i) && ops::bytes_of(i).is_none() {
+            if i.as_str().is_none()
+                && !super::core::is_displayable(vm, i)
+                && ops::bytes_of(i).is_none()
+            {
                 ok = false;
             }
         }
@@ -1486,9 +1385,19 @@ fn t_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     py::set(vm, this, "text", Value::None)?;
     py::set(vm, this, "mask", vals[6].clone())?;
     py::set(vm, this, "tokenized", Value::Bool(tokenized))?;
-    vm.call_method(this, "set_text", vec![text, vals[2].clone(), vals[3].clone()])?;
-    let less = py::import_attr(vm, "renpy.game", "less_updates").map(|v| ops::truthy(vm, &v).unwrap_or(false)).unwrap_or(false);
-    let slow = if less { Value::Bool(false) } else { vals[1].clone() };
+    vm.call_method(
+        this,
+        "set_text",
+        vec![text, vals[2].clone(), vals[3].clone()],
+    )?;
+    let less = py::import_attr(vm, "renpy.game", "less_updates")
+        .map(|v| ops::truthy(vm, &v).unwrap_or(false))
+        .unwrap_or(false);
+    let slow = if less {
+        Value::Bool(false)
+    } else {
+        vals[1].clone()
+    };
     py::set(vm, this, "slow", slow.clone())?;
     py::set(vm, this, "slow_done", vals[4].clone())?;
     py::set(vm, this, "slow_done_time", Value::None)?;
@@ -1506,7 +1415,12 @@ fn t_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let s = py::get_or_none(vm, this, "slow")?;
     let dup = ops::truthy(vm, &s)?;
     py::set(vm, this, "_duplicatable", Value::Bool(dup))?;
-    py::set(vm, this, "displayable_offsets", vm.types.new_list(Vec::new()))?;
+    py::set(
+        vm,
+        this,
+        "displayable_offsets",
+        vm.types.new_list(Vec::new()),
+    )?;
     Ok(Value::None)
 }
 
@@ -1611,9 +1525,12 @@ fn t_scope(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 fn in_init_phase(vm: &mut Vm) -> bool {
-    let ctx = py::import_attr(vm, "renpy.game", "context").and_then(|f| vm.call(&f, Vec::new(), Vec::new()));
+    let ctx = py::import_attr(vm, "renpy.game", "context")
+        .and_then(|f| vm.call(&f, Vec::new(), Vec::new()));
     match ctx {
-        Ok(c) if !py::is_none(&c) => py::get_or_none(vm, &c, "init_phase").map(|v| ops::truthy(vm, &v).unwrap_or(false)).unwrap_or(false),
+        Ok(c) if !py::is_none(&c) => py::get_or_none(vm, &c, "init_phase")
+            .map(|v| ops::truthy(vm, &v).unwrap_or(false))
+            .unwrap_or(false),
         _ => true,
     }
 }
@@ -1631,14 +1548,24 @@ fn t_set_text(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let text = arg_or(args, kw, 1, "text", Value::None);
     let scope = arg_or(args, kw, 2, "scope", Value::None);
     let substitute = arg_or(args, kw, 3, "substitute", Value::Bool(false));
-    let update = match arg(args, kw, 4, "update") { Some(v) => ops::truthy(vm, v)?, None => true };
+    let update = match arg(args, kw, 4, "update") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => true,
+    };
     let locked = py::get_or_none(vm, this, "locked")?;
     if ops::truthy(vm, &locked)? {
         return Ok(Value::Bool(false));
     }
-    let lang = if in_init_phase(vm) { Value::None } else { pref_language(vm) };
+    let lang = if in_init_phase(vm) {
+        Value::None
+    } else {
+        pref_language(vm)
+    };
     py::set(vm, this, "language", lang)?;
-    let tokenized = { let v = py::get_or_none(vm, this, "tokenized")?; ops::truthy(vm, &v)? };
+    let tokenized = {
+        let v = py::get_or_none(vm, this, "tokenized")?;
+        ops::truthy(vm, &v)?
+    };
     if tokenized {
         let old = py::get_or_none(vm, this, "text")?;
         if update && !ops::eq(vm, &old, &text)? {
@@ -1660,13 +1587,19 @@ fn t_set_text(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     for i in items {
         let mut i = i;
         if i.as_str().is_some() && !matches!(substitute, Value::Bool(false)) {
-            let r = vm.call(&sub_f, vec![i.clone(), scope.clone(), substitute.clone()], Vec::new())?;
+            let r = vm.call(
+                &sub_f,
+                vec![i.clone(), scope.clone(), substitute.clone()],
+                Vec::new(),
+            )?;
             let r = py::items(vm, &r)?;
             i = r[0].clone();
             uses = uses || ops::truthy(vm, &r[1])?;
         }
         if let Some(b) = ops::bytes_of(&i) {
-            i = vm.types.new_string(String::from_utf8_lossy(&b).into_owned());
+            i = vm
+                .types
+                .new_string(String::from_utf8_lossy(&b).into_owned());
         }
         new_text.push(i);
     }
@@ -1697,7 +1630,14 @@ fn t_per_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let tp = py::get_or_none(vm, this, "text_parameter")?;
         let sub = py::get_or_none(vm, this, "substitute")?;
         let f = py::get(vm, this, "set_text")?;
-        vm.call(&f, vec![tp], vec![("substitute".into(), sub), ("update".into(), Value::Bool(true))])?;
+        vm.call(
+            &f,
+            vec![tp],
+            vec![
+                ("substitute".into(), sub),
+                ("update".into(), Value::Bool(true)),
+            ],
+        )?;
     }
     if style_b(vm, this, "slow_abortable")? {
         caches().borrow_mut().slow_text.push(this.clone());
@@ -1706,13 +1646,23 @@ fn t_per_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn t_set_ctc(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    py::set(vm, &args[0], "ctc", args.get(1).cloned().unwrap_or(Value::None))?;
+    py::set(
+        vm,
+        &args[0],
+        "ctc",
+        args.get(1).cloned().unwrap_or(Value::None),
+    )?;
     py::set(vm, &args[0], "dirty", Value::Bool(true))?;
     Ok(Value::None)
 }
 
 fn t_set_last_ctc(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    py::set(vm, &args[0], "last_ctc", args.get(1).cloned().unwrap_or(Value::None))?;
+    py::set(
+        vm,
+        &args[0],
+        "last_ctc",
+        args.get(1).cloned().unwrap_or(Value::None),
+    )?;
     py::set(vm, &args[0], "dirty", Value::Bool(true))?;
     Ok(Value::None)
 }
@@ -1726,7 +1676,10 @@ fn t_update(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     py::set(vm, this, "dirty", Value::Bool(false))?;
     kill_layout(this.id());
-    let tokenized = { let v = py::get_or_none(vm, this, "tokenized")?; ops::truthy(vm, &v)? };
+    let tokenized = {
+        let v = py::get_or_none(vm, this, "tokenized")?;
+        ops::truthy(vm, &v)?
+    };
     let mut tokens = if !tokenized {
         let text = py::get(vm, this, "text")?;
         let mut items = text_items(vm, &text)?;
@@ -1746,8 +1699,17 @@ fn t_update(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         if !py::is_none(&start) {
             let s = py::int(vm, &start)? as usize;
             let end = py::get_or_none(vm, this, "end")?;
-            let first: Vec<char> = items.first().and_then(|v| v.as_str()).unwrap_or("").chars().collect();
-            let e = if py::is_none(&end) { first.len() } else { (py::int(vm, &end)? as usize).min(first.len()) };
+            let first: Vec<char> = items
+                .first()
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .chars()
+                .collect();
+            let e = if py::is_none(&end) {
+                first.len()
+            } else {
+                (py::int(vm, &end)? as usize).min(first.len())
+            };
             let s = s.min(first.len());
             let mut start_string: String = first[..s].iter().collect();
             let mid: String = first[s..e].iter().collect();
@@ -1812,7 +1774,9 @@ fn t_update(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             _ => {}
         }
     }
-    let focusable = tokens.iter().any(|t| matches!(t, Token::Tag(s) if s.starts_with("a=")));
+    let focusable = tokens
+        .iter()
+        .any(|t| matches!(t, Token::Tag(s) if s.starts_with("a=")));
     let tp = tokens_to_py(vm, &tokens);
     py::set(vm, this, "tokens", tp)?;
     let mut uniq: Vec<Value> = Vec::new();
@@ -1840,7 +1804,10 @@ fn apply_custom_tags(vm: &mut Vm, tokens: Vec<Token>) -> PyResult<Vec<Token>> {
                 rv.push(Token::Text(py::string(vm, &r)?));
             }
             Token::Tag(text) => {
-                let (tag, value) = text.split_once('=').map(|(a, b)| (a.to_owned(), b.to_owned())).unwrap_or((text.clone(), String::new()));
+                let (tag, value) = text
+                    .split_once('=')
+                    .map(|(a, b)| (a.to_owned(), b.to_owned()))
+                    .unwrap_or((text.clone(), String::new()));
                 let k = vm.types.new_str(&tag);
                 let mut f = vm.call_method(&ct, "get", vec![k.clone(), Value::None])?;
                 let mut self_closing = false;
@@ -1928,21 +1895,64 @@ fn t_kill_layout(_: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn layout_value(vm: &mut Vm, l: &TextLayout) -> PyResult<Value> {
     let ns = py::import_attr(vm, "types", "SimpleNamespace")?;
-    let size = vm.types.new_tuple(vec![Value::Float(l.size.0), Value::Float(l.size.1)]);
+    let size = vm
+        .types
+        .new_tuple(vec![Value::Float(l.size.0), Value::Float(l.size.1)]);
     let targets = vm.types.new_dict();
     for (i, t) in l.hyperlink_targets.iter().enumerate() {
         ops::setitem(vm, &targets, Value::Int(i as i64 + 1), t.clone())?;
     }
-    vm.call(&ns, Vec::new(), vec![
-        ("size".into(), size),
-        ("width".into(), Value::Float(l.width)),
-        ("height".into(), Value::Float(l.height)),
-        ("baseline".into(), Value::Float(l.baseline)),
-        ("max_time".into(), Value::Float(l.max_time)),
-        ("hyperlink_targets".into(), targets),
-        ("xborder".into(), Value::Float(l.xborder)),
-        ("yborder".into(), Value::Float(l.yborder)),
-    ])
+    vm.call(
+        &ns,
+        Vec::new(),
+        vec![
+            ("size".into(), size),
+            ("width".into(), Value::Float(l.width)),
+            ("height".into(), Value::Float(l.height)),
+            ("baseline".into(), Value::Float(l.baseline)),
+            ("max_time".into(), Value::Float(l.max_time)),
+            ("hyperlink_targets".into(), targets),
+            ("xborder".into(), Value::Float(l.xborder)),
+            ("yborder".into(), Value::Float(l.yborder)),
+        ],
+    )
+}
+
+/// `Layout(text, width, height, renders, size_only, splits_from)` built
+/// from Python: runs the same layout as `Text.render` and exposes its
+/// fields on `this`. The layout joins the text's layout cache entry, which
+/// a later `splits_from` resolves through `_text_id`.
+pub fn fill_layout_object(
+    vm: &mut Vm,
+    this: &Value,
+    text: &Value,
+    width: f64,
+    height: f64,
+    renders: &Value,
+    splits_from: &Value,
+) -> PyResult<()> {
+    ensure_updated(vm, text)?;
+    let tokens = get_tokens(vm, text)?;
+    let mut map = HashMap::new();
+    if !py::is_none(renders) {
+        for k in py::items(vm, renders)? {
+            let r = ops::getitem(vm, renders, k.clone())?;
+            map.insert(k.id(), r);
+        }
+    }
+    let from = match py::get_opt(vm, splits_from, "_text_id")? {
+        Some(Value::Int(id)) => caches().borrow().layouts.get(&id).cloned(),
+        _ => None,
+    };
+    let l = build_layout(vm, text, &tokens, width, height, &map, from.as_deref())?;
+    let ns = layout_value(vm, &l)?;
+    for n in ["size", "width", "height", "baseline", "max_time", "hyperlink_targets", "xborder", "yborder"] {
+        let v = py::get(vm, &ns, n)?;
+        py::set(vm, this, n, v)?;
+    }
+    py::set(vm, this, "_text_id", Value::Int(text.id()))?;
+    caches().borrow_mut().layouts.insert(text.id(), Rc::new(l));
+    Ok(())
 }
 
 fn t_get_layout(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -1954,7 +1964,11 @@ fn t_get_layout(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn t_get_virtual_layout(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let l = caches().borrow().virtual_layouts.get(&args[0].id()).cloned();
+    let l = caches()
+        .borrow()
+        .virtual_layouts
+        .get(&args[0].id())
+        .cloned();
     match l {
         Some(l) => layout_value(vm, &l),
         None => Ok(Value::None),
@@ -1991,11 +2005,17 @@ fn t_get_placement(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let f = py::get(vm, &Value::Obj(d), "get_placement")?;
     let rv = vm.call(&f, vec![this.clone()], Vec::new())?;
     let mut p = py::items(vm, &rv)?;
-    let is_baseline = p.get(3).is_some_and(|v| v.obj().is_some_and(|o| o.class_name() == "Sentinel") || v.as_str() == Some("baseline"));
+    let is_baseline = p.get(3).is_some_and(|v| {
+        v.obj().is_some_and(|o| o.class_name() == "Sentinel") || v.as_str() == Some("baseline")
+    });
     if !is_baseline {
         return Ok(rv);
     }
-    let cached = caches().borrow().virtual_layouts.get(&this.id()).map(|l| l.baseline);
+    let cached = caches()
+        .borrow()
+        .virtual_layouts
+        .get(&this.id())
+        .map(|l| l.baseline);
     let baseline = match cached {
         Some(b) => b,
         None => {
@@ -2029,7 +2049,10 @@ fn current_target(vm: &mut Vm, this: &Value) -> PyResult<Option<Value>> {
 
 fn t_focus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let default = match arg(args, kw, 1, "default") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let default = match arg(args, kw, 1, "default") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     let target = current_target(vm, this)?;
     let had = caches().borrow().layouts.contains_key(&this.id());
     kill_layout(this.id());
@@ -2055,7 +2078,10 @@ fn t_focus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn t_unfocus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let default = match arg(args, kw, 1, "default") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let default = match arg(args, kw, 1, "default") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     kill_layout(this.id());
     render::redraw(vm, this, 0.);
     let funcs = hyperlink_funcs(vm, this)?;
@@ -2072,7 +2098,11 @@ fn t_hyperlink_sensitive(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> 
     if funcs.len() < 4 {
         return Ok(Value::Bool(true));
     }
-    vm.call(&funcs[3], vec![args.get(1).cloned().unwrap_or(Value::None)], Vec::new())
+    vm.call(
+        &funcs[3],
+        vec![args.get(1).cloned().unwrap_or(Value::None)],
+        Vec::new(),
+    )
 }
 
 fn map_event(vm: &mut Vm, ev: &Value, name: &str) -> PyResult<bool> {
@@ -2083,7 +2113,9 @@ fn map_event(vm: &mut Vm, ev: &Value, name: &str) -> PyResult<bool> {
 }
 
 fn ignore_event(vm: &mut Vm) -> crysirror_python::PyErr {
-    match py::import_attr(vm, "renpy.display.core", "IgnoreEvent").and_then(|c| vm.call(&c, Vec::new(), Vec::new())) {
+    match py::import_attr(vm, "renpy.display.core", "IgnoreEvent")
+        .and_then(|c| vm.call(&c, Vec::new(), Vec::new()))
+    {
         Ok(e) => crysirror_python::PyErr::Exc(e.obj().cloned().unwrap()),
         Err(e) => e,
     }
@@ -2096,7 +2128,10 @@ fn t_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let y = py::f64_of(vm, &args.get(3).cloned().unwrap_or(Value::Int(0)))?;
     let st = args.get(4).cloned().unwrap_or(Value::Int(0));
     let slow_done = py::get_or_none(vm, this, "slow_done")?;
-    let slow = { let v = py::get_or_none(vm, this, "slow")?; ops::truthy(vm, &v)? };
+    let slow = {
+        let v = py::get_or_none(vm, this, "slow")?;
+        ops::truthy(vm, &v)?
+    };
     if !py::is_none(&slow_done) && !slow {
         if super::events::is_type(vm, &ev, super::events::TIMEEVENT)? {
             let m = py::get_or_none(vm, &ev, "modal")?;
@@ -2131,7 +2166,16 @@ fn t_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     for o in py::items(vm, &offs).unwrap_or_default() {
         let o = py::items(vm, &o)?;
         let (xo, yo) = (py::f64_of(vm, &o[1])?, py::f64_of(vm, &o[2])?);
-        let rv = vm.call_method(&o[0], "event", vec![ev.clone(), Value::Float(x - xo), Value::Float(y - yo), st.clone()])?;
+        let rv = vm.call_method(
+            &o[0],
+            "event",
+            vec![
+                ev.clone(),
+                Value::Float(x - xo),
+                Value::Float(y - yo),
+                st.clone(),
+            ],
+        )?;
         if !py::is_none(&rv) {
             return Ok(rv);
         }
@@ -2168,12 +2212,21 @@ fn t_size(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let renders = child_renders(vm, this, width)?;
     let tokens = get_tokens(vm, this)?;
     let l = build_layout(vm, this, &tokens, width, height, &renders, None)?;
-    Ok(vm.types.new_tuple(vec![Value::Float(l.size.0), Value::Float(l.size.1)]))
+    Ok(vm
+        .types
+        .new_tuple(vec![Value::Float(l.size.0), Value::Float(l.size.1)]))
 }
 
 fn t_get_time(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let _ = vm;
-    Ok(Value::Float(caches().borrow().layouts.get(&args[0].id()).map(|l| l.max_time).unwrap_or(0.)))
+    Ok(Value::Float(
+        caches()
+            .borrow()
+            .layouts
+            .get(&args[0].id())
+            .map(|l| l.max_time)
+            .unwrap_or(0.),
+    ))
 }
 
 fn t_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -2189,7 +2242,10 @@ fn t_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let s = ops::truthy(vm, &sc)?;
         py::set(vm, this, "slow", Value::Bool(s))?;
     }
-    let mut slow = { let v = py::get_or_none(vm, this, "slow")?; ops::truthy(vm, &v)? };
+    let mut slow = {
+        let v = py::get_or_none(vm, this, "slow")?;
+        ops::truthy(vm, &v)?
+    };
     let sdt = py::get_or_none(vm, this, "slow_done_time")?;
     if !slow && !py::is_none(&sdt) {
         py::set(vm, this, "slow_done_time", Value::Float(st))?;
@@ -2198,21 +2254,32 @@ fn t_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let id = this.id();
     let tokens = get_tokens(vm, this)?;
     let cached_v = caches().borrow().virtual_layouts.get(&id).cloned();
-    let virtual_layout = match cached_v.filter(|l| l.width == width && l.height == height && !l.pending) {
-        Some(l) => l,
-        None => {
-            let renders = child_renders(vm, this, width)?;
-            let l = Rc::new(build_layout(vm, this, &tokens, width, height, &renders, None)?);
-            caches().borrow_mut().virtual_layouts.insert(id, l.clone());
-            l
-        }
-    };
+    let virtual_layout =
+        match cached_v.filter(|l| l.width == width && l.height == height && !l.pending) {
+            Some(l) => l,
+            None => {
+                let renders = child_renders(vm, this, width)?;
+                let l = Rc::new(build_layout(
+                    vm, this, &tokens, width, height, &renders, None,
+                )?);
+                caches().borrow_mut().virtual_layouts.insert(id, l.clone());
+                l
+            }
+        };
     let cached = caches().borrow().layouts.get(&id).cloned();
     let layout = match cached.filter(|l| l.width == width && l.height == height && !l.pending) {
         Some(l) => l,
         None => {
             let renders = child_renders(vm, this, width)?;
-            let l = Rc::new(build_layout(vm, this, &tokens, width, height, &renders, Some(&virtual_layout))?);
+            let l = Rc::new(build_layout(
+                vm,
+                this,
+                &tokens,
+                width,
+                height,
+                &renders,
+                Some(&virtual_layout),
+            )?);
             caches().borrow_mut().layouts.insert(id, l.clone());
             l
         }
@@ -2235,7 +2302,9 @@ fn t_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     // Inline displayables.
     let mut offsets = Vec::new();
     for g in &layout.glyphs {
-        let Piece::Disp(_, d, _, _) = &layout.pieces[g.piece] else { continue };
+        let Piece::Disp(_, d, _, _) = &layout.pieces[g.piece] else {
+            continue;
+        };
         if g.ch != '\u{fffc}' {
             continue;
         }
@@ -2243,7 +2312,11 @@ fn t_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             continue;
         }
         let sdt = py::get_or_none(vm, this, "slow_done_time")?;
-        let cst = if py::is_none(&sdt) { st - g.time } else { st - py::f64_of(vm, &sdt)?.min(g.time) };
+        let cst = if py::is_none(&sdt) {
+            st - g.time
+        } else {
+            st - py::f64_of(vm, &sdt)?.min(g.time)
+        };
         let pl = vm.call_method(d, "get_placement", Vec::new())?;
         let (pxo, pyo) = super::core::place(vm, &pl, g.width, g.ascent, g.width, g.line_spacing)?;
         let xo = g.x + pxo + layout.xoffset;
@@ -2251,13 +2324,27 @@ fn t_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let size = opt_f(vm, this, "size")?;
         let cr = render::render(vm, d, width, size, cst, at)?;
         let source = render::source_of(vm, &cr)?;
-        rv.children.push(render::Blit { source, x: xo, y: yo, focus: true, main: true });
-        offsets.push(vm.types.new_tuple(vec![d.clone(), Value::Float(xo), Value::Float(yo)]));
+        rv.children.push(render::Blit {
+            source,
+            x: xo,
+            y: yo,
+            focus: true,
+            main: true,
+        });
+        offsets.push(
+            vm.types
+                .new_tuple(vec![d.clone(), Value::Float(xo), Value::Float(yo)]),
+        );
     }
     py::set(vm, this, "displayable_offsets", vm.types.new_list(offsets))?;
     for (link, hx, hy, hw, hh, valid) in &layout.hyperlinks {
         if st >= *valid || !slow {
-            rv.focuses.push(render::Focus { d: this.clone(), arg: Value::Int(*link), rect: Some([hx + layout.xoffset, hy + layout.yoffset, *hw, *hh]), mask: None });
+            rv.focuses.push(render::Focus {
+                d: this.clone(),
+                arg: Value::Int(*link),
+                rect: Some([hx + layout.xoffset, hy + layout.yoffset, *hw, *hh]),
+                mask: None,
+            });
         }
     }
     if slow {
@@ -2267,10 +2354,20 @@ fn t_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if vertical {
         let (rw, rh) = super::layout::size(&out);
         let mut vd = RenderData::new(rh, rw);
-        vd.forward = Some(Mat([0., 1., 0., 0., -1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.]));
-        vd.reverse = Some(Mat([0., -1., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.]));
+        vd.forward = Some(Mat([
+            0., 1., 0., 0., -1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ]));
+        vd.reverse = Some(Mat([
+            0., -1., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ]));
         let src = render::source_of(vm, &out)?;
-        vd.children.push(render::Blit { source: src, x: rh, y: 0., focus: true, main: true });
+        vd.children.push(render::Blit {
+            source: src,
+            x: rh,
+            y: 0.,
+            focus: true,
+            main: true,
+        });
         out = new_render(vm, vd);
     }
     let _ = render_data(&out);
@@ -2320,23 +2417,59 @@ fn t_get_displayables(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         }
     }
     let tp = tokens_to_py(vm, &out);
-    let set = vm.call(&Value::Obj(vm.types.set.clone()), vec![vm.types.new_list(ds)], Vec::new())?;
+    let set = vm.call(
+        &Value::Obj(vm.types.set.clone()),
+        vec![vm.types.new_list(ds)],
+        Vec::new(),
+    )?;
     Ok(vm.types.new_tuple(vec![tp, set]))
 }
 
 // extras -------------------------------------------------------------------------------------
 
 const TEXT_TAGS: &[(&str, bool)] = &[
-    ("alpha", true), ("alt", true), ("art", true), ("axis", true), ("done", false), ("instance", true), ("image", false),
-    ("p", false), ("w", false), ("fast", false), ("b", true), ("i", true), ("u", true), ("a", true), ("plain", true),
-    ("font", true), ("color", true), ("outlinecolor", true), ("size", true), ("noalt", true), ("nw", false), ("s", true),
-    ("shader", true), ("rt", true), ("rb", true), ("k", true), ("cps", true), ("space", false), ("vspace", false), ("", true),
+    ("alpha", true),
+    ("alt", true),
+    ("art", true),
+    ("axis", true),
+    ("done", false),
+    ("instance", true),
+    ("image", false),
+    ("p", false),
+    ("w", false),
+    ("fast", false),
+    ("b", true),
+    ("i", true),
+    ("u", true),
+    ("a", true),
+    ("plain", true),
+    ("font", true),
+    ("color", true),
+    ("outlinecolor", true),
+    ("size", true),
+    ("noalt", true),
+    ("nw", false),
+    ("s", true),
+    ("shader", true),
+    ("rt", true),
+    ("rb", true),
+    ("k", true),
+    ("cps", true),
+    ("space", false),
+    ("vspace", false),
+    ("", true),
 ];
 
 fn f_check_text_tags(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let s = py::string(vm, &arg_or(args, kw, 0, "s", Value::None))?;
-    let check_unclosed = ops::truthy(vm, &arg_or(args, kw, 1, "check_unclosed", Value::Bool(false)))?;
-    let mut all: HashMap<String, bool> = TEXT_TAGS.iter().map(|(k, v)| ((*k).to_owned(), *v)).collect();
+    let check_unclosed = ops::truthy(
+        vm,
+        &arg_or(args, kw, 1, "check_unclosed", Value::Bool(false)),
+    )?;
+    let mut all: HashMap<String, bool> = TEXT_TAGS
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), *v))
+        .collect();
     let ct = py::config(vm, "custom_text_tags")?;
     if ops::truthy(vm, &ct)? {
         for (k, _) in ops::mapping_items(vm, &ct)? {
@@ -2359,11 +2492,26 @@ fn f_check_text_tags(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         if text.starts_with('#') {
             continue;
         }
-        let text = text.split('=').next().unwrap_or("").split(':').next().unwrap_or("").to_owned();
+        let text = text
+            .split('=')
+            .next()
+            .unwrap_or("")
+            .split(':')
+            .next()
+            .unwrap_or("")
+            .to_owned();
         if let Some(c) = text.strip_prefix('/') {
             match stack.last() {
-                None => return Ok(vm.types.new_string(format!("Close text tag '{{{text}}}' does not match an open text tag."))),
-                Some(top) if top != c => return Ok(vm.types.new_string(format!("Close text tag '{{{text}}}' does not match open text tag '{{{top}}}'."))),
+                None => {
+                    return Ok(vm.types.new_string(format!(
+                        "Close text tag '{{{text}}}' does not match an open text tag."
+                    )));
+                }
+                Some(top) if top != c => {
+                    return Ok(vm.types.new_string(format!(
+                        "Close text tag '{{{text}}}' does not match open text tag '{{{top}}}'."
+                    )));
+                }
                 _ => {
                     stack.pop();
                 }
@@ -2371,14 +2519,21 @@ fn f_check_text_tags(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             continue;
         }
         match all.get(&text) {
-            None => return Ok(vm.types.new_string(format!("Text tag '{text}' is not known."))),
+            None => {
+                return Ok(vm
+                    .types
+                    .new_string(format!("Text tag '{text}' is not known.")));
+            }
             Some(true) => stack.push(text),
             Some(false) => {}
         }
     }
     if check_unclosed && !stack.is_empty() {
         let l: Vec<String> = stack.iter().map(|s| format!("'{s}'")).collect();
-        return Ok(vm.types.new_string(format!("One or more text tags were left open at the end of the string: {}", l.join(", "))));
+        return Ok(vm.types.new_string(format!(
+            "One or more text tags were left open at the end of the string: {}",
+            l.join(", ")
+        )));
     }
     Ok(Value::None)
 }
@@ -2388,7 +2543,10 @@ fn f_filter_text_tags(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let allow = arg_or(args, kw, 1, "allow", Value::None);
     let deny = arg_or(args, kw, 2, "deny", Value::None);
     if py::is_none(&allow) == py::is_none(&deny) {
-        return Err(py::error(vm, "Only one of the allow and deny keyword arguments should be given to filter_text_tags."));
+        return Err(py::error(
+            vm,
+            "Only one of the allow and deny keyword arguments should be given to filter_text_tags.",
+        ));
     }
     let tokens = tokenize(&s, false).map_err(|e| py::error(vm, e))?;
     let mut rv = String::new();
@@ -2396,10 +2554,20 @@ fn f_filter_text_tags(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         match t {
             Token::Paragraph => rv.push('\n'),
             Token::Tag(text) => {
-                let kind = text.split('=').next().unwrap_or("").split(':').next().unwrap_or("");
+                let kind = text
+                    .split('=')
+                    .next()
+                    .unwrap_or("")
+                    .split(':')
+                    .next()
+                    .unwrap_or("");
                 let kind = kind.strip_prefix('/').unwrap_or(kind);
                 let k = vm.types.new_str(kind);
-                let keep = if !py::is_none(&allow) { ops::contains(vm, &allow, &k)? } else { !ops::contains(vm, &deny, &k)? };
+                let keep = if !py::is_none(&allow) {
+                    ops::contains(vm, &allow, &k)?
+                } else {
+                    !ops::contains(vm, &deny, &k)?
+                };
                 if keep {
                     rv.push('{');
                     rv.push_str(&text);
@@ -2429,7 +2597,10 @@ fn f_filter_alt_text(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             Token::Paragraph => rv.push('\n'),
             Token::Tag(text) => {
                 let kind = text.split('=').next().unwrap_or("");
-                let (kind, end) = match kind.strip_prefix('/') { Some(k) => (k, true), None => (kind, false) };
+                let (kind, end) = match kind.strip_prefix('/') {
+                    Some(k) => (k, true),
+                    None => (kind, false),
+                };
                 let k = vm.types.new_str(kind);
                 if !py::is_none(&filter) && ops::contains(vm, &filter, &k)? {
                     if end {
@@ -2456,7 +2627,11 @@ fn f_filter_alt_text(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn pt_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let style = arg_or(args, kw, 1, "style", vm.types.new_str("default"));
-    let props: Vec<_> = kw.iter().filter(|(k, _)| &**k != "style").cloned().collect();
+    let props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| &**k != "style")
+        .cloned()
+        .collect();
     py::set(vm, this, "style", style)?;
     let d = py::kwargs_dict(vm, &props)?;
     py::set(vm, this, "properties", d)?;
@@ -2480,10 +2655,19 @@ fn pt_duplicate(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let parts = py::items(vm, &aa)?;
     if parts.is_empty() {
         let n = py::get(vm, &a, "name")?;
-        let n: Vec<String> = py::items(vm, &n)?.iter().map(|x| x.as_str().unwrap_or("").to_owned()).collect();
-        return Err(py::error(vm, format!("'{}' takes a single string parameter.", n.join(" "))));
+        let n: Vec<String> = py::items(vm, &n)?
+            .iter()
+            .map(|x| x.as_str().unwrap_or("").to_owned())
+            .collect();
+        return Err(py::error(
+            vm,
+            format!("'{}' takes a single string parameter.", n.join(" ")),
+        ));
     }
-    let param: String = parts.iter().map(|p| p.as_str().unwrap_or("").to_owned()).collect();
+    let param: String = parts
+        .iter()
+        .map(|p| p.as_str().unwrap_or("").to_owned())
+        .collect();
     let e = py::import_attr(vm, "renpy.python", "py_eval")?;
     let p = vm.types.new_string(param);
     let s = vm.call(&e, vec![p], Vec::new())?;
@@ -2491,134 +2675,220 @@ fn pt_duplicate(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn f_textwrap(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let s = py::string(vm, &arg_or(args, kw, 0, "s", Value::None))?;
+    let s = arg_or(args, kw, 0, "s", Value::None);
+    let s = py::string(vm, &s)?;
     let width = py::f64_of(vm, &arg_or(args, kw, 1, "width", Value::Int(78)))?;
-    let mut gs: Vec<G> = s.chars().map(|c| {
-        let w = if (c as u32) >= 0x1100 && unicode_linebreak::break_property(c as u32) == unicode_linebreak::BreakClass::Ideographic { 20. } else { 10. };
-        G { ch: c, x: 0., y: 0., ascent: 10., line_spacing: 10., width: w, advance: w, split: 0, ruby: 0, time: 0., hyperlink: 0, piece: 0, font: None }
-    }).collect();
-    annotate_unicode(&mut gs, false);
-    linebreak_tex(&mut gs, width * 10., width * 10., false);
-    let mut rv = Vec::new();
-    let mut line = String::new();
-    for g in &gs {
-        match g.split {
-            SPLIT_INSTEAD => rv.push(std::mem::take(&mut line)),
-            SPLIT_BEFORE => {
-                rv.push(std::mem::take(&mut line));
-                line.push(g.ch);
-            }
-            _ => line.push(g.ch),
-        }
+    let asian = arg_or(args, kw, 2, "asian", Value::Bool(false));
+    let asian = ops::truthy(vm, &asian)?;
+    let eaw = py::import_attr(vm, "unicodedata", "east_asian_width")?;
+    let rel = Rel::of(vm);
+    let mut gs = Vec::new();
+    for c in s.chars() {
+        let cv = vm.types.new_string(c.to_string());
+        let e = vm.call(&eaw, vec![cv], Vec::new())?;
+        let e = py::string(vm, &e)?;
+        let w = match e.as_str() {
+            "F" | "W" => 20.,
+            "A" if asian => 20.,
+            _ => 10.,
+        };
+        gs.push(G {
+            ch: c,
+            ascent: 10.,
+            line_spacing: 10.,
+            width: w,
+            advance: w,
+            ..G::default()
+        });
     }
-    if !line.is_empty() {
-        rv.push(line);
-    }
-    let l = rv.iter().map(|s| vm.types.new_str(s)).collect();
+    super::textsupport::annotate_unicode(rel, &mut gs, false, 2);
+    super::texwrap::linebreak_tex(rel, &mut gs, width * 10., width * 10., false);
+    let l = super::textsupport::linebreak_list(&gs)
+        .into_iter()
+        .map(|s| vm.types.new_string(s))
+        .collect();
     Ok(vm.types.new_list(l))
 }
 
-fn init_textsupport(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, "renpy.text.textsupport", &[
-        ("tokenize", f_tokenize),
-        ("language_tailor", |_, _, _| Ok(Value::None)),
-    ]);
-    for (n, v) in [("TEXT", TEXT), ("TAG", TAG), ("PARAGRAPH", PARAGRAPH), ("DISPLAYABLE", DISPLAYABLE)] {
-        crysirror_python::modules::set(vm, &m, n, Value::Int(v));
-    }
-    Ok(m)
+fn f_thaic90(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    let s = py::string(vm, &arg_or(args, kw, 0, "s", Value::None))?;
+    let out = if Rel::of(vm).at_least(8, 6) {
+        crysirror_text::thai_c90::reencode(&s)
+    } else {
+        crysirror_text::thai_c90::legacy(&s)
+    };
+    Ok(vm.types.new_string(out))
 }
 
-fn init_texwrap(vm: &mut Vm) -> PyResult<ObjRef> {
-    Ok(crysirror_python::modules::module_with(vm, "renpy.text.texwrap", &[]))
+/// `unmap_arabic_presentation_forms(s)` (7.8/8.3): base letters for the
+/// presentation forms when `config.reverse_arabic_presentation_forms`.
+fn f_unmap_arabic(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    let v = arg_or(args, kw, 0, "s", Value::None);
+    let on = py::config(vm, "reverse_arabic_presentation_forms").unwrap_or(Value::Bool(false));
+    if !ops::truthy(vm, &on)? {
+        return Ok(v);
+    }
+    let s = py::string(vm, &v)?;
+    Ok(vm.types.new_string(crysirror_text::arabic::unmap_presentation_forms(&s)))
 }
 
 fn init_extras(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, "renpy.text.extras", &[
+    let rel = Rel::of(vm);
+    // filter_text_tags (7.0+) and filter_alt_text (7.4+) stay in every
+    // release: this runtime's say behaviour and self-voicing paths call
+    // them for all releases.
+    let mut fns: Vec<(&'static str, crysirror_python::object::NativeFn)> = vec![
         ("check_text_tags", f_check_text_tags),
         ("filter_text_tags", f_filter_text_tags),
         ("filter_alt_text", f_filter_alt_text),
-        ("textwrap", f_textwrap),
-        ("thaic90", |_, a, _| Ok(a.first().cloned().unwrap_or(Value::None))),
-        ("unmap_arabic_presentation_forms", |_, a, _| Ok(a.first().cloned().unwrap_or(Value::None))),
-    ]);
+    ];
+    if rel.at_least(6, 99) {
+        fns.push(("textwrap", f_textwrap));
+    }
+    if rel.since_pair(6, 1) {
+        fns.push(("thaic90", f_thaic90));
+    }
+    let arabic = rel.since_pair(8, 3) && !rel.at_least(8, 4);
+    if arabic {
+        fns.push(("unmap_arabic_presentation_forms", f_unmap_arabic));
+    }
+    let m = crysirror_python::modules::module_with(vm, "renpy.text.extras", &fns);
+    if arabic {
+        let d = vm.types.new_dict();
+        let mut rows: Vec<(char, &str)> = crysirror_text::arabic::reverse_mappings()
+            .iter()
+            .map(|(k, v)| (*k, *v))
+            .collect();
+        rows.sort();
+        for (k, v) in rows {
+            let k = vm.types.new_string(k.to_string());
+            let v = vm.types.new_str(v);
+            ops::setitem(vm, &d, k, v)?;
+        }
+        crysirror_python::modules::set(vm, &m, "arabic_reverse_mappings", d);
+    }
     let tt = vm.types.new_dict();
     for (k, v) in TEXT_TAGS {
         py::dict_set(vm, &tt, k, Value::Bool(*v))?;
     }
     crysirror_python::modules::set(vm, &m, "text_tags", tt);
-    for (n, v) in [("TEXT", TEXT), ("TAG", TAG), ("PARAGRAPH", PARAGRAPH), ("DISPLAYABLE", DISPLAYABLE)] {
-        crysirror_python::modules::set(vm, &m, n, Value::Int(v));
+    for (n, v, on) in [
+        ("TEXT", TEXT, true),
+        ("TAG", TAG, true),
+        ("PARAGRAPH", PARAGRAPH, rel.at_least(7, 0)),
+        ("DISPLAYABLE", DISPLAYABLE, rel.since_pair(5, 0)),
+    ] {
+        if on {
+            crysirror_python::modules::set(vm, &m, n, Value::Int(v));
+        }
     }
-    let pt = py::class(vm, "renpy.text.extras", "ParameterizedText", &[], &[("__init__", pt_init), ("_duplicate", pt_duplicate)], &[("_duplicatable", Value::Bool(true))])?;
+    let pt = py::class(
+        vm,
+        "renpy.text.extras",
+        "ParameterizedText",
+        &[],
+        &[("__init__", pt_init), ("_duplicate", pt_duplicate)],
+        &[("_duplicatable", Value::Bool(true))],
+    )?;
     crysirror_python::modules::set(vm, &m, "ParameterizedText", Value::Obj(pt));
     Ok(m)
 }
 
 fn init_text(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, "renpy.text.text", &[
-        ("layout_cache_clear", |_, _, _| {
-            layout_cache_clear();
-            Ok(Value::None)
-        }),
-        ("text_tick", |_, _, _| {
-            text_tick();
-            Ok(Value::None)
-        }),
-    ]);
+    let keep = Rel::of(vm).at_least(8, 6);
+    KEEP_DANGLING.with(|k| k.set(keep));
+    let m = crysirror_python::modules::module_with(
+        vm,
+        "renpy.text.text",
+        &[
+            ("layout_cache_clear", |_, _, _| {
+                layout_cache_clear();
+                Ok(Value::None)
+            }),
+            ("text_tick", |_, _, _| {
+                text_tick();
+                Ok(Value::None)
+            }),
+        ],
+    );
     let d = Value::Obj(super::core::displayable_class(vm));
-    let cls = py::class(vm, "renpy.text.text", "Text", &[d], &[
-        ("__init__", t_init),
-        ("after_upgrade", t_after_upgrade),
-        ("_duplicate", t_duplicate),
-        ("_in_current_store", t_in_current_store),
-        ("_repr_info", t_repr_info),
-        ("get_all_text", t_get_all_text),
-        ("_scope", t_scope),
-        ("set_text", t_set_text),
-        ("per_interact", t_per_interact),
-        ("set_ctc", t_set_ctc),
-        ("set_last_ctc", t_set_last_ctc),
-        ("update", t_update),
-        ("visit", t_visit),
-        ("_tts", t_tts),
-        ("_tts_all", t_tts),
-        ("kill_layout", t_kill_layout),
-        ("get_layout", t_get_layout),
-        ("get_virtual_layout", t_get_virtual_layout),
-        ("set_style_prefix", t_set_style_prefix),
-        ("get_placement", t_get_placement),
-        ("focus", t_focus),
-        ("unfocus", t_unfocus),
-        ("hyperlink_sensitive", t_hyperlink_sensitive),
-        ("event", t_event),
-        ("size", t_size),
-        ("get_time", t_get_time),
-        ("render", t_render),
-        ("tokenize", t_tokenize),
-        ("get_displayables", t_get_displayables),
-    ], &[
-        ("__version__", Value::Int(4)), ("_uses_scope", Value::Bool(true)), ("_duplicatable", Value::Bool(false)), ("locked", Value::Bool(false)),
-        ("language", Value::None), ("mask", Value::None), ("last_ctc", Value::None), ("tokenized", Value::Bool(false)), ("slow_done_time", Value::None),
-    ])?;
-    let act = vm.types.new_builtin("apply_custom_tags", f_apply_custom_tags);
+    let cls = py::class(
+        vm,
+        "renpy.text.text",
+        "Text",
+        &[d],
+        &[
+            ("__init__", t_init),
+            ("after_upgrade", t_after_upgrade),
+            ("_duplicate", t_duplicate),
+            ("_in_current_store", t_in_current_store),
+            ("_repr_info", t_repr_info),
+            ("get_all_text", t_get_all_text),
+            ("_scope", t_scope),
+            ("set_text", t_set_text),
+            ("per_interact", t_per_interact),
+            ("set_ctc", t_set_ctc),
+            ("set_last_ctc", t_set_last_ctc),
+            ("update", t_update),
+            ("visit", t_visit),
+            ("_tts", t_tts),
+            ("_tts_all", t_tts),
+            ("kill_layout", t_kill_layout),
+            ("get_layout", t_get_layout),
+            ("get_virtual_layout", t_get_virtual_layout),
+            ("set_style_prefix", t_set_style_prefix),
+            ("get_placement", t_get_placement),
+            ("focus", t_focus),
+            ("unfocus", t_unfocus),
+            ("hyperlink_sensitive", t_hyperlink_sensitive),
+            ("event", t_event),
+            ("size", t_size),
+            ("get_time", t_get_time),
+            ("render", t_render),
+            ("tokenize", t_tokenize),
+            ("get_displayables", t_get_displayables),
+        ],
+        &[
+            ("__version__", Value::Int(4)),
+            ("_uses_scope", Value::Bool(true)),
+            ("_duplicatable", Value::Bool(false)),
+            ("locked", Value::Bool(false)),
+            ("language", Value::None),
+            ("mask", Value::None),
+            ("last_ctc", Value::None),
+            ("tokenized", Value::Bool(false)),
+            ("slow_done_time", Value::None),
+        ],
+    )?;
+    let act = vm
+        .types
+        .new_builtin("apply_custom_tags", f_apply_custom_tags);
     let act = py::staticmethod(vm, act);
     vm.types.set_attr(&cls, "apply_custom_tags", act);
     crysirror_python::modules::set(vm, &m, "Text", Value::Obj(cls));
-    for (n, v) in [("TEXT", TEXT), ("TAG", TAG), ("PARAGRAPH", PARAGRAPH), ("DISPLAYABLE", DISPLAYABLE)] {
+    for (n, v) in [
+        ("TEXT", TEXT),
+        ("TAG", TAG),
+        ("PARAGRAPH", PARAGRAPH),
+        ("DISPLAYABLE", DISPLAYABLE),
+    ] {
         crysirror_python::modules::set(vm, &m, n, Value::Int(v));
     }
     let pt = py::import_attr(vm, "renpy.text.extras", "ParameterizedText")?;
     crysirror_python::modules::set(vm, &m, "ParameterizedText", pt);
-    let lt = vm.types.new_builtin("language_tailor", |_, _, _| Ok(Value::None));
+    let lt = vm
+        .types
+        .new_builtin("language_tailor", |_, _, _| Ok(Value::None));
     crysirror_python::modules::set(vm, &m, "language_tailor", lt);
     crysirror_python::modules::set(vm, &m, "BASELINE", Value::Int(-65536));
+    super::textclasses::install_names(vm, &m)?;
     Ok(m)
 }
 
 pub fn install(vm: &mut Vm) {
-    vm.register_native_module("renpy.text.textsupport", init_textsupport);
-    vm.register_native_module("renpy.text.texwrap", init_texwrap);
+    super::textsupport::install(vm);
+    super::texwrap::install(vm);
+    super::textunicode::install(vm);
     vm.register_native_module("renpy.text.extras", init_extras);
     vm.register_native_module("renpy.text.text", init_text);
 }

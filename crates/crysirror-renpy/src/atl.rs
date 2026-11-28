@@ -10,21 +10,106 @@ pub type Loc = (Rc<str>, u32);
 /// Transform properties accepted by ATL (`renpy.atl.PROPERTIES`), as
 /// registered by `renpy/display/transform.py` and its aliases.
 pub const PROPERTIES: &[&str] = &[
-    "additive", "alpha", "blend", "blur", "corner1", "corner2", "crop", "crop_relative", "debug", "delay", "events", "fit", "fps",
-    "matrixanchor", "matrixcolor", "matrixtransform", "maxsize", "mesh", "mesh_pad", "nearest", "perspective", "rotate", "rotate_pad",
-    "point_to", "orientation", "xrotate", "yrotate", "zrotate", "shader", "show_cancels_hide", "subpixel", "transform_anchor", "zoom",
-    "xanchoraround", "xanchor", "xaround", "xoffset", "xpan", "xpos", "xsize", "xtile", "xzoom", "yanchoraround", "yanchor", "yaround",
-    "yoffset", "ypan", "ypos", "ysize", "ytile", "yzoom", "zpos", "zzoom", "gl_anisotropic", "gl_blend_func", "gl_color_mask",
-    "gl_cull_face", "gl_depth", "gl_drawable_resolution", "gl_mipmap", "gl_pixel_perfect", "gl_texture_scaling", "gl_texture_wrap",
+    "additive",
+    "alpha",
+    "blend",
+    "blur",
+    "corner1",
+    "corner2",
+    "crop",
+    "crop_relative",
+    "debug",
+    "delay",
+    "events",
+    "fit",
+    "fps",
+    "matrixanchor",
+    "matrixcolor",
+    "matrixtransform",
+    "maxsize",
+    "mesh",
+    "mesh_pad",
+    "nearest",
+    "perspective",
+    "rotate",
+    "rotate_pad",
+    "point_to",
+    "orientation",
+    "xrotate",
+    "yrotate",
+    "zrotate",
+    "shader",
+    "show_cancels_hide",
+    "subpixel",
+    "transform_anchor",
+    "zoom",
+    "xanchoraround",
+    "xanchor",
+    "xaround",
+    "xoffset",
+    "xpan",
+    "xpos",
+    "xsize",
+    "xtile",
+    "xzoom",
+    "yanchoraround",
+    "yanchor",
+    "yaround",
+    "yoffset",
+    "ypan",
+    "ypos",
+    "ysize",
+    "ytile",
+    "yzoom",
+    "zpos",
+    "zzoom",
+    "gl_anisotropic",
+    "gl_blend_func",
+    "gl_color_mask",
+    "gl_cull_face",
+    "gl_depth",
+    "gl_drawable_resolution",
+    "gl_mipmap",
+    "gl_pixel_perfect",
+    "gl_texture_scaling",
+    "gl_texture_wrap",
     // Aliases.
-    "alignaround", "align", "anchor", "anchorangle", "anchoraround", "anchorradius", "angle", "around", "offset", "pos", "radius", "size",
-    "xalign", "xcenter", "xycenter", "xysize", "yalign", "ycenter", "_reset",
+    "alignaround",
+    "align",
+    "anchor",
+    "anchorangle",
+    "anchoraround",
+    "anchorradius",
+    "angle",
+    "around",
+    "offset",
+    "pos",
+    "radius",
+    "size",
+    "xalign",
+    "xcenter",
+    "xycenter",
+    "xysize",
+    "yalign",
+    "ycenter",
+    "_reset",
     // Older releases (6.x/7.x) accepted these as ATL properties too.
-    "xalignaround", "yalignaround", "xcenter", "ycenter", "xzoom", "yzoom", "set_center", "radius", "clipping",
+    "xalignaround",
+    "yalignaround",
+    "xcenter",
+    "ycenter",
+    "xzoom",
+    "yzoom",
+    "set_center",
+    "radius",
+    "clipping",
 ];
 
 pub fn is_property(name: &str) -> bool {
-    PROPERTIES.contains(&name) || name.starts_with("u_") || name.starts_with("gl_texture_wrap_") || name.starts_with("gl_texture_scaling_")
+    PROPERTIES.contains(&name)
+        || name.starts_with("u_")
+        || name.starts_with("gl_texture_wrap_")
+        || name.starts_with("gl_texture_scaling_")
 }
 
 #[derive(Clone, Debug, Default)]
@@ -44,15 +129,42 @@ pub struct RawMultipurpose {
 pub enum RawStatement {
     Block(RawBlock),
     Multipurpose(RawMultipurpose),
-    Repeat { loc: Loc, repeats: Option<PyExpr> },
-    Parallel { loc: Loc, blocks: Vec<RawBlock> },
-    Choice { loc: Loc, choices: Vec<(PyExpr, RawBlock)> },
-    On { loc: Loc, handlers: Vec<(String, RawBlock)> },
-    Time { loc: Loc, time: PyExpr },
-    Event { loc: Loc, name: String },
-    Function { loc: Loc, expr: PyExpr },
-    ContainsExpr { loc: Loc, expr: PyExpr },
-    Child { loc: Loc, children: Vec<RawBlock> },
+    Repeat {
+        loc: Loc,
+        repeats: Option<PyExpr>,
+    },
+    Parallel {
+        loc: Loc,
+        blocks: Vec<RawBlock>,
+    },
+    Choice {
+        loc: Loc,
+        choices: Vec<(PyExpr, RawBlock)>,
+    },
+    On {
+        loc: Loc,
+        handlers: Vec<(String, RawBlock)>,
+    },
+    Time {
+        loc: Loc,
+        time: PyExpr,
+    },
+    Event {
+        loc: Loc,
+        name: String,
+    },
+    Function {
+        loc: Loc,
+        expr: PyExpr,
+    },
+    ContainsExpr {
+        loc: Loc,
+        expr: PyExpr,
+    },
+    Child {
+        loc: Loc,
+        children: Vec<RawBlock>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -70,10 +182,39 @@ pub trait ParseContext {
 /// Warpers defined by `renpy/atl.py` and `renpy/common/000atl.rpy` /
 /// `00warpers` in every release; games may register more.
 pub const BUILTIN_WARPERS: &[&str] = &[
-    "pause", "instant", "linear", "easeout", "easein", "ease", "easeout_quad", "easein_quad", "ease_quad", "easeout_cubic", "easein_cubic",
-    "ease_cubic", "easeout_quart", "easein_quart", "ease_quart", "easeout_quint", "easein_quint", "ease_quint", "easeout_expo", "easein_expo",
-    "ease_expo", "easeout_circ", "easein_circ", "ease_circ", "easeout_back", "easein_back", "ease_back", "easeout_elastic", "easein_elastic",
-    "ease_elastic", "easeout_bounce", "easein_bounce", "ease_bounce",
+    "pause",
+    "instant",
+    "linear",
+    "easeout",
+    "easein",
+    "ease",
+    "easeout_quad",
+    "easein_quad",
+    "ease_quad",
+    "easeout_cubic",
+    "easein_cubic",
+    "ease_cubic",
+    "easeout_quart",
+    "easein_quart",
+    "ease_quart",
+    "easeout_quint",
+    "easein_quint",
+    "ease_quint",
+    "easeout_expo",
+    "easein_expo",
+    "ease_expo",
+    "easeout_circ",
+    "easein_circ",
+    "ease_circ",
+    "easeout_back",
+    "easein_back",
+    "ease_back",
+    "easeout_elastic",
+    "easein_elastic",
+    "ease_elastic",
+    "easeout_bounce",
+    "easein_bounce",
+    "ease_bounce",
 ];
 
 pub fn parse_atl(l: &mut Lexer, cx: &dyn ParseContext) -> PResult<RawBlock> {
@@ -104,7 +245,10 @@ pub fn parse_atl(l: &mut Lexer, cx: &dyn ParseContext) -> PResult<RawBlock> {
                     l.expect_block("contains")?;
                     let mut sub = l.subblock_lexer(false);
                     let b = parse_atl(&mut sub, cx)?;
-                    statements.push(Some(RawStatement::Child { loc, children: vec![b] }));
+                    statements.push(Some(RawStatement::Child {
+                        loc,
+                        children: vec![b],
+                    }));
                 }
             }
         } else if l.keyword("parallel") {
@@ -113,15 +257,23 @@ pub fn parse_atl(l: &mut Lexer, cx: &dyn ParseContext) -> PResult<RawBlock> {
             l.expect_block("parallel")?;
             let mut sub = l.subblock_lexer(false);
             let b = parse_atl(&mut sub, cx)?;
-            statements.push(Some(RawStatement::Parallel { loc, blocks: vec![b] }));
+            statements.push(Some(RawStatement::Parallel {
+                loc,
+                blocks: vec![b],
+            }));
         } else if l.keyword("choice") {
-            let chance = l.simple_expression()?.unwrap_or_else(|| l.expr("1.0".into()));
+            let chance = l
+                .simple_expression()?
+                .unwrap_or_else(|| l.expr("1.0".into()));
             l.require_re(":", ":")?;
             l.expect_eol()?;
             l.expect_block("choice")?;
             let mut sub = l.subblock_lexer(false);
             let b = parse_atl(&mut sub, cx)?;
-            statements.push(Some(RawStatement::Choice { loc, choices: vec![(chance, b)] }));
+            statements.push(Some(RawStatement::Choice {
+                loc,
+                choices: vec![(chance, b)],
+            }));
         } else if l.keyword("on") {
             let mut names = vec![match l.word() {
                 Some(w) => w,
@@ -138,7 +290,10 @@ pub fn parse_atl(l: &mut Lexer, cx: &dyn ParseContext) -> PResult<RawBlock> {
             l.expect_block("on")?;
             let mut sub = l.subblock_lexer(false);
             let b = parse_atl(&mut sub, cx)?;
-            statements.push(Some(RawStatement::On { loc, handlers: names.into_iter().map(|n| (n, b.clone())).collect() }));
+            statements.push(Some(RawStatement::On {
+                loc,
+                handlers: names.into_iter().map(|n| (n, b.clone())).collect(),
+            }));
         } else if l.keyword("time") {
             let t = l.require_simple()?;
             l.expect_noblock("time")?;
@@ -180,19 +335,31 @@ pub fn parse_atl(l: &mut Lexer, cx: &dyn ParseContext) -> PResult<RawBlock> {
         };
         if !prev_was_pass {
             match (merged.last_mut(), &new) {
-                (Some(RawStatement::Parallel { blocks, .. }), RawStatement::Parallel { blocks: nb, .. }) => {
+                (
+                    Some(RawStatement::Parallel { blocks, .. }),
+                    RawStatement::Parallel { blocks: nb, .. },
+                ) => {
                     blocks.extend(nb.iter().cloned());
                     continue;
                 }
-                (Some(RawStatement::Choice { choices, .. }), RawStatement::Choice { choices: nc, .. }) => {
+                (
+                    Some(RawStatement::Choice { choices, .. }),
+                    RawStatement::Choice { choices: nc, .. },
+                ) => {
                     choices.extend(nc.iter().cloned());
                     continue;
                 }
-                (Some(RawStatement::Child { children, .. }), RawStatement::Child { children: nc, .. }) => {
+                (
+                    Some(RawStatement::Child { children, .. }),
+                    RawStatement::Child { children: nc, .. },
+                ) => {
                     children.extend(nc.iter().cloned());
                     continue;
                 }
-                (Some(RawStatement::On { handlers, .. }), RawStatement::On { handlers: nh, .. }) => {
+                (
+                    Some(RawStatement::On { handlers, .. }),
+                    RawStatement::On { handlers: nh, .. },
+                ) => {
                     for (n, b) in nh {
                         match handlers.iter_mut().find(|(k, _)| k == n) {
                             Some(slot) => slot.1 = b.clone(),
@@ -207,11 +374,18 @@ pub fn parse_atl(l: &mut Lexer, cx: &dyn ParseContext) -> PResult<RawBlock> {
         prev_was_pass = false;
         merged.push(new);
     }
-    Ok(RawBlock { loc: block_loc, statements: merged, animation })
+    Ok(RawBlock {
+        loc: block_loc,
+        statements: merged,
+        animation,
+    })
 }
 
 fn parse_multipurpose(l: &mut Lexer, cx: &dyn ParseContext, loc: Loc) -> PResult<RawMultipurpose> {
-    let mut rm = RawMultipurpose { loc: Some(loc), ..Default::default() };
+    let mut rm = RawMultipurpose {
+        loc: Some(loc),
+        ..Default::default()
+    };
     let cp = l.checkpoint();
     let w = l.name();
     match w.as_deref() {
@@ -290,12 +464,18 @@ fn parse_multipurpose(l: &mut Lexer, cx: &dyn ParseContext, loc: Loc) -> PResult
             continue;
         }
         ll.revert(&cp);
-        let Some(expr) = ll.simple_expression()? else { break };
+        let Some(expr) = ll.simple_expression()? else {
+            break;
+        };
         if last_expression {
             return ll.error("ATL statement contains two expressions in a row; is one of them a misspelled property? If not, separate them with pass.");
         }
         this_expression = true;
-        let with = if ll.keyword("with") { Some(ll.require_simple()?) } else { None };
+        let with = if ll.keyword("with") {
+            Some(ll.require_simple()?)
+        } else {
+            None
+        };
         rm.expressions.push((expr, with));
     }
     if sub.is_none() {

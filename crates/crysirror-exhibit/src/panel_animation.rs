@@ -96,6 +96,18 @@ impl Spec {
     }
 }
 
+/// TmAsyncFade samples levels in unsigned 32-bit arithmetic, including descent.
+pub(super) fn fade_level(from: i32, to: i32, duration: u32, age: u32) -> i32 {
+    if age >= duration {
+        return to;
+    }
+    if age == 0 {
+        return from;
+    }
+    (duration.wrapping_mul(from as u32)
+        .wrapping_add(age.wrapping_mul(to.wrapping_sub(from) as u32)) / duration) as i32
+}
+
 struct Lane {
     slot: u8,
     from: [i32; 2],
@@ -114,12 +126,7 @@ impl Lane {
         std::array::from_fn(|i| {
             let delta = self.to[i].wrapping_sub(self.from[i]);
             if kind == Kind::Fade {
-                // Original uses unsigned 32-bit arithmetic, including a descending level.
-                return (self
-                    .ms
-                    .wrapping_mul(self.from[i] as u32)
-                    .wrapping_add(age.wrapping_mul(delta as u32))
-                    / self.ms) as i32;
+                return fade_level(self.from[i], self.to[i], self.ms, age);
             }
             let step = match self.mode {
                 0 => i64::from(delta) * i64::from(age) / i64::from(self.ms),
@@ -155,6 +162,13 @@ pub(super) struct Animations {
     waiting: Option<(Kind, i32)>,
 }
 impl Animations {
+    pub fn replace_billboard_fade(&mut self, panels: &Panels, now: u64, slot: u8, level: u8, duration: u32, skip: bool) -> Result<()> {
+        self.leave(Kind::Fade, 8, false);
+        self.begin(Spec { kind: Kind::Fade, channel: 8, asynchronous: false, relative: false, delay: 0,
+            targets: vec![Target { slot: i32::from(slot), value: [i32::from(level),0], duration, mode: 0 }],
+        }, panels, now, skip)
+    }
+
     pub fn begin(&mut self, spec: Spec, panels: &Panels, now: u64, skip: bool) -> Result<()> {
         let key = (spec.kind, spec.channel);
         ensure!(

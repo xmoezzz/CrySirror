@@ -6,6 +6,7 @@ mod business;
 mod photo;
 mod power;
 mod slots;
+mod native_slots;
 mod shop;
 mod construction;
 mod stock_profile_ui;
@@ -42,6 +43,7 @@ use crysirror_core::{
 };
 use serde_json::json;
 use widgets::{Assets, Widget};
+use unicode_segmentation::UnicodeSegmentation;
 
 const BUTTONS: [&str; 6] = ["Start", "Continue", "Guest", "Config", "End", "Shop"];
 const CLICK: u64 =
@@ -68,6 +70,7 @@ enum Scene {
     Events,
     Personnel,
     Dance,
+    DancePerformance,
     Desk,
     Leisure(leisure::Destination),
 }
@@ -84,6 +87,7 @@ impl Scene {
             Self::Leisure(kind) => kind.name(),
             Self::Desk => "SceneDeskCustomize",
             Self::Dance => "SceneDanceSelect",
+            Self::DancePerformance => "DanceMain",
             Self::Personnel => "SceneMaidManagement",
             Self::Events => "SceneScenarioSelect",
             Self::Awards => "SceneTrophy",
@@ -109,13 +113,16 @@ impl Default for MainLight {
     }
 }
 impl MainLight {
-    fn environment(&self) -> serde_json::Value {
+    fn environment(&self, settings: &config_panel::Settings) -> serde_json::Value {
         let direction = crate::chara::unity_euler(self.rotation) * glam::Vec3::Z;
         json!({
             "show_sky":false,"tonemap":"none","ambient":[0.,0.,0.],
-            "bloom":0.,"ambient_occlusion":0.,
+            "bloom":0.08 * settings.bloom / 100.,"ambient_occlusion":0.,
+            "temporal_aa":false,
+            "raster_quality":{"samples":settings.samples,"shadow_map_size":([512,1024,2048,4096][settings.shadows]),
+                              "anisotropy":([1,4,16][settings.anisotropy])},
             "sun":{"direction":[-direction.x,direction.y,direction.z],"color":[1.,1.,1.],
-                   "intensity":self.intensity,"shadow_strength":0.098}
+                   "intensity":self.intensity,"shadow_strength":0.098,"shadows":settings.shadows != 0}
         })
     }
 }
@@ -177,12 +184,14 @@ struct AdvCameraMove {
     ease: String,
 }
 struct Game {
+    title_return: Option<TitleReturn>,
     adv_camera: Orbit,
     main_light: MainLight,
     camera_move: Option<AdvCameraMove>,
     adv_cover: Option<crate::adapter::Fade>,
     world_cover: Option<crate::adapter::Fade>,
     dialogue: Option<(String, String)>,
+    voice_maid: Option<(bool, usize)>,
     daily: daily::Menu,
     business: business::Panel,
     shop: shop::Screen,
@@ -213,6 +222,7 @@ struct Game {
     pressed: Option<usize>,
     focus: usize,
     config_panel: Option<config_panel::Panel>,
+    settings: config_panel::Settings,
     message_transparency: f32,
     quit_dialog: Option<quit_dialog::QuitDialog>,
     choices: Option<choices::Choices>,
@@ -224,10 +234,19 @@ struct Game {
     leisure: leisure::Screen,
     desk: desk::Desk,
     dance: Option<dance::Screen>,
+    performance: Option<dance::performance::Show>,
     personnel: Option<personnel::Screen>,
     personnel_backup: Option<(usize,usize)>,
     events: Option<events::Screen>,
     shop_requests: Vec<Box<dyn DesktopRequestJob>>,
+}
+
+// SceneToTitle restores the point reserved by TitleMgr. The standalone
+// session holds this internal checkpoint until it can write native v1040 slots.
+struct TitleReturn {
+    state: crate::tjs::TjsState,
+    kag: Vec<u8>,
+    label: String,
 }
 
 impl Game {
@@ -239,14 +258,42 @@ impl Game {
         client: ClientId,
         now: u64,
     ) -> Result<()> {
+        self.enter_scene(scene, op, host, client, now, false)
+    }
+
+    fn enter_scene(
+        &mut self,
+        scene: Scene,
+        op: &mut Opener,
+        host: &mut dyn HostServices,
+        client: ClientId,
+        now: u64,
+        continuing_yotogi: bool,
+    ) -> Result<()> {
+        if self.scene == Scene::DancePerformance && scene != self.scene {
+            self.close_dance_performance(host, client)?;
+        }
         if matches!(self.scene,Scene::Script | Scene::StockEditor | Scene::Shop | Scene::Leisure(_)) && self.scene != scene {
+            if self.scene == Scene::Leisure(leisure::Destination::GuestClub) {
+                self.close_guest_comment(host, client)?;
+                self.actors.end_guest_man(&self.script)?;
+            }
+            if self.scene == Scene::Leisure(leisure::Destination::Blackjack) {
+                self.actors.reset_positions();
+                self.actors.motions.clear();
+                self.script.motion_blend = false;
+            }
             self.actors.leave(host, client)?;
+        }
+        if self.scene == Scene::Leisure(leisure::Destination::SlotMachine) {
+            self.release_slot_machine(op, host, client)?;
         }
         if self.scene == Scene::StockEditor { self.stock_editor.profile.blur(host, client)?; }
         if self.scene == Scene::Editor {
             self.editor.leave(host, client)?;
         }
-        self.widgets = if matches!(scene,Scene::FacilityPowerUp|Scene::FacilityManagement|Scene::Leisure(leisure::Destination::CreativeRoom)) {
+        self.widgets = if matches!(scene, Scene::FacilityPowerUp | Scene::FacilityManagement | Scene::DancePerformance
+            | Scene::Leisure(leisure::Destination::CreativeRoom | leisure::Destination::Blackjack | leisure::Destination::SlotMachine)) {
             Vec::new()
         } else {
             self.assets.scene(op, host, client, match scene {Scene::Result(panel)=>panel.asset(), _=>scene.name()}).with_context(|| format!("load widgets for {}", scene.name()))?
@@ -266,7 +313,13 @@ impl Game {
         }
         if !matches!(scene, Scene::Leisure(_)) {self.leisure=Default::default();}
         if scene!=Scene::Desk {self.desk.leave();}
-        if scene!=Scene::Title {self.config_panel=None;}
+        self.config_panel = None;
+        self.settings.control_press = None;
+        self.settings.shortcuts_open = false;
+        self.settings.shortcut_base = false;
+        if !matches!(scene, Scene::Logo | Scene::Warning) {
+            self.widgets.extend(self.assets.scene(op, host, client, "StandaloneShortcuts")?);
+        }
         if scene!=Scene::Dance {self.dance=None;}
         if scene!=Scene::Personnel {self.personnel=None;}
         if scene!=Scene::Events {self.events=None;}
@@ -295,7 +348,11 @@ impl Game {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("TJS lock"))?;
             let retail = &mut tjs.runtime.host_mut().state.retail;
-            retail.scene_loaded(scene.name(), &self.script.tag_backup);
+            let yotogi_label = scene == Scene::Script
+                && matches!(self.scene, Scene::Leisure(leisure::Destination::Yotogi | leisure::Destination::OldYotogi));
+            if !continuing_yotogi && !yotogi_label {
+                retail.scene_loaded(scene.name(), &self.script.tag_backup);
+            }
             retail.adv_present = scene == Scene::Script;
             retail.title_request = None;
         }
@@ -502,7 +559,7 @@ impl Game {
             camera["op"] = json!("set_camera");
             camera["camera"]["near"] = json!(0.01);
             let world = json!({"world": [
-                {"op": "set_environment", "environment": self.main_light.environment()},
+                {"op": "set_environment", "environment": self.main_light.environment(&self.settings)},
                 {"op": "spawn", "entity": {"id": 1, "name": name,
                     "geometry": {"kind": "scene", "asset": asset}}},
                 camera
@@ -594,6 +651,47 @@ impl Game {
         self.resume_at("label", op, host, client, now)
     }
 
+    fn remember_title(&mut self) -> Result<()> {
+        let kag = self.script.serialize_blob()?;
+        let state = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?
+            .runtime.host().state.clone();
+        self.title_return = Some(TitleReturn {
+            state,
+            kag,
+            label: self.script.current_label().into(),
+        });
+        Ok(())
+    }
+
+    fn return_to_title(
+        &mut self,
+        op: &mut Opener,
+        host: &mut dyn HostServices,
+        client: ClientId,
+        now: u64,
+    ) -> Result<()> {
+        let checkpoint = self.title_return.as_ref().context("title checkpoint was not created")?;
+        let mut script = AdvKag::for_profile(
+            &self.files, op.storage.as_ref(), crate::tjs::ScriptProfile::Com3d2,
+            checkpoint.state.clone(),
+        )?;
+        script.deserialize_blob(&self.files, op.storage.as_ref(), &checkpoint.kag)?;
+        script.jump_label(&self.files, op.storage.as_ref(), &checkpoint.label)?;
+        script.enabled = true;
+        script.exec();
+        self.actors.leave(host, client)?;
+        self.actors = Default::default();
+        self.sound.stop_all(host, client)?;
+        self.script = script;
+        self.adv_cover = None;
+        self.world_cover = None;
+        self.dialogue = None;
+        self.message_open = false;
+        self.trophies = Default::default();
+        self.day_camera_fade = None;
+        self.enter(Scene::Script, op, host, client, now)
+    }
+
     fn resume_at(&mut self, key: &str, op: &mut Opener, host: &mut dyn HostServices,
         client: ClientId, now: u64) -> Result<()> {
         let label = self.script.tag_backup.get(key)
@@ -624,6 +722,13 @@ impl Game {
         rect
     }
 
+    fn apply_environment(&self, host: &mut dyn HostServices, client: ClientId) -> Result<()> {
+        host.submit_engine(client, 1, &serde_json::to_vec(&json!({"world":[
+            {"op":"set_environment","environment":self.main_light.environment(&self.settings)}
+        ]}))?)?;
+        Ok(())
+    }
+
     fn update(
         &mut self,
         host: &mut dyn HostServices,
@@ -644,7 +749,14 @@ impl Game {
                 DesktopRequestState::Ready(_) => bail!("unexpected COM3D2 shop URL response"),
             }
         }
+        let settings_input = if self.config_panel.is_some() {
+            self.update_config(host, client, input, released, now)?;
+            true
+        } else {
+            self.settings_input(op, host, client, input, released, now)?
+        };
         match self.scene {
+            _ if settings_input => {}
             Scene::Logo | Scene::Warning => {
                 if let Some(since) = self.leaving {
                     if now.saturating_sub(since) >= 1000 {
@@ -671,6 +783,9 @@ impl Game {
                 }
             }
             Scene::Script => {
+                let pressed = input.buttons_pressed & (buttons::ENTER | buttons::MOUSE_LEFT) != 0;
+                let advance = self.message_advance(host, client, pressed, now)?;
+                self.script.special_se = self.sound.special_se;
                 let step=if let Some(choices)=&mut self.choices {
                     if let Some(label)=choices.update(input,released,now).map(str::to_owned) {
                         self.script.choose(&self.files,op.storage.as_ref(),&label)?;
@@ -680,7 +795,7 @@ impl Game {
                     KagStep::Waiting
                 }else{self.script.update(
                     now,
-                    input.buttons_pressed & (buttons::ENTER | buttons::MOUSE_LEFT) != 0,
+                    advance,
                     [self.adv_cover, self.world_cover].into_iter().flatten().any(|f| !f.done(now)),
                     &self.files,
                     op.storage.as_ref(),
@@ -766,6 +881,8 @@ impl Game {
                                 .map_err(|_| anyhow::anyhow!("TJS lock"))?;
                             let state = &t.runtime.host().state;
                             self.dialogue = Some((retail_names(&name, state), retail_names(&text, state)));
+                            self.settings.line_at = now;
+                            self.settings.revealed = false;
                         }
                         AdvUi::Fade { to, seconds } | AdvUi::Fade3d { to, seconds } => {
                             let cover = if matches!(effect, AdvUi::Fade3d { .. }) { &mut self.world_cover } else { &mut self.adv_cover };
@@ -833,18 +950,53 @@ impl Game {
                                 ease,
                             });
                         }
-                        AdvUi::Window(open) => self.message_open = open,
+                        AdvUi::Window(open) => {
+                            self.message_open = open;
+                            if !open {
+                                self.settings.auto = false;
+                            }
+                        }
+                        AdvUi::Sound(crate::sound::SoundOp::Play { kind, file, fade_s, looping }) => {
+                            let vm = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+                            let state = &vm.runtime.host().state.retail;
+                            if let Some(files) = state.audio_files(&self.files, kind, &file, state.compatibility) {
+                                self.sound.play_profile(host, client, files, kind, &file, fade_s, looping, state.compatibility)?;
+                            }
+                        }
                         AdvUi::CameraControl(enabled) => self.camera_control = enabled,
                         AdvUi::RetailMotionScript { slot, file, label,maid,man,positions } => {
                             let ops = self.actors.start_motion(&self.script, slot, &file, &label, maid, man, positions, &self.files, op, now)?;
                             for effect in ops.into_iter().rev() { effects.push_front(effect); }
                         }
+                        AdvUi::RetailFreeCall(name) => self.resume_recollection(&name, op, host, client, now)?,
+                        AdvUi::YotogiCall { name, label, edit_label, cancel_label } => {
+                            let legacy = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?
+                                .runtime.host().state.retail.yotogi_profile().context("no active Yotogi manager")?;
+                            let destination = if legacy { leisure::Destination::OldYotogi } else { leisure::Destination::Yotogi };
+                            self.script.tag_backup.insert("label".into(), label);
+                            self.script.tag_backup.insert("start".into(), name.clone());
+                            if let Some(edit_label) = edit_label {
+                                self.script.tag_backup.insert("edit_label".into(), edit_label);
+                            }
+                            if let Some(cancel_label) = cancel_label {
+                                self.script.tag_backup.insert("cancel_label".into(), cancel_label);
+                            }
+                            if name == "Null" {
+                                let label = self.script.tag_backup["label"].clone();
+                                self.script.jump_label(&self.files, op.storage.as_ref(), &label)?;
+                                self.script.exec();
+                            } else {
+                                self.enter_scene(Scene::Leisure(destination), op, host, client, now, true)?;
+                            }
+                        }
                         AdvUi::RetailTrophy(id)=>self.trophies.pending.push_back(id),
                         AdvUi::RetailClearMotionStacks=>self.actors.clear_motion_stacks(),
                         AdvUi::StopMotionScripts => self.actors.motions.clear(),
                         AdvUi::MotionBlend(on) => self.script.motion_blend = on,
-                        AdvUi::TalkVoice { file, .. } => {
+                        AdvUi::TalkVoice { file, maid, .. } => {
+                            self.voice_maid = maid;
                             self.sound.stop(host, client, Kind::Voice, 0.)?;
+                            self.update_voice_position(host, client)?;
                             let vm = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
                             let state = &vm.runtime.host().state.retail;
                             if let Some(files) = state.audio_files(&self.files, Kind::Voice, &file, state.compatibility) {
@@ -854,7 +1006,7 @@ impl Game {
                         AdvUi::LightMain { rotation, intensity } => {
                             if let Some(rotation) = rotation { self.main_light.rotation = rotation; }
                             if let Some(intensity) = intensity { self.main_light.intensity = intensity; }
-                            let environment = self.main_light.environment();
+                            let environment = self.main_light.environment(&self.settings);
                             host.submit_engine(client,1,&serde_json::to_vec(&json!({"world":[
                                 {"op":"set_environment","environment":environment}
                             ]}))?)?;
@@ -870,7 +1022,11 @@ impl Game {
                             self.script.enabled = true;
                             self.script.exec();
                         }
-                        "SceneTitle" => self.enter(Scene::Title, op, host, client, now)?,
+                        "SceneTitle" => {
+                            self.remember_title()?;
+                            self.enter(Scene::Title, op, host, client, now)?;
+                        }
+                        "SceneToTitle" => self.return_to_title(op, host, client, now)?,
                         "SceneDaily" => {
                             let scene=business::scene(self.script.tag_backup.get("type"))?;
                             self.enter(scene,op,host,client,now)?;
@@ -879,9 +1035,33 @@ impl Game {
                             let mode = business::PickMode::from_tag(self.script.tag_backup.get("type"))?;
                             self.enter(Scene::CharacterSelect(mode), op, host, client, now)?;
                         }
+                        "SceneYotogi" | "SceneYotogiOld"
+                            if self.script.tag_backup.get("start").is_some_and(|screen| screen == "Null") =>
+                        {
+                            if next == "SceneYotogiOld" {
+                                let vm = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+                                crate::tjs::retail::require_transferred_character(&vm.runtime.host().state)?;
+                            }
+                            self.resume_at("label", op, host, client, now)?;
+                            let mut vm = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+                            let state = &mut vm.runtime.host_mut().state;
+                            state.retail.scene_loaded(&next, &self.script.tag_backup);
+                        }
+                        "SceneFreeModeSelect" => {
+                            {
+                                let mut vm = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+                                crate::tjs::retail::begin_recollection(
+                                    &mut vm.runtime.host_mut().state,
+                                    self.script.tag_backup.clone(),
+                                );
+                            }
+                            self.enter(Scene::Leisure(leisure::Destination::FreeMode), op, host, client, now)?;
+                        }
                         name if let Some(destination)=leisure::Destination::parse(name) => self.enter(Scene::Leisure(destination),op,host,client,now)?,
                         "SceneDeskCustomize" => self.enter(Scene::Desk,op,host,client,now)?,
                         "SceneDanceSelect" => self.enter(Scene::Dance,op,host,client,now)?,
+                        name if name.starts_with("SceneDance_") && name.ends_with("_Release") =>
+                            self.open_dance_performance(name, op, host, client, now)?,
                         "SceneMaidManagement" => self.enter(Scene::Personnel,op,host,client,now)?,
                         "SceneScenarioSelect" => self.enter(Scene::Events,op,host,client,now)?,
                         "SceneTrophy" => self.enter(Scene::Awards,op,host,client,now)?,
@@ -906,8 +1086,11 @@ impl Game {
                 self.update_shop(op,host,client,input,released,now)?;
             }
             Scene::Desk => self.update_desk(op,host,client,input,released,now)?,
+            Scene::Leisure(leisure::Destination::GuestClub) if self.slot_viewer.is_some() =>
+                self.update_slots(op,host,client,input,released,now)?,
             Scene::Leisure(kind) => self.update_leisure(kind,op,host,client,input,released,now)?,
             Scene::Dance => self.update_dance(op,host,client,input,released,now)?,
+            Scene::DancePerformance => self.update_dance_performance(op,host,client,now)?,
             Scene::Personnel => self.update_personnel(op,host,client,input,released,now)?,
             Scene::Events => self.update_events(op,host,client,input,released,now)?,
             Scene::Awards => self.update_awards(op,host,client,input,released,now)?,
@@ -1099,9 +1282,7 @@ impl Game {
                 }
             }
             Scene::Title => {
-                if self.config_panel.is_some(){
-                    self.update_config(host,client,input,released,now)?;
-                } else if self.slot_viewer.is_some() {
+                if self.slot_viewer.is_some() {
                     self.update_slots(op,host,client,input,released,now)?;
                 } else if let Some(dialog) = &mut self.quit_dialog {
                     match dialog.update(&self.widgets, input, released, now) {
@@ -1157,6 +1338,8 @@ impl Game {
                             self.leaving = Some(now);
                         } else if name == "Continue" {
                             self.open_slots(slots::Mode::TitleLoad,op,host,client,now)?;
+                        } else if name == "Guest" {
+                            self.open_slots(slots::Mode::TitleGuest,op,host,client,now)?;
                         } else if name == "Config" {
                             self.open_config(op,host,client,now)?;
                         } else if name == "Shop" {
@@ -1226,8 +1409,13 @@ impl Game {
                 self.camera_move = None;
             }
         }
-        if matches!(self.scene,Scene::Script|Scene::StockEditor|Scene::Shop|Scene::Leisure(leisure::Destination::Casino|leisure::Destination::Examination)) { self.actors.sync(host, client, &self.files, op, now, &mut self.adv_camera, if self.scene==Scene::Shop {shop::CAMERA_OFFSET} else {0.})?; }
+        self.actors.set_player_opacity(self.settings.player_opacity / 100.);
+        let free_skill = matches!(self.scene, Scene::Leisure(d) if leisure::is_free_skill(d, &self.script.tag_backup));
+        if free_skill || matches!(self.scene,Scene::Script|Scene::StockEditor|Scene::Shop|Scene::DancePerformance|Scene::Leisure(leisure::Destination::Casino|leisure::Destination::Blackjack|leisure::Destination::Examination|leisure::Destination::FreeMode|leisure::Destination::GuestClub)) { self.actors.sync(host, client, &self.files, op, now, &mut self.adv_camera, if self.scene==Scene::Shop {shop::CAMERA_OFFSET} else {0.})?; }
         if self.scene==Scene::Shop {self.shop.initial_camera.get_or_insert(self.adv_camera);}
+        if self.scene == Scene::Script && self.voice_maid.is_some() {
+            self.update_voice_position(host, client)?;
+        }
         if let Some(mut photo) = self.photo.take() {
             if !photo.update(self, host, client, op, now)? { self.photo = Some(photo); }
         }
@@ -1280,10 +1468,16 @@ impl Game {
             .iter()
             .filter_map(|w| w.toggle.map(|t| (t.active_sprite, t.selected)))
             .collect();
+        let mut reveal = self.settings.visible_prefix(now);
+        let config_first = self.config_panel.as_ref().map_or(usize::MAX, |p| p.first());
+        let slot_tutorial = (self.scene == Scene::Leisure(leisure::Destination::SlotMachine))
+            .then(|| self.slot_tutorial_opacity(now));
         for (i, w) in self.widgets.iter_mut().chain(&mut self.trophies.widgets).enumerate() {
             let overlay = i >= scene_count;
             let mut rect = if overlay { w.rect } else { Self::rect(self.scene, w, elapsed) };
             let mut clip = if self.scene==Scene::StockEditor {self.stock_editor.clip(&w.path)} else {self.business.clip(self.scene,&w.path,&self.assets.operations_layout)};
+            if let Some(bounds) = self.assets.free_skill_layout.clip(&w.path) { clip = Some(bounds); }
+            if let Some(bounds) = self.assets.vip_layout.clip(&w.path) { clip = Some(bounds); }
             if self.scene==Scene::Desk {clip=self.desk.clip(&w.path,&self.assets.desk_grid);}
             if let Some(screen)=&self.dance {clip=screen.clip(&w.path);}
             if let Some(screen)=&self.personnel {clip=screen.clip(&w.path);}
@@ -1299,7 +1493,21 @@ impl Game {
                 (rect, clip, editor_visible) = self.editor.geometry(w, &self.assets.editor_layout);
             }
             let (shift, opacity) =
-                if overlay {trophy_transform} else if let Some(choices)=&self.choices && i>=choices.first {
+                if overlay {trophy_transform}
+                else if i >= config_first { (0., 255) }
+                else if w.path.starts_with("SystemUI Root/SystemShortcut/") {
+                    if !(self.settings.shortcuts || self.settings.shortcuts_open)
+                        || ((w.path.ends_with("/Config") || w.path.ends_with("/Help"))
+                            && !self.settings.shortcut_base)
+                    {
+                        continue;
+                    }
+                    (0., 255)
+                } else if let Some(opacity) = slot_tutorial
+                    && w.path.starts_with("/Canvas Tutorial Panel/")
+                {
+                    (0., opacity)
+                } else if let Some(choices)=&self.choices && i>=choices.first {
                     let (dy,bounds,show,alpha)=choices.draw(i,&w.path,now);
                     rect[1]+=dy;
                     clip=Some(bounds);
@@ -1310,6 +1518,12 @@ impl Game {
                         continue;
                     };
                     if !self.message_open || (name.is_empty() && w.path.contains("/SpeakerName")) {
+                        continue;
+                    }
+                    if w.path.ends_with("/Buttons/Auto") {
+                        w.tint[3] = if self.settings.auto { 255 } else { 175 };
+                    }
+                    if w.path.ends_with("/Hitret") && reveal < UnicodeSegmentation::graphemes(text.as_str(), true).count() {
                         continue;
                     }
                     if let Some(label) = w.label.as_mut() {
@@ -1373,6 +1587,21 @@ impl Game {
                     let mut pos = *pos;
                     pos[0] += shift + rect[0] - w.rect[0];
                     pos[1] += rect[1] - w.rect[1];
+                    let mut display = None;
+                    if self.scene == Scene::Script && w.path.ends_with("/MsgParent/Message") {
+                        if let Some(text) = paint["text"].as_str() {
+                            let mut glyphs = text.grapheme_indices(true);
+                            if let Some((end, _)) = glyphs.nth(reveal) {
+                                let mut prefix = paint.clone();
+                                prefix["text"] = json!(&text[..end]);
+                                display = Some(prefix);
+                                reveal = 0;
+                            } else {
+                                reveal = reveal.saturating_sub(text.graphemes(true).count());
+                            }
+                        }
+                    }
+                    let paint = display.as_ref().unwrap_or(paint);
                     layers.push(json!({"op":"put","layer":{"id":id,"rect":pos,"viewport_clip":clip,"opacity":opacity,"paint":paint,"visible":visible,"order":[w.depth,id]}}));
                 }
             } else {
@@ -1395,6 +1624,12 @@ impl Game {
                 }
             }
         }
+        if self.settings.fps {
+            let id = layers.len() + 1;
+            layers.push(json!({"op":"put","layer":{"id":id,"rect":[16,12,144,42],"order":[99999,id],
+                "paint":{"kind":"text","font":"default","size":22,
+                         "text":format!("{} FPS",host.presentation_fps().unwrap_or(0)),"color":[255,255,255,255]}}}));
+        }
         let count = layers.len();
         for id in count + 1..=self.previous_layers {
             layers.push(json!({"op":"remove","id":id}));
@@ -1416,6 +1651,7 @@ impl Game {
 struct Vm {
     client: ClientId,
     config: Config,
+    linked_cm3d2: Option<crate::tjs::retail::linked::Mounts>,
     game: Option<Game>,
 }
 impl Vm {
@@ -1433,6 +1669,9 @@ impl Vm {
             state
                 .retail
                 .attach(files.clone(), op.storage.clone(), &op.dir)?;
+            if let Some(linked) = self.linked_cm3d2.as_ref() {
+                state.retail.attach_linked(linked, &self.config.archives)?;
+            }
             let script = AdvKag::for_profile(
                 &files,
                 op.storage.as_ref(),
@@ -1442,12 +1681,14 @@ impl Vm {
             let assets = Assets::load(&mut op).context("load standalone Unity assets")?;
             let now = host.now_ms();
             let mut g = Game {
+                title_return: None,
                 adv_camera: ([0., 1.6, 0.], 3., [180., 0.]),
                 main_light: MainLight::default(),
                 camera_move: None,
                 adv_cover: None,
                 world_cover: None,
                 dialogue: None,
+                voice_maid: None,
                 daily: Default::default(),
                 business: Default::default(),
                 shop: Default::default(),
@@ -1461,7 +1702,7 @@ impl Vm {
                 assets,
                 files,
                 script,
-                sound: Sound::new(),
+                sound: Sound::standalone(),
                 scene: Scene::Logo,
                 widgets: vec![],
                 title_banner: None,
@@ -1478,6 +1719,7 @@ impl Vm {
                 pressed: None,
                 focus: 0,
                 config_panel: None,
+                settings: Default::default(),
                 message_transparency: 0.,
                 quit_dialog: None,
                 choices: None,
@@ -1489,6 +1731,7 @@ impl Vm {
                 leisure: Default::default(),
                 desk: Default::default(),
                 dance: None,
+                performance: None,
                 personnel: None,
                 personnel_backup: None,
                 events: None,
@@ -1542,7 +1785,8 @@ impl VmAdapter for Vm {
             let selected:Vec<_>=game.widgets.iter().filter(|w|w.toggle.is_some_and(|t|t.selected)).map(|w|&w.path).collect();
             json!({"scene":game.scene.name(),"day":day,"quit_dialog":game.quit_dialog.is_some(),"config_open":game.config_panel.is_some(),"choices":game.choices.as_ref().map(|c|c.labels()),"widgets":game.widgets.len(),"stock_editor":if game.scene==Scene::StockEditor {game.script.tjs.lock().ok().map(|t|game.stock_editor.diagnostics(&t.runtime.host().state))}else{None},"player_editor":game.editor.diagnostics(),"dialogue":game.dialogue,"npc_slots":game.actors.slots.iter().map(|((man,slot),i)|json!([man,slot,i])).collect::<Vec<_>>(),"club_meshes":game.club_meshes,
                 "preferences":preferences,"selected":selected,"focus":BUTTONS[game.focus],
-                "script":game.script.position(),"bgm":game.sound.current_bgm})
+                "script":game.script.position(),"bgm":game.sound.current_bgm,
+                "dance":game.performance.as_ref().map(dance::performance::Show::diagnostics)})
         });
         serde_json::to_vec(&state).unwrap_or_default()
     }
@@ -1556,11 +1800,18 @@ impl crysirror_runtime::runtime::VmFactory for Factory {
         spec: &crysirror_runtime::model::ClientSpec,
     ) -> Result<Box<dyn VmAdapter>> {
         ensure!(spec.program.is_empty(), "COM3D2 uses native scripts");
-        let config: Config = serde_json::from_value(spec.config.clone())?;
+        let mut value = spec.config.clone();
+        let linked_cm3d2 = value.as_object_mut()
+            .and_then(|fields| fields.remove("linked_cm3d2"))
+            .map(serde_json::from_value)
+            .transpose()?
+            .flatten();
+        let config: Config = serde_json::from_value(value)?;
         config.validate()?;
         Ok(Box::new(Vm {
             client,
             config,
+            linked_cm3d2,
             game: None,
         }))
     }

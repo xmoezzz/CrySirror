@@ -57,7 +57,7 @@ impl Desk {
     pub fn clip(&self, path: &str, grid: &shop::Grid) -> Option<[f32; 4]> {
         path.starts_with("desk-row/").then_some(grid.clip)
     }
-    fn catalog(&mut self, s: &mut TjsState) -> Result<()> {
+    pub(super) fn catalog(&mut self, s: &mut TjsState) -> Result<()> {
         if self.items.is_empty() || s.retail.desk.is_empty() {
             let mut items = Vec::new();
             let mut placements = s.retail.desk.clone();

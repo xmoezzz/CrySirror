@@ -112,6 +112,9 @@ impl EngineSystems {
                 }
                 if let Some(system) = &entity.vfx {
                     for emitter in &system.emitters {
+                        if let crysirror_vfx::RenderSpec::Sprite { triplanar_coverage: Some(coverage), .. } = &emitter.render {
+                            visitor(client, &coverage.texture);
+                        }
                         match &emitter.render {
                             crysirror_vfx::RenderSpec::Sprite { texture, .. }
                             | crysirror_vfx::RenderSpec::Mesh { texture, .. }

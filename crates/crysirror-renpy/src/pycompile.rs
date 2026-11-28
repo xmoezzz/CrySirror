@@ -7,14 +7,29 @@
 
 use crate::lexer::PyExpr;
 use crysirror_python::ast::*;
-use crysirror_python::compile::{compile_eval, compile_module, CompileOptions};
-use crysirror_python::parser::{parse_expression, parse_module, parse_module_py2_fallback, ParseOptions};
+use crysirror_python::compile::{CompileOptions, compile_eval, compile_module};
+use crysirror_python::parser::{
+    ParseOptions, parse_expression, parse_module, parse_module_py2_fallback,
+};
 use crysirror_python::{Dialect, Vm};
 use std::rc::Rc;
 
 fn wrap(name: &str, e: Expr) -> Expr {
     let loc = e.loc.clone();
-    Expr::new(loc.clone(), ExprKind::Call { func: Box::new(Expr::new(loc, ExprKind::Name { id: name.into(), ctx: Ctx::Load })), args: vec![e], keywords: Vec::new() })
+    Expr::new(
+        loc.clone(),
+        ExprKind::Call {
+            func: Box::new(Expr::new(
+                loc,
+                ExprKind::Name {
+                    id: name.into(),
+                    ctx: Ctx::Load,
+                },
+            )),
+            args: vec![e],
+            keywords: Vec::new(),
+        },
+    )
 }
 
 fn w_expr(e: &mut Expr) {
@@ -41,11 +56,17 @@ fn w_expr(e: &mut Expr) {
             values.iter_mut().for_each(w_expr);
         }
         ExprKind::Set(v) => v.iter_mut().for_each(w_expr),
-        ExprKind::Comp { elt, generators, .. } => {
+        ExprKind::Comp {
+            elt, generators, ..
+        } => {
             w_expr(elt);
             w_gens(generators);
         }
-        ExprKind::DictComp { key, value, generators } => {
+        ExprKind::DictComp {
+            key,
+            value,
+            generators,
+        } => {
             w_expr(key);
             w_expr(value);
             w_gens(generators);
@@ -56,11 +77,17 @@ fn w_expr(e: &mut Expr) {
                 w_expr(v);
             }
         }
-        ExprKind::Compare { left, comparators, .. } => {
+        ExprKind::Compare {
+            left, comparators, ..
+        } => {
             w_expr(left);
             comparators.iter_mut().for_each(w_expr);
         }
-        ExprKind::Call { func, args, keywords } => {
+        ExprKind::Call {
+            func,
+            args,
+            keywords,
+        } => {
             w_expr(func);
             args.iter_mut().for_each(w_expr);
             keywords.iter_mut().for_each(|k| w_expr(&mut k.value));
@@ -72,7 +99,9 @@ fn w_expr(e: &mut Expr) {
             w_expr(slice);
         }
         ExprKind::Starred { value, .. } => w_expr(value),
-        ExprKind::List { elts, .. } | ExprKind::Tuple { elts, .. } => elts.iter_mut().for_each(w_expr),
+        ExprKind::List { elts, .. } | ExprKind::Tuple { elts, .. } => {
+            elts.iter_mut().for_each(w_expr)
+        }
         ExprKind::Slice { lower, upper, step } => {
             for x in [lower, upper, step].into_iter().flatten() {
                 w_expr(x);
@@ -81,9 +110,16 @@ fn w_expr(e: &mut Expr) {
         ExprKind::Constant(_) | ExprKind::Name { .. } => {}
     }
     let name = match &e.kind {
-        ExprKind::List { ctx: Ctx::Load, .. } | ExprKind::Comp { kind: CompKind::List, .. } => Some("__renpy__list__"),
+        ExprKind::List { ctx: Ctx::Load, .. }
+        | ExprKind::Comp {
+            kind: CompKind::List,
+            ..
+        } => Some("__renpy__list__"),
         ExprKind::Dict { .. } | ExprKind::DictComp { .. } => Some("__renpy__dict__"),
-        ExprKind::Comp { kind: CompKind::Set, .. } => Some("__renpy__set__"),
+        ExprKind::Comp {
+            kind: CompKind::Set,
+            ..
+        } => Some("__renpy__set__"),
         _ => None,
     };
     if let Some(n) = name {
@@ -124,12 +160,23 @@ fn w_stmts(b: &mut [Stmt]) {
 
 fn w_stmt(s: &mut Stmt) {
     match &mut s.kind {
-        StmtKind::FunctionDef { args, body, decorators, .. } => {
+        StmtKind::FunctionDef {
+            args,
+            body,
+            decorators,
+            ..
+        } => {
             decorators.iter_mut().for_each(w_expr);
             w_args(args);
             w_stmts(body);
         }
-        StmtKind::ClassDef { bases, keywords, body, decorators, .. } => {
+        StmtKind::ClassDef {
+            bases,
+            keywords,
+            body,
+            decorators,
+            ..
+        } => {
             decorators.iter_mut().for_each(w_expr);
             bases.iter_mut().for_each(w_expr);
             keywords.iter_mut().for_each(|k| w_expr(&mut k.value));
@@ -150,7 +197,13 @@ fn w_stmt(s: &mut Stmt) {
                 w_expr(v);
             }
         }
-        StmtKind::For { target, iter, body, orelse, .. } => {
+        StmtKind::For {
+            target,
+            iter,
+            body,
+            orelse,
+            ..
+        } => {
             w_expr(target);
             w_expr(iter);
             w_stmts(body);
@@ -167,12 +220,22 @@ fn w_stmt(s: &mut Stmt) {
             }
             w_stmts(body);
         }
-        StmtKind::Raise { exc, cause, py2_value, py2_tb } => {
+        StmtKind::Raise {
+            exc,
+            cause,
+            py2_value,
+            py2_tb,
+        } => {
             for e in [exc, cause, py2_value, py2_tb].into_iter().flatten() {
                 w_expr(e);
             }
         }
-        StmtKind::Try { body, handlers, orelse, finalbody } => {
+        StmtKind::Try {
+            body,
+            handlers,
+            orelse,
+            finalbody,
+        } => {
             w_stmts(body);
             for h in handlers.iter_mut() {
                 if let Some(t) = h.typ.as_mut() {
@@ -195,7 +258,11 @@ fn w_stmt(s: &mut Stmt) {
             }
             values.iter_mut().for_each(w_expr);
         }
-        StmtKind::Exec { body, globals, locals } => {
+        StmtKind::Exec {
+            body,
+            globals,
+            locals,
+        } => {
             w_expr(body);
             for e in [globals, locals].into_iter().flatten() {
                 w_expr(e);
@@ -212,7 +279,12 @@ fn w_stmt(s: &mut Stmt) {
 }
 
 /// Compiles `src` in mode `exec`/`hide` (statements) or `eval`.
-pub fn compile(vm: &Vm, src: &PyExpr, mode: &str, dialect: Dialect) -> Result<Rc<crysirror_python::code::Code>, String> {
+pub fn compile(
+    vm: &Vm,
+    src: &PyExpr,
+    mode: &str,
+    dialect: Dialect,
+) -> Result<Rc<crysirror_python::code::Code>, String> {
     let text = src.text.replace('\r', "");
     let filename = src.filename.to_string();
     let line = src.line.max(1);
@@ -245,15 +317,44 @@ pub fn compile(vm: &Vm, src: &PyExpr, mode: &str, dialect: Dialect) -> Result<Rc
 /// so its names are function locals (closures and comprehensions see them).
 fn wrap_hide(body: Vec<crysirror_python::ast::Stmt>) -> Vec<crysirror_python::ast::Stmt> {
     use crysirror_python::ast::{Ctx, Expr, ExprKind, Stmt, StmtKind};
-    let loc = body.first().map(|s| s.loc.clone()).unwrap_or(crysirror_python::ast::Loc { line: 1, col: 0 });
+    let loc = body
+        .first()
+        .map(|s| s.loc.clone())
+        .unwrap_or(crysirror_python::ast::Loc { line: 1, col: 0 });
     let name = "_execute_python_hide".to_string();
     let def = Stmt {
         loc: loc.clone(),
-        kind: StmtKind::FunctionDef { name: name.clone(), args: Box::default(), body, decorators: Vec::new(), returns: None, is_async: false },
+        kind: StmtKind::FunctionDef {
+            name: name.clone(),
+            args: Box::default(),
+            body,
+            decorators: Vec::new(),
+            returns: None,
+            is_async: false,
+        },
     };
-    let func = Expr { loc: loc.clone(), kind: ExprKind::Name { id: name, ctx: Ctx::Load } };
-    let call = Expr { loc: loc.clone(), kind: ExprKind::Call { func: Box::new(func), args: Vec::new(), keywords: Vec::new() } };
-    vec![def, Stmt { loc, kind: StmtKind::Expr(call) }]
+    let func = Expr {
+        loc: loc.clone(),
+        kind: ExprKind::Name {
+            id: name,
+            ctx: Ctx::Load,
+        },
+    };
+    let call = Expr {
+        loc: loc.clone(),
+        kind: ExprKind::Call {
+            func: Box::new(func),
+            args: Vec::new(),
+            keywords: Vec::new(),
+        },
+    };
+    vec![
+        def,
+        Stmt {
+            loc,
+            kind: StmtKind::Expr(call),
+        },
+    ]
 }
 
 /// Bind the native ParameterInfo lists used by SL2 and ATL.
@@ -267,13 +368,18 @@ pub(crate) fn bind_parameters(
 ) -> crysirror_python::PyResult<crysirror_python::Value> {
     let scope = vm.types.new_dict();
     let mut args = args.iter().cloned();
-    let mut kwargs = kwargs.iter().cloned().collect::<std::collections::BTreeMap<_, _>>();
+    let mut kwargs = kwargs
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeMap<_, _>>();
     for parameter in &signature.parameters {
         let value = match parameter.kind {
             0 => args.next(),
             1 => match (args.next(), kwargs.remove(parameter.name.as_str())) {
                 (Some(_), Some(_)) => {
-                    return Err(vm.type_error(format!("parameter {} supplied twice", parameter.name)));
+                    return Err(
+                        vm.type_error(format!("parameter {} supplied twice", parameter.name))
+                    );
                 }
                 (pos, kw) => pos.or(kw),
             },
@@ -282,7 +388,9 @@ pub(crate) fn bind_parameters(
             4 => {
                 let rest = vm.types.new_dict();
                 for (key, value) in std::mem::take(&mut kwargs) {
-                    rest.obj().unwrap().dict_set_raw(&vm.types, vm.types.new_str(&key), value);
+                    rest.obj()
+                        .unwrap()
+                        .dict_set_raw(&vm.types, vm.types.new_str(&key), value);
                 }
                 Some(rest)
             }
@@ -298,7 +406,10 @@ pub(crate) fn bind_parameters(
             }
             _ => return Err(vm.type_error(format!("missing parameter {}", parameter.name))),
         };
-        scope.obj().unwrap().dict_set_raw(&vm.types, vm.types.new_str(&parameter.name), value);
+        scope
+            .obj()
+            .unwrap()
+            .dict_set_raw(&vm.types, vm.types.new_str(&parameter.name), value);
     }
     if args.next().is_some() || !kwargs.is_empty() {
         return Err(vm.type_error("unexpected Ren'Py arguments"));

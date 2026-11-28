@@ -1214,6 +1214,45 @@ fn two_channel_normal_maps_and_specular_strength_change_shading() {
 
 #[test]
 #[ignore = "requires a real wgpu adapter; execute explicitly"]
+fn layered_blinn_lobes_and_green_specular_masks_reach_pixels() {
+    use serde_json::json;
+    let gpu = Arc::new(pollster::block_on(Gpu::request(&wgpu::Instance::default(), None)).unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path();
+    std::fs::create_dir(path.join("assets")).unwrap();
+    for (name, color) in [("low.png", [255, 0, 0, 255]), ("high.png", [0, 255, 0, 255])] {
+        image::RgbaImage::from_pixel(1, 1, image::Rgba(color)).save(path.join("assets").join(name)).unwrap();
+    }
+    let shot = |sun: bool, height: &str, side: &str, top: &str| {
+        let material = json!({"base_color_factor":[0,0,0,1],
+            "effect":{"kind":"layered_blinn","softness":0.2,"mask_power":1,"intensity":if sun {0} else {1},"specular_scale":1,"specular_exponent":8},
+            "occlusion_texture":height,"metallic_roughness_texture":side,"opacity_texture":top});
+        let project = json!({"schema":2,"name":"blinn","content_revision":"1","canvas":[96,96],"assets":"assets",
+            "clients":[{"name":"game","adapter":"crysirror-script-v1","game":"blinn","systems":{"entities":[
+            {"id":1,"name":"panel","geometry":{"kind":"cube"},"material":material}]}}]});
+        let file = path.join("project.json");
+        std::fs::write(&file, serde_json::to_vec(&project).unwrap()).unwrap();
+        let mut rt = Runtime::load(&file, &path.join("state")).unwrap();
+        let light = sun.then(|| json!({"direction":[0,0,-1],"intensity":1,"shadows":false}));
+        let batch: crysirror_scene::ServiceBatch = serde_json::from_value(json!({"world":[
+            {"op":"set_camera","camera":{"eye":[0,0,3],"target":[0,0,0],"up":[0,1,0],"fov_y_degrees":45,"near":0.05,"far":50}},
+            {"op":"set_environment","environment":{"sun":light,"intensity":0,"show_sky":false,"bloom":0,"ambient_occlusion":0,"temporal_aa":false}}]})).unwrap();
+        rt.host.engine.submit(rt.client_id("game").unwrap(), &batch).unwrap();
+        rt.tick(0, InputFrame::default()).unwrap();
+        let mut renderer = Renderer::new(gpu.clone(), wgpu::TextureFormat::Rgba8UnormSrgb);
+        renderer.set_pbr_scene(Some(rt.render_pbr().unwrap().unwrap())).unwrap();
+        renderer.capture(&rt.host.scene, &mut rt.assets, rt.project.canvas, rt.project.background).unwrap().get_pixel(48, 48).0[0]
+    };
+    for sun in [true, false] {
+        let off = shot(sun, "low.png", "high.png", "low.png");
+        let mixed = shot(sun, "high.png", "high.png", "low.png");
+        let upper = shot(sun, "low.png", "low.png", "high.png");
+        assert!(off < 8 && mixed > off + 20 && upper > mixed + 8, "sun={sun} disabled={off} mixed={mixed} upper={upper}");
+    }
+}
+
+#[test]
+#[ignore = "requires a real wgpu adapter; execute explicitly"]
 fn local_point_and_spot_shadows_darken_only_occluded_floor() {
     let gpu = Arc::new(pollster::block_on(Gpu::request(&wgpu::Instance::default(), None)).unwrap());
     let shot = |shape: serde_json::Value, shadows: bool| {
@@ -2226,4 +2265,30 @@ fn puppet_layers_render_meshes_with_masks_blends_and_deformation() {
         (x0..x1).flat_map(|x| (y0..y1).map(move |y| (x, y))).filter(|(x, y)| px(img, *x, *y)[..3] == [255, 255, 0]).count()
     };
     assert!(yellow(&turned, 53, 75, 17, 24) > 30, "rotated arm extends sideways from the shoulder");
+}
+
+#[test]
+#[ignore = "requires a real wgpu adapter; execute explicitly"]
+fn raster_quality_switch_and_scaled_capture_render_pixels() {
+    let gpu = Arc::new(pollster::block_on(Gpu::request(&wgpu::Instance::default(), None)).unwrap());
+    let tmp = tempfile::tempdir().unwrap();
+    let mut rt = pbr_runtime(tmp.path(), true);
+    let mut scene = rt.render_pbr().unwrap().unwrap();
+    scene.environment.temporal_aa = false;
+    let mut renderer = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut images = Vec::new();
+    for samples in [1, 2, 4, 8] {
+        scene.environment.raster_quality = Some(crysirror_scene::view::RasterQuality {
+            samples, shadow_map_size: 1024, anisotropy: if samples == 1 { 1 } else { 16 },
+        });
+        renderer.set_pbr_scene(Some(scene.clone())).unwrap();
+        let pixels = renderer.capture_scaled(
+            &rt.host.scene, &mut rt.assets, rt.project.canvas, rt.project.background, 2,
+        ).unwrap();
+        assert_eq!(pixels.dimensions(), (640, 360));
+        let center = pixels.get_pixel(320, 190).0;
+        assert!(center[0] > center[1] && center[0] > center[2], "{samples}: {center:?}");
+        images.push(pixels);
+    }
+    assert_ne!(images[0], images[2], "changing MSAA must affect rendered pixels");
 }

@@ -29,7 +29,11 @@ fn f_parse_statement(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     for id in &ids {
         h.push(nodes::handle(vm, *id)?);
     }
-    Ok(if h.len() == 1 { h.pop().unwrap() } else { vm.types.new_list(h) })
+    Ok(if h.len() == 1 {
+        h.pop().unwrap()
+    } else {
+        vm.types.new_list(h)
+    })
 }
 
 fn f_parse_block(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -63,7 +67,9 @@ fn f_parse(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let r = super::state::rt(vm);
         let bytes = r.files.read(&name).or_else(|| r.files.common_read(&name));
         match bytes {
-            Some(b) => String::from_utf8_lossy(&b).trim_start_matches('\u{feff}').to_owned(),
+            Some(b) => String::from_utf8_lossy(&b)
+                .trim_start_matches('\u{feff}')
+                .to_owned(),
             None => return Err(vm.exc_msg("IOError", format!("Could not find '{name}'."))),
         }
     } else {
@@ -73,7 +79,8 @@ fn f_parse(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let game = py::import(vm, "renpy.game")?;
     py::set(vm, &game, "exception_info", info)?;
     let f: Rc<str> = name.as_str().into();
-    let grouped = crate::lexer::list_logical_lines(&f, &text, first).and_then(|l| crate::lexer::group_logical_lines(&f, l));
+    let grouped = crate::lexer::list_logical_lines(&f, &text, first)
+        .and_then(|l| crate::lexer::group_logical_lines(&f, l));
     let block = match grouped {
         Ok(b) => b,
         Err(e) => {
@@ -95,8 +102,14 @@ fn release_deferred_errors(vm: &mut Vm) -> PyResult<()> {
     let errors = py::import_attr(vm, MODULE, "parse_errors")?;
     let c = |vm: &mut Vm, n: &str| py::config_bool(vm, n).unwrap_or(false);
     let rules = [
-        ("check_conflicting_properties", c(vm, "check_conflicting_properties")),
-        ("check_translate_none", c(vm, "early_developer") && c(vm, "check_translate_none")),
+        (
+            "check_conflicting_properties",
+            c(vm, "check_conflicting_properties"),
+        ),
+        (
+            "check_translate_none",
+            c(vm, "early_developer") && c(vm, "check_translate_none"),
+        ),
         ("duplicate_id", c(vm, "early_developer")),
         ("atl_pos_only", !c(vm, "atl_pos_only")),
     ];
@@ -113,7 +126,10 @@ fn release_deferred_errors(vm: &mut Vm) -> PyResult<()> {
         for k in keys {
             names.push(crysirror_python::ops::repr(vm, &k)?);
         }
-        return Err(py::error(vm, format!("Unknown deferred error label(s) : ({},)", names.join(", "))));
+        return Err(py::error(
+            vm,
+            format!("Unknown deferred error label(s) : ({},)", names.join(", ")),
+        ));
     }
     Ok(())
 }
@@ -148,7 +164,10 @@ fn f_report_parse_errors(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     py::set(vm, &config, "debug_sound", Value::Bool(false))?;
     let v = py::import_attr(vm, "renpy", "version")?;
     let v = py::string(vm, &v)?;
-    let report = format!("I'm sorry, but errors were detected in your script. Please correct the\nerrors listed below, and try again.\n\n\n{}\nRen'Py Version: {v}\n", full.trim_end());
+    let report = format!(
+        "I'm sorry, but errors were detected in your script. Please correct the\nerrors listed below, and try again.\n\n\n{}\nRen'Py Version: {v}\n",
+        full.trim_end()
+    );
     super::log::push(vm, "errors", &report);
     super::link::diagnostic(vm, format!("renpy parse errors: {}", full.trim_end()));
     let f = py::import_attr(vm, "renpy.display.error", "report_parse_errors")?;
@@ -161,7 +180,10 @@ fn f_report_parse_errors(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn trie_add(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
-    Err(py::error(vm, "renpy.parser.statements.add is not available in this runtime; use renpy.register_statement."))
+    Err(py::error(
+        vm,
+        "renpy.parser.statements.add is not available in this runtime; use renpy.register_statement.",
+    ))
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
@@ -192,7 +214,11 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let t = vm.call(&Value::Obj(trie.clone()), Vec::new(), Vec::new())?;
     set(vm, "ParseTrie", Value::Obj(trie));
     set(vm, "statements", t);
-    set(vm, "translate_none_files", vm.types.new_set(Default::default()));
+    set(
+        vm,
+        "translate_none_files",
+        vm.types.new_set(Default::default()),
+    );
     Ok(m)
 }
 

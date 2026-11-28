@@ -24,7 +24,10 @@ fn tqd_getitem(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         return Ok(rv);
     }
     if py::config_bool(vm, "debug")? {
-        return Err(py::error(vm, format!("During an interpolation, '{k}' was not found as a variable.")));
+        return Err(py::error(
+            vm,
+            format!("During an interpolation, '{k}' was not found as a variable."),
+        ));
     }
     Ok(py::s(vm, &format!("<{k} unbound>")))
 }
@@ -54,7 +57,9 @@ fn predict_say(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn scry_say(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (who, what, scry) = (&args[0], &args[1], &args[2]);
-    let interacts = vm.call_method(who, "will_interact", Vec::new()).unwrap_or(Value::Bool(true));
+    let interacts = vm
+        .call_method(who, "will_interact", Vec::new())
+        .unwrap_or(Value::Bool(true));
     py::set(vm, scry, "interacts", interacts)?;
     let et = match vm.call_method(who, "get_extend_text", vec![what.clone()]) {
         Ok(v) => v,
@@ -71,7 +76,14 @@ pub(crate) fn say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let mut k: Vec<(Rc<str>, Value)> = kw.to_vec();
     if py::config_bool(vm, "old_substitutions")? {
         let tqd = py::import_attr(vm, "renpy.exports", "tag_quoting_dict")?;
-        what = crysirror_python::ops::binary_op(vm, &what, &tqd, crysirror_python::ast::BinOp::Mod, false, false)?;
+        what = crysirror_python::ops::binary_op(
+            vm,
+            &what,
+            &tqd,
+            crysirror_python::ast::BinOp::Mod,
+            false,
+            false,
+        )?;
     }
     if py::is_none(&who) {
         who = narrator(vm)?;
@@ -103,7 +115,11 @@ fn do_reshow_say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let what = args[1].clone();
     let interact = match args.get(2) {
         Some(v) => v.clone(),
-        None => kw.iter().position(|(k, _)| &**k == "interact").map(|i| kw.remove(i).1).unwrap_or(Value::Bool(false)),
+        None => kw
+            .iter()
+            .position(|(k, _)| &**k == "interact")
+            .map(|i| kw.remove(i).1)
+            .unwrap_or(Value::Bool(false)),
     };
     if !py::is_none(&who) {
         who = super::super::python::eval(vm, &who, &Value::None, &Value::None)?;
@@ -116,7 +132,11 @@ fn do_reshow_say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn get_reshow_say(vm: &mut Vm, _: &[Value], kw: Kw) -> PyResult<Value> {
     let lk = store_get(vm, "_last_say_kwargs")?;
-    let mut k = if py::is_none(&lk) { Vec::new() } else { py::str_items(vm, &lk)? };
+    let mut k = if py::is_none(&lk) {
+        Vec::new()
+    } else {
+        py::str_items(vm, &lk)?
+    };
     for (n, v) in kw {
         k.retain(|(x, _)| x != n);
         k.push((n.clone(), v.clone()));
@@ -149,7 +169,12 @@ fn get_side_image(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let c = ctx(vm)?;
     let images = py::get(vm, &c, "images")?;
     let attrs = if !py::is_none(&image_tag) {
-        let il = ex(vm, "default_layer", vec![layer.clone(), image_tag.clone()], Vec::new())?;
+        let il = ex(
+            vm,
+            "default_layer",
+            vec![layer.clone(), image_tag.clone()],
+            Vec::new(),
+        )?;
         let a = vm.call_method(&images, "get_attributes", vec![il, image_tag.clone()])?;
         let mut v = vec![image_tag];
         v.extend(py::items(vm, &a)?);
@@ -174,7 +199,11 @@ fn get_side_image(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let required = vm.types.new_list(vec![items[0].clone()]);
     let optional = vm.types.new_list(items[1..].to_vec());
-    vm.call_method(&images, "choose_image", vec![prefix, required, optional, Value::None])
+    vm.call_method(
+        &images,
+        "choose_image",
+        vec![prefix, required, optional, Value::None],
+    )
 }
 
 fn count_dialogue_blocks(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
@@ -196,7 +225,11 @@ fn substitute(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let scope = arg_or(args, kw, 1, "scope", Value::None);
     let translate = arg_or(args, kw, 2, "translate", Value::Bool(true));
     let f = py::import_attr(vm, "renpy.substitutions", "substitute")?;
-    let r = vm.call(&f, vec![s], vec![("scope".into(), scope), ("translate".into(), translate)])?;
+    let r = vm.call(
+        &f,
+        vec![s],
+        vec![("scope".into(), scope), ("translate".into(), translate)],
+    )?;
     crysirror_python::ops::getitem(vm, &r, Value::Int(0))
 }
 
@@ -213,7 +246,12 @@ fn ls_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     py::set(vm, this, "_who", arg_or(args, kw, 1, "who", Value::None))?;
     py::set(vm, this, "what", arg_or(args, kw, 2, "what", Value::None))?;
     py::set(vm, this, "args", arg_or(args, kw, 3, "args", Value::None))?;
-    py::set(vm, this, "kwargs", arg_or(args, kw, 4, "kwargs", Value::None))?;
+    py::set(
+        vm,
+        this,
+        "kwargs",
+        arg_or(args, kw, 4, "kwargs", Value::None),
+    )?;
     Ok(Value::None)
 }
 
@@ -228,7 +266,16 @@ fn last_say(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let what = store_get(vm, "_last_say_what")?;
     let a = store_get(vm, "_last_say_args")?;
     let k = store_get(vm, "_last_say_kwargs")?;
-    vm.call(&c, Vec::new(), vec![("who".into(), who), ("what".into(), what), ("args".into(), a), ("kwargs".into(), k)])
+    vm.call(
+        &c,
+        Vec::new(),
+        vec![
+            ("who".into(), who),
+            ("what".into(), what),
+            ("args".into(), a),
+            ("kwargs".into(), k),
+        ],
+    )
 }
 
 pub fn functions() -> Vec<(&'static str, NativeFn)> {
@@ -243,7 +290,10 @@ pub fn functions() -> Vec<(&'static str, NativeFn)> {
         ("get_side_image", get_side_image),
         ("count_dialogue_blocks", count_dialogue_blocks),
         ("count_seen_dialogue_blocks", count_seen_dialogue_blocks),
-        ("count_newly_seen_dialogue_blocks", count_newly_seen_dialogue_blocks),
+        (
+            "count_newly_seen_dialogue_blocks",
+            count_newly_seen_dialogue_blocks,
+        ),
         ("substitute", substitute),
         ("get_say_image_tag", get_say_image_tag),
         ("last_say", last_say),
@@ -253,13 +303,27 @@ pub fn functions() -> Vec<(&'static str, NativeFn)> {
 pub fn values(vm: &mut Vm, m: &ObjRef) -> PyResult<()> {
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, m, n, v);
     let obj = Value::Obj(vm.types.object.clone());
-    let tqd = py::class(vm, "renpy.exports", "TagQuotingDict", &[obj.clone()], &[("__getitem__", tqd_getitem)], &[])?;
+    let tqd = py::class(
+        vm,
+        "renpy.exports",
+        "TagQuotingDict",
+        &[obj.clone()],
+        &[("__getitem__", tqd_getitem)],
+        &[],
+    )?;
     let inst = vm.call(&Value::Obj(tqd.clone()), Vec::new(), Vec::new())?;
     set(vm, "TagQuotingDict", Value::Obj(tqd));
     set(vm, "tag_quoting_dict", inst);
     let who = vm.types.new_builtin("who", ls_who);
     let who = py::property(vm, who, None)?;
-    let ls = py::class(vm, "renpy.exports", "LastSay", &[obj], &[("__init__", ls_init)], &[("who", who)])?;
+    let ls = py::class(
+        vm,
+        "renpy.exports",
+        "LastSay",
+        &[obj],
+        &[("__init__", ls_init)],
+        &[("who", who)],
+    )?;
     set(vm, "LastSay", Value::Obj(ls));
     let curry = py::import_attr(vm, "renpy.curry", "curry")?;
     let drs = py::get_raw(m, "do_reshow_say");

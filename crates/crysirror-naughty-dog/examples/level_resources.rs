@@ -243,3 +243,46 @@ fn main() -> Result<()> {
     println!("{total_files} mounted files");
     Ok(())
 }
+
+#[test]
+#[ignore = "requires BCAS20097 01.00 via UNCHARTED2_ROOT"]
+fn installed_movie_and_music_audio() -> Result<()> {
+    let root = std::env::var_os("UNCHARTED2_ROOT").context("UNCHARTED2_ROOT")?;
+    let dir = Dir::open_ambient_dir(root, ambient_authority())?.open_dir("PS3_GAME/USRDIR/build/main")?;
+    let mut registry = FormatRegistry::default();
+    crysirror_formats_arc::register(&mut registry)?;
+    let mut context = DecodeContext::new(ClientId(1));
+    context.limits.max_entry_size = 128 << 20;
+    let mount = |source: &str| -> Result<ArchiveMount> {
+        let (_, arc) = registry.open(file(&dir, source)?, Some("sony/psarc"), &context)?;
+        ArchiveMount::new(arc, context.clone())
+    };
+    let english = mount("sound1/speech/english.psarc")?;
+    let streams = mount("sound1/streams.psarc")?;
+    let music = mount("sound1/music.psarc")?;
+    let check = |archive: &ArchiveMount, name: &str| -> Result<()> {
+        let mut audio = crysirror_audio::decoder::open_asset(archive.open(name)?, Some("xvag"))?;
+        let mut buffer = [[0.; 2]; 4096];
+        let mut frames = 0;
+        while frames < 20 * audio.sample_rate() {
+            let count = audio.read(&mut buffer)?;
+            if buffer[..count].iter().flatten().any(|v| v.abs() > 0.0001) { return Ok(()); }
+            if count == 0 { break; }
+            frames += count as u32;
+        }
+        anyhow::bail!("{name} has no signal in {frames} frames")
+    };
+    let mut movies = 0;
+    for item in dir.open_dir("movie1")?.entries()? {
+        let filename = item?.file_name();
+        let Some(name) = filename.to_str().and_then(|s| s.strip_suffix(".m2v")) else { continue };
+        let archive = if name == "sce-ndi-logos" { &streams } else { &english };
+        check(archive, &format!("{name}.xvag")).with_context(|| name.to_owned())?;
+        movies += 1;
+    }
+    assert_eq!(movies, 47);
+    let tracks = music.list()?;
+    assert_eq!(tracks.len(), 446);
+    for name in tracks { check(&music, &name).with_context(|| name)?; }
+    Ok(())
+}

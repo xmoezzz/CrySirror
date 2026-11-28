@@ -19,7 +19,11 @@ fn mget(vm: &mut Vm, n: &str) -> PyResult<Value> {
 
 fn fget(vm: &mut Vm, o: &Value, n: &str) -> PyResult<f64> {
     let v = py::get_or_none(vm, o, n)?;
-    if py::is_none(&v) { Ok(0.) } else { py::f64_of(vm, &v) }
+    if py::is_none(&v) {
+        Ok(0.)
+    } else {
+        py::f64_of(vm, &v)
+    }
 }
 
 fn bget(vm: &mut Vm, o: &Value, n: &str) -> PyResult<bool> {
@@ -46,7 +50,9 @@ fn f_default_drag_group(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn f_default_drag_joined(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let t = vm.types.new_tuple(vec![args[0].clone(), Value::Int(0), Value::Int(0)]);
+    let t = vm
+        .types
+        .new_tuple(vec![args[0].clone(), Value::Int(0), Value::Int(0)]);
     Ok(vm.types.new_list(vec![t]))
 }
 
@@ -70,22 +76,82 @@ fn f_rect_overlap_area(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 // Drag ------------------------------------------------------------------------------------------------
 
 const DRAG_NAMES: &[&str] = &[
-    "d", "drag_name", "draggable", "droppable", "drag_raise", "dragged", "dropped", "drop_allowable", "drag_handle", "drag_joined", "clicked",
-    "hovered", "unhovered", "replaces", "drag_offscreen", "mouse_drop", "activated", "alternate", "style", "dragging",
+    "d",
+    "drag_name",
+    "draggable",
+    "droppable",
+    "drag_raise",
+    "dragged",
+    "dropped",
+    "drop_allowable",
+    "drag_handle",
+    "drag_joined",
+    "clicked",
+    "hovered",
+    "unhovered",
+    "replaces",
+    "drag_offscreen",
+    "mouse_drop",
+    "activated",
+    "alternate",
+    "style",
+    "dragging",
 ];
 
 const REPLACED: &[&str] = &[
-    "x", "y", "at", "target_x", "target_y", "target_at", "target_at_delay", "snap_warper", "snap_start", "snap_start_x", "snap_start_y", "snapping",
-    "grab_x", "grab_y", "last_x", "last_y", "old_position", "drag_moved", "last_drop", "mouse_drop", "click_time", "z",
+    "x",
+    "y",
+    "at",
+    "target_x",
+    "target_y",
+    "target_at",
+    "target_at_delay",
+    "snap_warper",
+    "snap_start",
+    "snap_start_x",
+    "snap_start_y",
+    "snapping",
+    "grab_x",
+    "grab_y",
+    "last_x",
+    "last_y",
+    "old_position",
+    "drag_moved",
+    "last_drop",
+    "mouse_drop",
+    "click_time",
+    "z",
 ];
 
 fn drag_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let handle = vm.types.new_tuple(vec![Value::Float(0.), Value::Float(0.), Value::Float(1.), Value::Float(1.)]);
+    let handle = vm.types.new_tuple(vec![
+        Value::Float(0.),
+        Value::Float(0.),
+        Value::Float(1.),
+        Value::Float(1.),
+    ]);
     let mut v = vec![
-        Value::None, Value::None, Value::Bool(true), Value::Bool(true), Value::Bool(true), Value::None, Value::None,
-        mget(vm, "default_drop_allowable")?, handle, mget(vm, "default_drag_joined")?, Value::None, Value::None, Value::None, Value::None,
-        Value::Bool(false), Value::Bool(false), Value::None, Value::None, vm.types.new_str("drag"), Value::None,
+        Value::None,
+        Value::None,
+        Value::Bool(true),
+        Value::Bool(true),
+        Value::Bool(true),
+        Value::None,
+        Value::None,
+        mget(vm, "default_drop_allowable")?,
+        handle,
+        mget(vm, "default_drag_joined")?,
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::Bool(false),
+        Value::Bool(false),
+        Value::None,
+        Value::None,
+        vm.types.new_str("drag"),
+        Value::None,
     ];
     for (i, a) in args.iter().skip(1).enumerate().take(DRAG_NAMES.len()) {
         v[i] = a.clone();
@@ -97,7 +163,11 @@ fn drag_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             None => props.push((k.clone(), val.clone())),
         }
     }
-    let snapped = props.iter().find(|(k, _)| &**k == "snapped").map(|(_, v)| v.clone()).unwrap_or(Value::None);
+    let snapped = props
+        .iter()
+        .find(|(k, _)| &**k == "snapped")
+        .map(|(_, v)| v.clone())
+        .unwrap_or(Value::None);
     props.push(("style".into(), v[18].clone()));
     super::core::d_init(vm, &[this.clone()], &props)?;
     for (i, n) in DRAG_NAMES.iter().enumerate() {
@@ -112,10 +182,36 @@ fn drag_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let g = f_default_drag_group(vm, &[], &[])?;
         py::set(vm, this, "drag_group", g)?;
     }
-    for n in ["x", "y", "w", "h", "old_position", "parent_width", "parent_height", "target_x", "target_y", "grab_x", "grab_y", "last_x", "last_y", "snap_warper", "last_drop"] {
+    for n in [
+        "x",
+        "y",
+        "w",
+        "h",
+        "old_position",
+        "parent_width",
+        "parent_height",
+        "target_x",
+        "target_y",
+        "grab_x",
+        "grab_y",
+        "last_x",
+        "last_y",
+        "snap_warper",
+        "last_drop",
+    ] {
         py::set(vm, this, n, Value::None)?;
     }
-    for n in ["start_x", "start_y", "at", "target_at", "target_at_delay", "snap_start", "snap_start_x", "snap_start_y", "z"] {
+    for n in [
+        "start_x",
+        "start_y",
+        "at",
+        "target_at",
+        "target_at_delay",
+        "snap_start",
+        "snap_start_x",
+        "snap_start_y",
+        "z",
+    ] {
         py::set(vm, this, n, Value::Int(0))?;
     }
     py::set(vm, this, "snapping", Value::Bool(false))?;
@@ -216,7 +312,11 @@ fn drag_set_style_prefix(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> 
         vm.call(&f, vec![this.clone(), args[1].clone(), root], Vec::new())?;
         let c = py::get_or_none(vm, this, "child")?;
         if !py::is_none(&c) {
-            vm.call_method(&c, "set_style_prefix", vec![args[1].clone(), Value::Bool(false)])?;
+            vm.call_method(
+                &c,
+                "set_style_prefix",
+                vec![args[1].clone(), Value::Bool(false)],
+            )?;
         }
     }
     Ok(Value::None)
@@ -320,7 +420,10 @@ fn drag_visit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn drag_focus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let default = match arg(args, kw, 1, "default") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let default = match arg(args, kw, 1, "default") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     let d = super::core::displayable_class(vm);
     let f = py::get(vm, &Value::Obj(d), "focus")?;
     vm.call(&f, vec![this.clone(), Value::Bool(default)], Vec::new())?;
@@ -336,7 +439,10 @@ fn drag_focus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn drag_unfocus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let default = match arg(args, kw, 1, "default") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let default = match arg(args, kw, 1, "default") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     let d = super::core::displayable_class(vm);
     let f = py::get(vm, &Value::Obj(d), "unfocus")?;
     vm.call(&f, vec![this.clone(), Value::Bool(default)], Vec::new())?;
@@ -380,7 +486,11 @@ fn drag_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             let p = py::items(vm, &dgp)?;
             py::set(vm, this, "x", p[0].clone())?;
             py::set(vm, this, "y", p[1].clone())?;
-            let op = if p.len() == 3 { p[2].clone() } else { position.clone() };
+            let op = if p.len() == 3 {
+                p[2].clone()
+            } else {
+                position.clone()
+            };
             py::set(vm, this, "old_position", op)?;
         }
     }
@@ -388,7 +498,18 @@ fn drag_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let place = !ops::eq(vm, &op, &position)? || py::is_none(&py::get_or_none(vm, this, "x")?);
     if place {
         py::set(vm, this, "x", Value::None)?;
-        let r = vm.call_method(this, "place", vec![Value::None, Value::Int(0), Value::Int(0), Value::Float(w), Value::Float(h), rv.clone()])?;
+        let r = vm.call_method(
+            this,
+            "place",
+            vec![
+                Value::None,
+                Value::Int(0),
+                Value::Int(0),
+                Value::Float(w),
+                Value::Float(h),
+                rv.clone(),
+            ],
+        )?;
         let r = py::items(vm, &r)?;
         let (px, pyy) = (py::f64_of(vm, &r[0])?, py::f64_of(vm, &r[1])?);
         py::set(vm, this, "x", int(px))?;
@@ -421,7 +542,12 @@ fn drag_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         py::set(vm, this, "snap_start", Value::Int(0))?;
         if bget(vm, this, "snapping")? {
             let s = py::get_or_none(vm, this, "snapped")?;
-            run(vm, &s, vec![this.clone(), tx, ty, Value::Bool(true)], Vec::new())?;
+            run(
+                vm,
+                &s,
+                vec![this.clone(), tx, ty, Value::Bool(true)],
+                Vec::new(),
+            )?;
         }
         py::set(vm, this, "snapping", Value::Bool(false))?;
     } else if bget(vm, this, "snapping")? {
@@ -433,7 +559,10 @@ fn drag_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             done = py::f64_of(vm, &d)?;
         }
         let abs = py::import_attr(vm, "renpy.display.core", "absolute")?;
-        for (n, t, s) in [("x", "target_x", "snap_start_x"), ("y", "target_y", "snap_start_y")] {
+        for (n, t, s) in [
+            ("x", "target_x", "snap_start_x"),
+            ("y", "target_y", "snap_start_y"),
+        ] {
             let (tv, sv) = (fget(vm, this, t)?, fget(vm, this, s)?);
             let v = vm.call(&abs, vec![Value::Float((tv - sv) * done + sv)], Vec::new())?;
             py::set(vm, this, n, v)?;
@@ -455,11 +584,34 @@ fn drag_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             match render::render(vm, &mask, fw, fh, st, at) {
                 Ok(r) => mask = r,
                 Err(_) if crysirror_python::builtins::is_callable(vm, &mask) => {}
-                Err(_) => return Err(py::error(vm, "Focus_mask must be None, True, a displayable, or a callable.")),
+                Err(_) => {
+                    return Err(py::error(
+                        vm,
+                        "Focus_mask must be None, True, a displayable, or a callable.",
+                    ));
+                }
             }
         }
-        let (fmx, fmy) = if py::is_none(&mask) { (Value::None, Value::None) } else { (Value::Int(0), Value::Int(0)) };
-        vm.call_method(&rv, "add_focus", vec![this.clone(), Value::None, Value::Float(fx), Value::Float(fy), Value::Float(fw), Value::Float(fh), fmx, fmy, mask])?;
+        let (fmx, fmy) = if py::is_none(&mask) {
+            (Value::None, Value::None)
+        } else {
+            (Value::Int(0), Value::Int(0))
+        };
+        vm.call_method(
+            &rv,
+            "add_focus",
+            vec![
+                this.clone(),
+                Value::None,
+                Value::Float(fx),
+                Value::Float(fy),
+                Value::Float(fw),
+                Value::Float(fh),
+                fmx,
+                fmy,
+                mask,
+            ],
+        )?;
     }
     let x = py::get_or_none(vm, this, "x")?;
     let y = py::get_or_none(vm, this, "y")?;
@@ -481,7 +633,9 @@ fn set_grab(vm: &mut Vm, v: Value) -> PyResult<()> {
 }
 
 fn touch(vm: &mut Vm) -> bool {
-    py::import_attr(vm, "renpy.display", "touch").map(|v| ops::truthy(vm, &v).unwrap_or(false)).unwrap_or(false)
+    py::import_attr(vm, "renpy.display", "touch")
+        .map(|v| ops::truthy(vm, &v).unwrap_or(false))
+        .unwrap_or(false)
 }
 
 fn run_clicked(vm: &mut Vm, clicked: &Value, this: &Value) -> PyResult<Value> {
@@ -491,7 +645,13 @@ fn run_clicked(vm: &mut Vm, clicked: &Value, this: &Value) -> PyResult<Value> {
     }
 }
 
-fn clamp_offscreen(vm: &mut Vm, off: &Value, d: &Value, mut nx: f64, mut ny: f64) -> PyResult<(f64, f64)> {
+fn clamp_offscreen(
+    vm: &mut Vm,
+    off: &Value,
+    d: &Value,
+    mut nx: f64,
+    mut ny: f64,
+) -> PyResult<(f64, f64)> {
     let (pw, ph) = (fget(vm, d, "parent_width")?, fget(vm, d, "parent_height")?);
     let (w, h) = (fget(vm, d, "w")?, fget(vm, d, "h")?);
     let truthy = ops::truthy(vm, off)?;
@@ -516,7 +676,12 @@ fn clamp_offscreen(vm: &mut Vm, off: &Value, d: &Value, mut nx: f64, mut ny: f64
                 nx = nx.max((f[0] - w).trunc()).min((pw - f[0]).trunc());
                 ny = ny.max((f[1] - h).trunc()).min((ph - f[1]).trunc());
             }
-            _ => return Err(py::error(vm, "Invalid number of arguments to drag_offscreen.")),
+            _ => {
+                return Err(py::error(
+                    vm,
+                    "Invalid number of arguments to drag_offscreen.",
+                ));
+            }
         }
     } else if truthy && off.as_str().is_none() && crysirror_python::builtins::is_callable(vm, off) {
         let r = vm.call(off, vec![int(nx), int(ny)], Vec::new())?;
@@ -552,7 +717,12 @@ fn drag_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let s = py::get_or_none(vm, this, "snapped")?;
         let tx = py::get_or_none(vm, this, "target_x")?;
         let ty = py::get_or_none(vm, this, "target_y")?;
-        run(vm, &s, vec![this.clone(), tx, ty, Value::Bool(false)], Vec::new())?;
+        run(
+            vm,
+            &s,
+            vec![this.clone(), tx, ty, Value::Bool(false)],
+            Vec::new(),
+        )?;
         py::set(vm, this, "snap_warper", Value::None)?;
         py::set(vm, this, "snap_start", Value::Int(0))?;
     }
@@ -605,7 +775,11 @@ fn drag_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         return Err(ignore_event(vm));
     }
     let ct = py::get_or_none(vm, this, "click_time")?;
-    if !py::is_none(&alternate) && touch(vm) && !py::is_none(&ct) && st - py::f64_of(vm, &ct)? > longpress {
+    if !py::is_none(&alternate)
+        && touch(vm)
+        && !py::is_none(&ct)
+        && st - py::f64_of(vm, &ct)? > longpress
+    {
         py::set(vm, this, "click_time", Value::None)?;
         let rv = run(vm, &alternate, Vec::new(), Vec::new())?;
         if !py::is_none(&rv) {
@@ -624,8 +798,14 @@ fn drag_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         }
         return vm.call_method(&child, "event", args[1..].to_vec());
     }
-    let ty = { let t = py::get_or_none(vm, &ev, "type")?; py::int(vm, &t).unwrap_or(0) };
-    let handled = matches!(ty, events::MOUSEMOTION | events::MOUSEBUTTONUP | events::MOUSEBUTTONDOWN);
+    let ty = {
+        let t = py::get_or_none(vm, &ev, "type")?;
+        py::int(vm, &t).unwrap_or(0)
+    };
+    let handled = matches!(
+        ty,
+        events::MOUSEMOTION | events::MOUSEBUTTONUP | events::MOUSEBUTTONDOWN
+    );
     let (gx, gy) = (fget(vm, this, "grab_x")?, fget(vm, this, "grab_y")?);
     if handled {
         let (sx, sy) = (fget(vm, this, "start_x")?, fget(vm, this, "start_y")?);
@@ -643,7 +823,13 @@ fn drag_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             let op = py::get_or_none(vm, this, "old_position")?;
             let self_at = py::get_or_none(vm, this, "at")?;
             for (d, xo, yo) in &offsets {
-                let (nx, ny) = clamp_offscreen(vm, &off, d, (par_x - gx + xo).trunc(), (par_y - gy + yo).trunc())?;
+                let (nx, ny) = clamp_offscreen(
+                    vm,
+                    &off,
+                    d,
+                    (par_x - gx + xo).trunc(),
+                    (par_y - gy + yo).trunc(),
+                )?;
                 let dg = drag_group(vm, d)?;
                 let dn = py::get_or_none(vm, d, "drag_name")?;
                 if !py::is_none(&dg) && !py::is_none(&dn) {
@@ -672,7 +858,11 @@ fn drag_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let drop = if !py::is_none(&g) && moved {
         let jl = vm.types.new_list(joined.clone());
         if bget(vm, this, "mouse_drop")? {
-            vm.call_method(&g, "get_drop_at", vec![jl, Value::Float(par_x), Value::Float(par_y)])?
+            vm.call_method(
+                &g,
+                "get_drop_at",
+                vec![jl, Value::Float(par_x), Value::Float(par_y)],
+            )?
         } else {
             vm.call_method(&g, "get_best_drop", vec![jl])?
         }
@@ -749,7 +939,15 @@ fn drag_get_placement(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let x = py::get_or_none(vm, this, "x")?;
     if !py::is_none(&x) {
         let y = py::get_or_none(vm, this, "y")?;
-        return Ok(vm.types.new_tuple(vec![x, y, Value::Int(0), Value::Int(0), Value::Int(0), Value::Int(0), Value::Bool(true)]));
+        return Ok(vm.types.new_tuple(vec![
+            x,
+            y,
+            Value::Int(0),
+            Value::Int(0),
+            Value::Int(0),
+            Value::Int(0),
+            Value::Bool(true),
+        ]));
     }
     let d = super::core::displayable_class(vm);
     let f = py::get(vm, &Value::Obj(d), "get_placement")?;
@@ -837,7 +1035,10 @@ fn dg_add(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn dg_remove(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (this, child) = (&args[0], &args[1]);
     if !is_drag(vm, child)? {
-        return Err(py::error(vm, "Only drags can be removed from a drag group."));
+        return Err(py::error(
+            vm,
+            "Only drags can be removed from a drag group.",
+        ));
     }
     py::set(vm, child, "x", Value::None)?;
     let rm = multibox(vm, "remove")?;
@@ -879,7 +1080,10 @@ fn dg_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn reorder(vm: &mut Vm, args: &[Value], sign: i64) -> PyResult<Value> {
     let this = &args[0];
     py::set(vm, this, "sorted", Value::Bool(false))?;
-    let mut serial = { let v = py::get_or_none(vm, this, "z_serial")?; py::int(vm, &v).unwrap_or(0) };
+    let mut serial = {
+        let v = py::get_or_none(vm, this, "z_serial")?;
+        py::int(vm, &v).unwrap_or(0)
+    };
     for i in py::items(vm, &args[1])? {
         serial += 1;
         py::set(vm, &i, "z", Value::Int(sign * serial))?;
@@ -918,7 +1122,12 @@ fn allowable(vm: &mut Vm, c: &Value, joined: &Value) -> PyResult<bool> {
 }
 
 fn rect_of(vm: &mut Vm, d: &Value) -> PyResult<[f64; 4]> {
-    Ok([fget(vm, d, "x")?, fget(vm, d, "y")?, fget(vm, d, "w")?, fget(vm, d, "h")?])
+    Ok([
+        fget(vm, d, "x")?,
+        fget(vm, d, "y")?,
+        fget(vm, d, "w")?,
+        fget(vm, d, "h")?,
+    ])
 }
 
 fn dg_get_best_drop(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -975,24 +1184,54 @@ fn dg_get_child_by_name(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("default_drag_group", f_default_drag_group),
-        ("default_drag_joined", f_default_drag_joined),
-        ("default_drop_allowable", |_, _, _| Ok(Value::Bool(true))),
-        ("rect_overlap_area", f_rect_overlap_area),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("default_drag_group", f_default_drag_group),
+            ("default_drag_joined", f_default_drag_joined),
+            ("default_drop_allowable", |_, _, _| Ok(Value::Bool(true))),
+            ("rect_overlap_area", f_rect_overlap_area),
+        ],
+    );
     let d = Value::Obj(super::core::displayable_class(vm));
     let ro = py::import_attr(vm, "renpy.revertable", "RevertableObject")?;
-    let drag = py::class(vm, MODULE, "Drag", &[d, ro], &[
-        ("__init__", drag_init), ("snap", drag_snap), ("set_style_prefix", drag_set_style_prefix), ("add", drag_add), ("_clear", drag_clear),
-        ("set_child", drag_set_child), ("top", drag_top), ("bottom", drag_bottom), ("update_style_prefix", drag_update_style_prefix),
-        ("visit", drag_visit), ("focus", drag_focus), ("unfocus", drag_unfocus), ("render", drag_render),
-        ("get_drag_from_name", drag_get_drag_from_name), ("event", drag_event), ("get_placement", drag_get_placement),
-        ("per_interact", drag_per_interact),
-    ], &[
-        ("z", Value::Int(0)), ("focusable", Value::Bool(true)), ("old_position", Value::None), ("drag_offscreen", Value::Bool(false)),
-        ("activated", Value::None), ("alternate", Value::None), ("dragging", Value::None), ("drag_group_weakref", Value::None), ("click_time", Value::None),
-    ])?;
+    let drag = py::class(
+        vm,
+        MODULE,
+        "Drag",
+        &[d, ro],
+        &[
+            ("__init__", drag_init),
+            ("snap", drag_snap),
+            ("set_style_prefix", drag_set_style_prefix),
+            ("add", drag_add),
+            ("_clear", drag_clear),
+            ("set_child", drag_set_child),
+            ("top", drag_top),
+            ("bottom", drag_bottom),
+            ("update_style_prefix", drag_update_style_prefix),
+            ("visit", drag_visit),
+            ("focus", drag_focus),
+            ("unfocus", drag_unfocus),
+            ("render", drag_render),
+            ("get_drag_from_name", drag_get_drag_from_name),
+            ("event", drag_event),
+            ("get_placement", drag_get_placement),
+            ("per_interact", drag_per_interact),
+        ],
+        &[
+            ("z", Value::Int(0)),
+            ("focusable", Value::Bool(true)),
+            ("old_position", Value::None),
+            ("drag_offscreen", Value::Bool(false)),
+            ("activated", Value::None),
+            ("alternate", Value::None),
+            ("dragging", Value::None),
+            ("drag_group_weakref", Value::None),
+            ("click_time", Value::None),
+        ],
+    )?;
     let dv = Value::Obj(drag);
     let g = vm.types.new_builtin("_draggable", drag_draggable);
     let p = py::property(vm, g, None)?;
@@ -1004,11 +1243,30 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     crysirror_python::modules::set(vm, &m, "Drag", dv);
     let mb = py::import_attr(vm, "renpy.display.layout", "MultiBox")?;
     let rl = py::import_attr(vm, "renpy.revertable", "RevertableList")?;
-    let dg = py::class(vm, MODULE, "DragGroup", &[mb], &[
-        ("__init__", dg_init), ("add", dg_add), ("remove", dg_remove), ("render", dg_render), ("event", dg_event),
-        ("raise_children", dg_raise), ("lower_children", dg_lower), ("get_best_drop", dg_get_best_drop), ("get_drop_at", dg_get_drop_at),
-        ("get_children", dg_get_children), ("get_child_by_name", dg_get_child_by_name),
-    ], &[("z_serial", Value::Int(0)), ("sorted", Value::Bool(false)), ("_list_type", rl)])?;
+    let dg = py::class(
+        vm,
+        MODULE,
+        "DragGroup",
+        &[mb],
+        &[
+            ("__init__", dg_init),
+            ("add", dg_add),
+            ("remove", dg_remove),
+            ("render", dg_render),
+            ("event", dg_event),
+            ("raise_children", dg_raise),
+            ("lower_children", dg_lower),
+            ("get_best_drop", dg_get_best_drop),
+            ("get_drop_at", dg_get_drop_at),
+            ("get_children", dg_get_children),
+            ("get_child_by_name", dg_get_child_by_name),
+        ],
+        &[
+            ("z_serial", Value::Int(0)),
+            ("sorted", Value::Bool(false)),
+            ("_list_type", rl),
+        ],
+    )?;
     crysirror_python::modules::set(vm, &m, "DragGroup", Value::Obj(dg));
     Ok(m)
 }

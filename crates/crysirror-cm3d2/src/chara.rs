@@ -201,6 +201,8 @@ pub struct Maid {
     pub rotation: [f32; 3],
     /// `TBody` animation states.
     pub anims: Vec<AnimState>,
+    pub(crate) performance_time: Option<u64>,
+    pub(crate) performance_audio: Option<f32>,
     pub name_first: String,
     pub name_last: String,
     pub npc: bool,
@@ -1114,7 +1116,8 @@ impl View {
                 }
                 let mut anim = serde_json::Map::new();
                 if *slot == "body" {
-                    maid.advance_anims(now);
+                    let animation_now = maid.performance_time.unwrap_or(now);
+                    maid.advance_anims(animation_now);
                     let layers: Vec<serde_json::Value> = maid
                         .anims
                         .iter()
@@ -1123,8 +1126,9 @@ impl View {
                             let path = files.path(&a.file)?;
                             Some(json!({
                                 "clip": crysirror_asset::interchange::CM3D2_CLIP, "source": path,
-                                "time": now.saturating_sub(a.start) as f32 / 1000., "speed": 1.0, "looping": a.looping,
-                                "weight": a.weight(now), "target_weight": a.target, "fade": a.rate.min(1000.),
+                                "time": animation_now.saturating_sub(a.start) as f32 / 1000.,
+                                "speed": if maid.performance_time.is_some() { 0.0 } else { 1.0 }, "looping": a.looping,
+                                "weight": a.weight(animation_now), "target_weight": a.target, "fade": a.rate.min(1000.),
                                 "blend_layer": a.layer,
                             }))
                         })
@@ -1156,7 +1160,7 @@ impl View {
                 // The world advances clip time; resubmit only on change of
                 // the clip, follow, nodes or face (time excluded).
                 let mut signature = serde_json::Value::Object(anim.clone());
-                if let Some(ls) = signature.get_mut("layers").and_then(|l| l.as_array_mut()) {
+                if maid.performance_time.is_none() && let Some(ls) = signature.get_mut("layers").and_then(|l| l.as_array_mut()) {
                     for l in ls {
                         l["time"] = json!(0);
                         l["weight"] = json!(0);

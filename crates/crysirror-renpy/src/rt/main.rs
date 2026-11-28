@@ -94,12 +94,140 @@ fn f_reset_clock(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 /// `run(restart)`: one run of the script from the start label.
+fn trace_styles(vm: &mut Vm, at: &str) {
+    if std::env::var_os("CRYSIRROR_RENPY_TRACE").is_some() {
+        let ok = super::style::get_style(vm, "main_menu_text").is_ok();
+        let t = super::style::get_style(vm, "main_menu_title").is_ok();
+        super::link::diagnostic(
+            vm,
+            format!("trace: {at}: main_menu_text={ok} main_menu_title={t}"),
+        );
+    }
+}
+
+/// 6.18 `run(restart)`: the init-time steps of later releases (styles,
+/// screen analysis, post_init) all happen in `main`.
+fn run_618(vm: &mut Vm, restart: Value) -> PyResult<Value> {
+    call0(vm, "renpy.python", "clean_stores")?;
+    let log = call0(vm, "renpy.python", "RollbackLog")?;
+    set_attr(vm, "renpy.game", "log", log)?;
+    let ctx_cls = get_attr(vm, "renpy.execution", "Context")?;
+    let ctx = vm.call(&ctx_cls, vec![Value::Bool(true)], Vec::new())?;
+    let contexts = vm.types.new_list(vec![ctx]);
+    set_attr(vm, "renpy.game", "contexts", contexts)?;
+    let script = get_attr(vm, "renpy.game", "script")?;
+    let start = py::s(vm, "_start");
+    let has = py::method(vm, &script, "has_label", vec![start])?;
+    let start_label = if py::truthy(vm, &has)? { "_start" } else { "start" };
+    let ctx = context(vm)?;
+    let l = py::s(vm, start_label);
+    py::method(vm, &ctx, "goto_label", vec![l])?;
+    let warp_label = call0(vm, WARP, "warp")?;
+    if !py::is_none(&warp_label) {
+        py::method(vm, &ctx, "goto_label", vec![warp_label])?;
+        let a = py::s(vm, "_after_warp");
+        py::method(vm, &ctx, "call", vec![a])?;
+        let config = py::import(vm, "renpy.config")?;
+        py::set(vm, &config, "skipping", Value::None)?;
+    }
+    let _ = (|| -> PyResult<()> {
+        let ctime = call0(vm, "time", "ctime")?;
+        let line = format!("--- {}", py::string(vm, &ctime)?);
+        let s = py::s(vm, &line);
+        call(vm, "renpy.exports", "log", vec![s])?;
+        let e = py::s(vm, "");
+        call(vm, "renpy.exports", "log", vec![e])?;
+        Ok(())
+    })();
+    set_attr(vm, "store", "_restart", restart)?;
+    method0(vm, "renpy.display", "interface", "enter_context")?;
+    call(vm, "renpy.execution", "run_context", vec![Value::Bool(true)])?;
+    Ok(Value::None)
+}
+
+/// 6.18 `main` after the init code: post-init steps, then the run loop.
+fn after_init_618(vm: &mut Vm) -> PyResult<()> {
+    method0(vm, "renpy.game", "script", "save_bytecode")?;
+    for f in {
+        let g = py::import(vm, "renpy.game")?;
+        py::get_items(vm, &g, "post_init")
+    }? {
+        vm.call(&f, Vec::new(), Vec::new())?;
+    }
+    // 6.12 – 6.18 differ in the post-init steps they run.
+    if at_least(vm, 6, 15) {
+        call0(vm, "renpy.translation", "init_translation")?;
+    }
+    call0(vm, "renpy.style", "build_styles")?;
+    if at_least(vm, 6, 18) {
+        method0(vm, "renpy.game", "script", "analyze")?;
+        call0(vm, "renpy.atl", "compile_all")?;
+    }
+    if at_least(vm, 6, 17) {
+        call0(vm, "renpy.display.screen", "prepare_screens")?;
+    }
+    call0(vm, "renpy.loader", "index_archives")?;
+    for n in ["less_memory", "less_mouse", "less_updates"] {
+        set_attr(vm, "renpy.game", n, Value::Bool(false))?;
+    }
+    if at_least(vm, 6, 14) {
+        call(vm, DUMP, "dump", vec![Value::Bool(false)])?;
+        let ok = call0(vm, ARGUMENTS, "post_init")?;
+        if !py::truthy(vm, &ok)? {
+            return Ok(());
+        }
+    }
+    let script = get_attr(vm, "renpy.game", "script")?;
+    py::set(vm, &script, "all_stmts", Value::None)?;
+    call0(vm, "renpy.python", "make_clean_stores")?;
+    method0(vm, "renpy.display.im", "cache", "init")?;
+    let interface = get_attr(vm, "renpy.game", "interface")?;
+    if !py::truthy(vm, &interface)? {
+        call0(vm, "renpy.display.core", "Interface")?;
+    }
+    let info = py::s(vm, "While running game code:");
+    set_attr(vm, "renpy.game", "exception_info", info)?;
+    set_attr(vm, "renpy", "first_utter_start", Value::Bool(false))?;
+    let mut restart = Value::None;
+    loop {
+        if py::truthy(vm, &restart)? && at_least(vm, 6, 15) {
+            call0(vm, "renpy.display.screen", "before_restart")?;
+        }
+        let r = run_618(vm, restart.clone());
+        let egt = py::config(vm, "end_game_transition")?;
+        let a = py::s(vm, "_invoke_main_menu");
+        let b = py::s(vm, "_main_menu");
+        restart = vm.types.new_tuple(vec![egt, a, b]);
+        let p = call(vm, "renpy.persistent", "update", vec![Value::Bool(true)]);
+        let outcome = match r {
+            Ok(_) => Ok(()),
+            Err(e) if exc_is(vm, &e, "renpy.game", "FullRestartException") => {
+                if let PyErr::Exc(o) = &e {
+                    restart = py::get(vm, &Value::Obj(o.clone()), "reason")?;
+                }
+                Ok(())
+            }
+            Err(e) => Err(e),
+        };
+        let _ = method0(vm, "renpy.display", "interface", "finish_pending");
+        let ev = get_attr(vm, "renpy.loadsave", "autosave_not_running")?;
+        py::method(vm, &ev, "wait", vec![py::f(3.0)])?;
+        outcome?;
+        p?;
+    }
+}
+
 fn f_run(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+    trace_styles(vm, "run start");
     let restart = args.first().cloned().unwrap_or(Value::None);
+    if !at_least(vm, 6, 99) {
+        return run_618(vm, restart);
+    }
     f_reset_clock(vm, &[], &[])?;
     call0(vm, "renpy.python", "clean_stores")?;
     log_clock(vm, "Cleaning stores")?;
     call0(vm, "renpy.translation", "init_translation")?;
+    trace_styles(vm, "after init_translation");
     log_clock(vm, "Init translation")?;
     call0(vm, "renpy.style", "build_styles")?;
     log_clock(vm, "Build styles")?;
@@ -124,7 +252,11 @@ fn f_run(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         if at_least(vm, 7, 4) {
             let q = get_attr(vm, "renpy.game", "QuitException")?;
             let e = vm.call(&q, Vec::new(), Vec::new())?;
-            return Err(PyErr::Exc(e.obj().cloned().ok_or_else(|| vm.type_error("QuitException"))?));
+            return Err(PyErr::Exc(
+                e.obj()
+                    .cloned()
+                    .ok_or_else(|| vm.type_error("QuitException"))?,
+            ));
         }
         call0(vm, "renpy.exports", "quit")?;
     }
@@ -145,7 +277,11 @@ fn f_run(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let script = get_attr(vm, "renpy.game", "script")?;
     let start = py::s(vm, "_start");
     let has = py::method(vm, &script, "has_label", vec![start])?;
-    let start_label = if py::truthy(vm, &has)? { "_start" } else { "start" };
+    let start_label = if py::truthy(vm, &has)? {
+        "_start"
+    } else {
+        "start"
+    };
     let ctx = context(vm)?;
     let l = py::s(vm, start_label);
     py::method(vm, &ctx, "goto_label", vec![l])?;
@@ -171,7 +307,12 @@ fn f_run(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     set_attr(vm, "store", "_restart", restart)?;
     method0(vm, "renpy.display", "interface", "enter_context")?;
     log_clock(vm, &format!("Running {start_label}"))?;
-    call(vm, "renpy.execution", "run_context", vec![Value::Bool(true)])?;
+    call(
+        vm,
+        "renpy.execution",
+        "run_context",
+        vec![Value::Bool(true)],
+    )?;
     Ok(Value::None)
 }
 
@@ -207,8 +348,15 @@ fn f_load_build_info(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn f_load_rpe(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let n = args.first().map(|v| py::string(vm, v)).transpose()?.unwrap_or_default();
-    Err(py::error(vm, format!("Ren'Py engine extensions (.rpe) are not supported by this runtime: {n}")))
+    let n = args
+        .first()
+        .map(|v| py::string(vm, v))
+        .transpose()?
+        .unwrap_or_default();
+    Err(py::error(
+        vm,
+        format!("Ren'Py engine extensions (.rpe) are not supported by this runtime: {n}"),
+    ))
 }
 
 fn persistent_attr(vm: &mut Vm, name: &str) -> PyResult<Value> {
@@ -241,14 +389,21 @@ fn init_phase(vm: &mut Vm) -> PyResult<()> {
     if py::truthy(vm, &errors)? {
         let c = get_attr(vm, "renpy.game", "ParseErrorException")?;
         let e = vm.call(&c, Vec::new(), Vec::new())?;
-        return Err(PyErr::Exc(e.obj().cloned().ok_or_else(|| vm.type_error("ParseErrorException"))?));
+        return Err(PyErr::Exc(
+            e.obj()
+                .cloned()
+                .ok_or_else(|| vm.type_error("ParseErrorException"))?,
+        ));
     }
     let info = py::s(vm, "While executing init code:");
     set_attr(vm, "renpy.game", "exception_info", info)?;
     let script = get_attr(vm, "renpy.game", "script")?;
     let initcode = py::get_items(vm, &script, "initcode")?;
     let node_cls = get_attr(vm, "renpy.ast", "Node")?;
-    let node_cls = node_cls.obj().cloned().ok_or_else(|| vm.type_error("renpy.ast.Node"))?;
+    let node_cls = node_cls
+        .obj()
+        .cloned()
+        .ok_or_else(|| vm.type_error("renpy.ast.Node"))?;
     for (i, entry) in initcode.into_iter().enumerate() {
         set_attr(vm, "renpy.game", "initcode_ast_id", Value::Int(i as i64))?;
         let node = ops::getitem(vm, &entry, Value::Int(1))?;
@@ -259,12 +414,19 @@ fn init_phase(vm: &mut Vm) -> PyResult<()> {
             vm.call(&node, Vec::new(), Vec::new())?;
         }
     }
+    trace_styles(vm, "after initcode");
     let info = py::s(vm, "After initialization, but before game start.");
     set_attr(vm, "renpy.game", "exception_info", info)?;
+    if !at_least(vm, 6, 99) {
+        return after_init_618(vm);
+    }
     if at_least(vm, 7, 0) {
         call0(vm, "renpy.log", "post_init")?;
     }
-    for f in { let t__ = py::import(vm, "renpy.game")?; py::get_items(vm, &t__, "post_init") }? {
+    for f in {
+        let t__ = py::import(vm, "renpy.game")?;
+        py::get_items(vm, &t__, "post_init")
+    }? {
         vm.call(&f, Vec::new(), Vec::new())?;
     }
     if at_least(vm, 8, 2) {
@@ -344,7 +506,12 @@ fn init_phase(vm: &mut Vm) -> PyResult<()> {
         let ev = get_attr(vm, "renpy.loadsave", "autosave_not_running")?;
         py::method(vm, &ev, "wait", vec![py::f(3.0)])?;
         if at_least(vm, 7, 5) {
-            for cb in { let t__ = py::import(vm, "renpy.config")?; py::get_items(vm, &t__, "at_exit_callbacks") }.unwrap_or_default() {
+            for cb in {
+                let t__ = py::import(vm, "renpy.config")?;
+                py::get_items(vm, &t__, "at_exit_callbacks")
+            }
+            .unwrap_or_default()
+            {
                 vm.call(&cb, Vec::new(), Vec::new())?;
             }
         }
@@ -357,7 +524,12 @@ fn f_main(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let r = main_body(vm);
     let fin = (|| -> PyResult<()> {
         if at_least(vm, 7, 4) {
-            for cb in { let t__ = py::import(vm, "renpy.config")?; py::get_items(vm, &t__, "quit_callbacks") }.unwrap_or_default() {
+            for cb in {
+                let t__ = py::import(vm, "renpy.config")?;
+                py::get_items(vm, &t__, "quit_callbacks")
+            }
+            .unwrap_or_default()
+            {
                 vm.call(&cb, Vec::new(), Vec::new())?;
             }
         }
@@ -375,11 +547,99 @@ fn f_main(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
-fn main_body(vm: &mut Vm) -> PyResult<()> {
+/// 6.7 – 6.11 `main()`: the script loads before persistent data and
+/// styles, there is no `_errorhandling` module, and the init phase is a
+/// flag of `renpy.game` around the init code.
+fn main_body_611(vm: &mut Vm) -> PyResult<()> {
     let info = py::s(vm, "Before loading the script.");
     set_attr(vm, "renpy.game", "exception_info", info)?;
-    call0(vm, ARGUMENTS, "pre_init")?;
-    call0(vm, "renpy.sl2.slparser", "init")?;
+    call0(vm, "renpy.config", "init")?;
+    let gamedir = py::config(vm, "gamedir")?;
+    set_attr(vm, "renpy.game", "basepath", gamedir.clone())?;
+    let commondir = py::config(vm, "commondir")?;
+    let mut sp = vec![gamedir];
+    if !py::is_none(&commondir) {
+        sp.push(commondir);
+    }
+    let sp = vm.types.new_list(sp);
+    let config = py::import(vm, "renpy.config")?;
+    py::set(vm, &config, "searchpath", sp)?;
+    call0(vm, "renpy.loader", "index_archives")?;
+    let log = call0(vm, "renpy.python", "RollbackLog")?;
+    set_attr(vm, "renpy.game", "log", log)?;
+    let store = py::import(vm, "store")?;
+    set_attr(vm, "store", "store", store)?;
+    let info = py::s(vm, "While loading the script.");
+    set_attr(vm, "renpy.game", "exception_info", info)?;
+    let script = call0(vm, "renpy.script", "Script")?;
+    set_attr(vm, "renpy.game", "script", script.clone())?;
+    // Statements that run while the script loads need a context.
+    let ctx_cls = get_attr(vm, "renpy.execution", "Context")?;
+    let ctx = vm.call(&ctx_cls, vec![Value::Bool(false)], Vec::new())?;
+    py::set(vm, &ctx, "init_phase", Value::Bool(true))?;
+    let contexts = vm.types.new_list(vec![ctx]);
+    set_attr(vm, "renpy.game", "contexts", contexts)?;
+    py::method(vm, &script, "load_script", Vec::new())?;
+    let errors = call0(vm, "renpy.parser", "report_parse_errors")?;
+    if py::truthy(vm, &errors)? {
+        let c = get_attr(vm, "renpy.game", "ParseErrorException")?;
+        let e = vm.call(&c, Vec::new(), Vec::new())?;
+        return Err(PyErr::Exc(e.obj().cloned().ok_or_else(|| vm.type_error("ParseErrorException"))?));
+    }
+    let info = py::s(vm, "After loading the script.");
+    set_attr(vm, "renpy.game", "exception_info", info)?;
+    if py::is_none(&py::get(vm, &config, "savedir")?) {
+        let sd = call0(vm, "_crysirror_renpy", "savedir")?;
+        py::set(vm, &config, "savedir", sd)?;
+    }
+    let persistent = call0(vm, "renpy.persistent", "init")?;
+    set_attr(vm, "renpy.game", "persistent", persistent.clone())?;
+    call0(vm, "renpy.savelocation", "init")?;
+    call0(vm, "renpy.persistent", "update")?;
+    let persistent = get_attr(vm, "renpy.game", "persistent")?;
+    let prefs = py::get(vm, &persistent, "_preferences")?;
+    set_attr(vm, "renpy.game", "preferences", prefs.clone())?;
+    set_attr(vm, "renpy.game", "seen_session", py::dict(vm))?;
+    set_attr(vm, "store", "persistent", persistent)?;
+    set_attr(vm, "store", "_preferences", prefs)?;
+    let style = call0(vm, "renpy.style", "StyleManager")?;
+    set_attr(vm, "renpy.game", "style", style.clone())?;
+    set_attr(vm, "store", "style", style)?;
+    let info = py::s(vm, "While executing init code:");
+    set_attr(vm, "renpy.game", "exception_info", info)?;
+    set_attr(vm, "renpy.game", "init_phase", Value::Bool(true))?;
+    let initcode = py::get_items(vm, &script, "initcode")?;
+    let node_cls = get_attr(vm, "renpy.ast", "Node")?;
+    let node_cls = node_cls.obj().cloned().ok_or_else(|| vm.type_error("renpy.ast.Node"))?;
+    for entry in initcode {
+        let node = ops::getitem(vm, &entry, Value::Int(1))?;
+        if ops::isinstance(vm, &node, &node_cls) {
+            let ctx = context(vm)?;
+            py::method(vm, &ctx, "run", vec![node])?;
+        } else {
+            vm.call(&node, Vec::new(), Vec::new())?;
+        }
+    }
+    set_attr(vm, "renpy.game", "init_phase", Value::Bool(false))?;
+    let ctx = context(vm)?;
+    py::set(vm, &ctx, "init_phase", Value::Bool(false))?;
+    let info = py::s(vm, "After initialization, but before game start.");
+    set_attr(vm, "renpy.game", "exception_info", info)?;
+    after_init_618(vm)
+}
+
+fn main_body(vm: &mut Vm) -> PyResult<()> {
+    if !at_least(vm, 6, 12) {
+        return main_body_611(vm);
+    }
+    let info = py::s(vm, "Before loading the script.");
+    set_attr(vm, "renpy.game", "exception_info", info)?;
+    if at_least(vm, 6, 14) {
+        call0(vm, ARGUMENTS, "pre_init")?;
+    }
+    if at_least(vm, 6, 17) {
+        call0(vm, "renpy.sl2.slparser", "init")?;
+    }
     call0(vm, "renpy.config", "init")?;
     let _ = call0(vm, "renpy.gl2.live2d", "reset");
     call0(vm, MAIN, "choose_variants")?;
@@ -417,7 +677,12 @@ fn main_body(vm: &mut Vm) -> PyResult<()> {
     py::set(vm, &ctx, "init_phase", Value::Bool(true))?;
     let contexts = vm.types.new_list(vec![ctx]);
     set_attr(vm, "renpy.game", "contexts", contexts)?;
-    call(vm, "renpy.execution", "not_infinite_loop", vec![Value::Int(60)])?;
+    call(
+        vm,
+        "renpy.execution",
+        "not_infinite_loop",
+        vec![Value::Int(60)],
+    )?;
     let info = py::s(vm, "While loading the script.");
     set_attr(vm, "renpy.game", "exception_info", info)?;
     let script = call0(vm, "renpy.script", "Script")?;
@@ -434,9 +699,16 @@ fn main_body(vm: &mut Vm) -> PyResult<()> {
         let s = py::s(vm, "tl/None/common");
         call(vm, "renpy.exports", "load_module", vec![s])?;
     }
-    let iss = py::get(vm, &config, "init_system_styles")?;
-    vm.call(&iss, Vec::new(), Vec::new())?;
+    // `config.init_system_styles` arrives in 6.99; 6.18 builds styles and
+    // prepares screens here, before the script loads.
+    let iss = py::get_or_none(vm, &config, "init_system_styles")?;
+    if !py::is_none(&iss) {
+        vm.call(&iss, Vec::new(), Vec::new())?;
+    }
     call0(vm, "renpy.style", "build_styles")?;
+    if !at_least(vm, 6, 99) {
+        call0(vm, "renpy.display.screen", "prepare_screens")?;
+    }
     log_clock(vm, "Loading error handling")?;
     py::method(vm, &script, "load_script", Vec::new())?;
     log_clock(vm, "Loading script")?;
@@ -483,16 +755,20 @@ fn main_body(vm: &mut Vm) -> PyResult<()> {
 }
 
 fn init_main(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MAIN, &[
-        ("log_clock", f_log_clock),
-        ("reset_clock", f_reset_clock),
-        ("run", f_run),
-        ("load_rpe", f_load_rpe),
-        ("load_rpe_py", f_load_rpe),
-        ("choose_variants", f_choose_variants),
-        ("load_build_info", f_load_build_info),
-        ("main", f_main),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MAIN,
+        &[
+            ("log_clock", f_log_clock),
+            ("reset_clock", f_reset_clock),
+            ("run", f_run),
+            ("load_rpe", f_load_rpe),
+            ("load_rpe_py", f_load_rpe),
+            ("choose_variants", f_choose_variants),
+            ("load_build_info", f_load_build_info),
+            ("main", f_main),
+        ],
+    );
     let now = py::f(super::link::now(vm));
     crysirror_python::modules::set(vm, &m, "last_clock", now);
     Ok(m)
@@ -532,7 +808,10 @@ fn ns_contains(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn new_args(vm: &mut Vm) -> PyResult<Value> {
     let ns = get_attr(vm, ARGUMENTS, "Namespace")?;
-    let mut kwargs: Vec<(Rc<str>, Value)> = vec![(Rc::from("basedir"), py::s(vm, "")), (Rc::from("command"), py::s(vm, "run"))];
+    let mut kwargs: Vec<(Rc<str>, Value)> = vec![
+        (Rc::from("basedir"), py::s(vm, "")),
+        (Rc::from("command"), py::s(vm, "run")),
+    ];
     for (k, v) in ARG_DEFAULTS {
         let v = match (k, v) {
             (&"trace", _) => Value::Int(0),
@@ -566,7 +845,12 @@ fn f_cmd_false(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 fn f_cmd_rmpersistent(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let loc = get_attr(vm, "renpy.loadsave", "location")?;
     py::method(vm, &loc, "unlink_persistent", Vec::new())?;
-    set_attr(vm, "renpy.persistent", "should_save_persistent", Value::Bool(false))?;
+    set_attr(
+        vm,
+        "renpy.persistent",
+        "should_save_persistent",
+        Value::Bool(false),
+    )?;
     Ok(Value::Bool(false))
 }
 
@@ -623,24 +907,41 @@ fn f_post_init(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn init_arguments(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, ARGUMENTS, &[
-        ("run", f_cmd_run),
-        ("compile", f_cmd_false),
-        ("quit", f_cmd_false),
-        ("rmpersistent", f_cmd_rmpersistent),
-        ("register_command", f_register_command),
-        ("bootstrap", f_bootstrap),
-        ("pre_init", f_pre_init),
-        ("post_init", f_post_init),
-        ("takes_no_arguments", |_, _, _| Ok(Value::None)),
-        ("clean_epic_arguments", |_, _, _| Ok(Value::None)),
-        ("clean_macos_arguments", |_, _, _| Ok(Value::None)),
-    ]);
-    let ns = py::class(vm, ARGUMENTS, "Namespace", &[], &[("__init__", ns_init), ("__contains__", ns_contains)], &[])?;
+    let m = crysirror_python::modules::module_with(
+        vm,
+        ARGUMENTS,
+        &[
+            ("run", f_cmd_run),
+            ("compile", f_cmd_false),
+            ("quit", f_cmd_false),
+            ("rmpersistent", f_cmd_rmpersistent),
+            ("register_command", f_register_command),
+            ("bootstrap", f_bootstrap),
+            ("pre_init", f_pre_init),
+            ("post_init", f_post_init),
+            ("takes_no_arguments", |_, _, _| Ok(Value::None)),
+            ("clean_epic_arguments", |_, _, _| Ok(Value::None)),
+            ("clean_macos_arguments", |_, _, _| Ok(Value::None)),
+        ],
+    );
+    let ns = py::class(
+        vm,
+        ARGUMENTS,
+        "Namespace",
+        &[],
+        &[("__init__", ns_init), ("__contains__", ns_contains)],
+        &[],
+    )?;
     crysirror_python::modules::set(vm, &m, "Namespace", Value::Obj(ns));
     crysirror_python::modules::set(vm, &m, "commands", vm.types.new_dict());
     crysirror_python::modules::set(vm, &m, "display", vm.types.new_dict());
-    let cc = ops::make_set(vm, ["compile", "add_from", "merge_strings"].iter().map(|s| vm.types.new_str(s)).collect())?;
+    let cc = ops::make_set(
+        vm,
+        ["compile", "add_from", "merge_strings"]
+            .iter()
+            .map(|s| vm.types.new_str(s))
+            .collect(),
+    )?;
     crysirror_python::modules::set(vm, &m, "compile_commands", cc);
     crysirror_python::modules::set(vm, &m, "epic_arguments", Value::None);
     Ok(m)
@@ -652,14 +953,20 @@ fn init_arguments(vm: &mut Vm) -> PyResult<ObjRef> {
 /// player never passes.
 fn f_dump(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let m = py::import(vm, DUMP)?;
-    if { let t__ = py::get(vm, &m, "completed_dump")?; py::truthy(vm, &t__) }? {
+    if {
+        let t__ = py::get(vm, &m, "completed_dump")?;
+        py::truthy(vm, &t__)
+    }? {
         return Ok(Value::None);
     }
     py::set(vm, &m, "completed_dump", Value::Bool(true))?;
     let args = get_attr(vm, "renpy.game", "args")?;
     let jd = py::get_or_none(vm, &args, "json_dump")?;
     if py::truthy(vm, &jd)? {
-        return Err(py::error(vm, "JSON dumps (--json-dump) are not supported by this runtime."));
+        return Err(py::error(
+            vm,
+            "JSON dumps (--json-dump) are not supported by this runtime.",
+        ));
     }
     Ok(Value::None)
 }
@@ -673,7 +980,11 @@ fn f_file_exists(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn init_dump(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, DUMP, &[("dump", f_dump), ("file_exists", f_file_exists)]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        DUMP,
+        &[("dump", f_dump), ("file_exists", f_file_exists)],
+    );
     for n in ["definitions", "transforms", "screens"] {
         crysirror_python::modules::set(vm, &m, n, vm.types.new_list(Vec::new()));
     }
@@ -689,14 +1000,18 @@ fn none(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn init_presplash(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, PRESPLASH, &[
-        ("start", none),
-        ("pump_window", none),
-        ("end", none),
-        ("sleep", none),
-        ("progress", none),
-        ("find_file", none),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        PRESPLASH,
+        &[
+            ("start", none),
+            ("pump_window", none),
+            ("end", none),
+            ("sleep", none),
+            ("progress", none),
+            ("find_file", none),
+        ],
+    );
     for n in ["window", "progress_bar", "progress_kind"] {
         crysirror_python::modules::set(vm, &m, n, Value::None);
     }
@@ -725,11 +1040,18 @@ fn f_warp(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let Some((filename, line)) = spec.split_once(':') else {
         return Err(py::error(vm, "No : found in warp location."));
     };
-    let line: i64 = line.trim().parse().map_err(|_| vm.value_error(format!("invalid literal for int(): {line:?}")))?;
+    let line: i64 = line
+        .trim()
+        .parse()
+        .map_err(|_| vm.value_error(format!("invalid literal for int(): {line:?}")))?;
     if !py::config_bool(vm, "developer")? {
         return Err(py::error(vm, "Can't warp, developer mode disabled."));
     }
-    let filename = if filename.starts_with("game/") { filename.to_owned() } else { format!("game/{filename}") };
+    let filename = if filename.starts_with("game/") {
+        filename.to_owned()
+    } else {
+        format!("game/{filename}")
+    };
     let script = get_attr(vm, "renpy.game", "script")?;
     let nm = py::get(vm, &script, "namemap")?;
     let values = py::method(vm, &nm, "values", Vec::new())?;
@@ -772,7 +1094,8 @@ fn f_warp(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
             .unwrap_or(true);
         ops::dict_set(vm, &d, next, if choice { node.clone() } else { old })
     };
-    let items = |vm: &mut Vm, v: &Value, n: &str| -> PyResult<Vec<Value>> { py::get_items(vm, v, n) };
+    let items =
+        |vm: &mut Vm, v: &Value, n: &str| -> PyResult<Vec<Value>> { py::get_items(vm, v, n) };
     for n in &seen {
         if isinst(vm, n, "Translate")? {
             let lang = py::get_or_none(vm, n, "language")?;
@@ -835,7 +1158,10 @@ fn f_warp(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
         }
     }
     let Some((_, node)) = best else {
-        return Err(py::error(vm, format!("Could not find a statement to warp to. ({spec})")));
+        return Err(py::error(
+            vm,
+            format!("Could not find a statement to warp to. ({spec})"),
+        ));
     };
     let d = prev.obj().cloned().unwrap();
     let mut run = Vec::new();
@@ -870,9 +1196,14 @@ fn f_warp(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     py::method(vm, &ctx, "goto_label", vec![name.clone()])?;
     let aw = py::s(vm, "_after_warp");
     py::method(vm, &ctx, "come_from", vec![name, aw])?;
-    let rc = get_attr(vm, "renpy.game", "RestartContext")?;
+    let module = super::state::restart_module(vm);
+    let rc = get_attr(vm, module, "RestartContext")?;
     let e = vm.call(&rc, Vec::new(), Vec::new())?;
-    Err(PyErr::Exc(e.obj().cloned().ok_or_else(|| vm.type_error("RestartContext"))?))
+    Err(PyErr::Exc(
+        e.obj()
+            .cloned()
+            .ok_or_else(|| vm.type_error("RestartContext"))?,
+    ))
 }
 
 fn init_warp(vm: &mut Vm) -> PyResult<ObjRef> {

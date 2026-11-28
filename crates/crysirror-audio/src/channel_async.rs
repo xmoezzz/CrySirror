@@ -203,6 +203,7 @@ impl ChannelAudio {
         crate::mixer::VoiceSpec {
             gain_envelope: p.gain_envelope,
             mix_group: p.mix_group.clone(),
+            spatial: p.spatial_position.map(|position| crate::mixer::Spatial { position, ..Default::default() }),
             gain: p.gain,
             rate: p.rate,
             fade_in_ms: p.fade_ms,
@@ -500,6 +501,7 @@ impl ChannelAudio {
             | AudioRequest::SetGain { channel, .. }
             | AudioRequest::FinishGainFade { channel, .. }
             | AudioRequest::SetPan { channel, .. }
+            | AudioRequest::SetChannelSpatial { channel, .. }
             | AudioRequest::SetLooped { channel, .. }
             | AudioRequest::SetChannelSwap { channel, .. }
             | AudioRequest::SetTrackGains { channel, .. } => (*channel, false),

@@ -64,7 +64,7 @@ pub fn source(name: &str) -> Option<&'static str> {
         "six" => SIX,
         "importlib" => "import sys\ndef import_module(name, package=None):\n    if name.startswith('.'):\n        name = package + name\n    __import__(name)\n    return sys.modules[name]\ndef reload(module):\n    return module\ndef invalidate_caches():\n    pass\n",
         "queue" | "Queue" => QUEUE,
-        "atexit" => "_handlers = []\ndef register(f, *args, **kwargs):\n    _handlers.append((f, args, kwargs))\n    return f\ndef unregister(f):\n    _handlers[:] = [h for h in _handlers if h[0] is not f]\n",
+        "atexit" => ATEXIT,
         "shutil" => "import os\ndef copyfile(src, dst):\n    with open(src, 'rb') as a:\n        d = a.read()\n    with open(dst, 'wb') as b:\n        b.write(d)\n    return dst\ncopy = copyfile\ncopy2 = copyfile\ndef move(src, dst):\n    os.rename(src, dst)\n    return dst\ndef rmtree(path, ignore_errors=False):\n    pass\n",
         "glob" => "import os, fnmatch\ndef glob(pattern):\n    d, p = os.path.split(pattern)\n    try:\n        names = os.listdir(d or '.')\n    except OSError:\n        return []\n    return [os.path.join(d, n) if d else n for n in names if fnmatch.fnmatch(n, p)]\niglob = glob\n",
         "calendar" => CALENDAR,
@@ -1044,6 +1044,34 @@ def _reconstruct(x, memo, func, args, state=None, listiter=None, dictiter=None, 
 
 const TYPES: &str = r##"
 import sys
+class UnionType:
+    """`X | Y` of classes (PEP 604)."""
+    __slots__ = ('__args__',)
+    @staticmethod
+    def _make(a, b):
+        args = []
+        for x in (a, b):
+            for y in (x.__args__ if isinstance(x, UnionType) else (x,)):
+                y = type(None) if y is None else y
+                if y not in args:
+                    args.append(y)
+        rv = UnionType.__new__(UnionType)
+        rv.__args__ = tuple(args)
+        return rv
+    def __or__(self, other):
+        return UnionType._make(self, other)
+    def __ror__(self, other):
+        return UnionType._make(other, self)
+    def __instancecheck__(self, obj):
+        return isinstance(obj, self.__args__)
+    def __subclasscheck__(self, cls):
+        return issubclass(cls, self.__args__)
+    def __eq__(self, other):
+        return isinstance(other, UnionType) and set(self.__args__) == set(other.__args__)
+    def __hash__(self):
+        return hash(frozenset(self.__args__))
+    def __repr__(self):
+        return ' | '.join('None' if a is type(None) else getattr(a, '__qualname__', repr(a)) if getattr(a, '__module__', None) == 'builtins' else repr(a) if not isinstance(a, type) else a.__module__ + '.' + a.__qualname__ for a in self.__args__)
 def _f(): pass
 FunctionType = type(_f)
 LambdaType = type(lambda: None)
@@ -1887,113 +1915,653 @@ class TextWrapper:
 "##;
 
 const WEAKREF: &str = r##"
-from _weakref import ref, proxy, getweakrefcount
-ReferenceType = ref
-ProxyType = type(None)
-CallableProxyType = type(None)
-ProxyTypes = ()
+import sys
+from _weakref import (getweakrefcount, getweakrefs, ref, proxy, CallableProxyType,
+                      ProxyType, ReferenceType, _remove_dead_weakref)
+from _collections_abc import MutableMapping
+
+ProxyTypes = (ProxyType, CallableProxyType)
+
+__all__ = ["ref", "proxy", "getweakrefcount", "getweakrefs", "WeakKeyDictionary",
+           "ReferenceType", "ProxyType", "CallableProxyType", "ProxyTypes",
+           "WeakValueDictionary", "WeakSet", "WeakMethod", "finalize"]
+
+# Python 2 callers expect list-returning mapping methods.
+_PY2 = sys.version_info[0] < 3
+
+def _result(gen):
+    return list(gen) if _PY2 else gen
+
 
 class WeakMethod(ref):
+    __slots__ = "_func_ref", "_meth_type", "_alive", "__weakref__"
+
     def __new__(cls, meth, callback=None):
-        self = ref.__new__(cls, meth.__self__, callback)
-        self._func = meth.__func__
+        try:
+            obj = meth.__self__
+            func = meth.__func__
+        except AttributeError:
+            raise TypeError("argument should be a bound method, not {}".format(type(meth))) from None
+        def _cb(arg):
+            self = self_wr()
+            if self._alive:
+                self._alive = False
+                if callback is not None:
+                    callback(self)
+        self = ref.__new__(cls, obj, _cb)
+        self._func_ref = ref(func, _cb)
+        self._meth_type = type(meth)
+        self._alive = True
+        self_wr = ref(self)
         return self
+
     def __call__(self):
         obj = ref.__call__(self)
-        if obj is None:
+        func = self._func_ref()
+        if obj is None or func is None:
             return None
-        return self._func.__get__(obj, type(obj))
+        return func.__get__(obj, type(obj))
 
-class WeakValueDictionary(dict):
+    def __eq__(self, other):
+        if isinstance(other, WeakMethod):
+            if not self._alive or not other._alive:
+                return self is other
+            return ref.__eq__(self, other) and self._func_ref == other._func_ref
+        return NotImplemented
+
+    def __ne__(self, other):
+        if isinstance(other, WeakMethod):
+            if not self._alive or not other._alive:
+                return self is not other
+            return ref.__ne__(self, other) or self._func_ref != other._func_ref
+        return NotImplemented
+
+    __hash__ = ref.__hash__
+
+
+class KeyedRef(ref):
+    """A weakref carrying the dictionary key it is stored under."""
+
+    __slots__ = "key",
+
+    def __new__(type, ob, callback, key):
+        self = ref.__new__(type, ob, callback)
+        self.key = key
+        return self
+
+    def __init__(self, ob, callback, key):
+        ref.__init__(self, ob, callback)
+
+
+class WeakValueDictionary(MutableMapping):
+    """Mapping whose entries disappear when their values are collected."""
+
     def __init__(self, other=(), **kw):
-        dict.__init__(self)
+        def remove(wr, selfref=ref(self), _atomic_removal=_remove_dead_weakref):
+            self = selfref()
+            if self is not None:
+                _atomic_removal(self.data, wr.key)
+        self._remove = remove
+        self.data = {}
         self.update(other, **kw)
+
     def __getitem__(self, key):
-        o = dict.__getitem__(self, key)()
+        o = self.data[key]()
         if o is None:
-            dict.__delitem__(self, key)
             raise KeyError(key)
         return o
-    def __setitem__(self, key, value):
-        dict.__setitem__(self, key, ref(value))
-    def get(self, key, default=None):
-        try:
-            return self[key]
-        except KeyError:
-            return default
+
+    def __delitem__(self, key):
+        del self.data[key]
+
+    def __len__(self):
+        return len(self.data)
+
     def __contains__(self, key):
         try:
-            o = dict.__getitem__(self, key)()
+            o = self.data[key]()
         except KeyError:
             return False
         return o is not None
-    def items(self):
-        return [(k, v()) for k, v in dict.items(self) if v() is not None]
-    def values(self):
-        return [v() for v in dict.values(self) if v() is not None]
-    def itervalues(self):
-        return iter(self.values())
-    def iteritems(self):
-        return iter(self.items())
-    def update(self, other=(), **kw):
-        if hasattr(other, 'items'):
-            other = other.items()
-        for k, v in other:
-            self[k] = v
-        for k, v in kw.items():
-            self[k] = v
-    def pop(self, key, *default):
+
+    def __repr__(self):
+        return "<%s at %#x>" % (self.__class__.__name__, id(self))
+
+    def __setitem__(self, key, value):
+        self.data[key] = KeyedRef(value, self._remove, key)
+
+    def copy(self):
+        new = WeakValueDictionary()
+        for key, wr in list(self.data.items()):
+            o = wr()
+            if o is not None:
+                new[key] = o
+        return new
+
+    __copy__ = copy
+
+    def __deepcopy__(self, memo):
+        from copy import deepcopy
+        new = self.__class__()
+        for key, wr in list(self.data.items()):
+            o = wr()
+            if o is not None:
+                new[deepcopy(key, memo)] = o
+        return new
+
+    def get(self, key, default=None):
         try:
-            o = dict.pop(self, key)()
+            wr = self.data[key]
         except KeyError:
-            if default:
-                return default[0]
-            raise
+            return default
+        o = wr()
         if o is None:
-            if default:
-                return default[0]
+            return default
+        return o
+
+    def _items(self):
+        for k, wr in list(self.data.items()):
+            v = wr()
+            if v is not None:
+                yield k, v
+
+    def _keys(self):
+        for k, wr in list(self.data.items()):
+            if wr() is not None:
+                yield k
+
+    def _values(self):
+        for wr in list(self.data.values()):
+            obj = wr()
+            if obj is not None:
+                yield obj
+
+    def items(self):
+        return _result(self._items())
+
+    def keys(self):
+        return _result(self._keys())
+
+    def values(self):
+        return _result(self._values())
+
+    def __iter__(self):
+        return self._keys()
+
+    iteritems = _items
+    iterkeys = _keys
+    itervalues = _values
+
+    def has_key(self, key):
+        return key in self
+
+    def itervaluerefs(self):
+        for wr in list(self.data.values()):
+            yield wr
+
+    def valuerefs(self):
+        return list(self.data.values())
+
+    def popitem(self):
+        while True:
+            key, wr = self.data.popitem()
+            o = wr()
+            if o is not None:
+                return key, o
+
+    def pop(self, key, *args):
+        try:
+            o = self.data.pop(key)()
+        except KeyError:
+            o = None
+        if o is None:
+            if args:
+                return args[0]
             raise KeyError(key)
         return o
+
     def setdefault(self, key, default=None):
         try:
-            return self[key]
+            o = self.data[key]()
         except KeyError:
-            self[key] = default
+            o = None
+        if o is None:
+            self.data[key] = KeyedRef(default, self._remove, key)
             return default
-    def copy(self):
-        return WeakValueDictionary(self.items())
+        return o
 
-class WeakKeyDictionary(dict):
+    def update(self, other=None, **kwargs):
+        d = self.data
+        if other is not None:
+            if not hasattr(other, "items"):
+                other = dict(other)
+            for key, o in list(other.items()):
+                d[key] = KeyedRef(o, self._remove, key)
+        for key, o in kwargs.items():
+            d[key] = KeyedRef(o, self._remove, key)
+
+    def clear(self):
+        self.data.clear()
+
+    def __or__(self, other):
+        if isinstance(other, (dict, MutableMapping)):
+            c = self.copy()
+            c.update(other)
+            return c
+        return NotImplemented
+
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+
+class WeakKeyDictionary(MutableMapping):
+    """Mapping whose entries disappear when their keys are collected."""
+
     def __init__(self, dict=None):
-        globals()['dict'].__init__(self)
+        self.data = {}
+        def remove(k, selfref=ref(self)):
+            self = selfref()
+            if self is not None:
+                try:
+                    del self.data[k]
+                except KeyError:
+                    pass
+        self._remove = remove
         if dict is not None:
             self.update(dict)
+
+    def __delitem__(self, key):
+        del self.data[ref(key)]
+
+    def __getitem__(self, key):
+        return self.data[ref(key)]
+
+    def __len__(self):
+        return len(self.data)
+
+    def __repr__(self):
+        return "<%s at %#x>" % (self.__class__.__name__, id(self))
+
     def __setitem__(self, key, value):
-        globals()['dict'].__setitem__(self, key, value)
+        self.data[ref(key, self._remove)] = value
+
+    def copy(self):
+        new = WeakKeyDictionary()
+        for key, value in list(self.data.items()):
+            o = key()
+            if o is not None:
+                new[o] = value
+        return new
+
+    __copy__ = copy
+
+    def __deepcopy__(self, memo):
+        from copy import deepcopy
+        new = self.__class__()
+        for key, value in list(self.data.items()):
+            o = key()
+            if o is not None:
+                new[o] = deepcopy(value, memo)
+        return new
+
+    def get(self, key, default=None):
+        return self.data.get(ref(key), default)
+
+    def __contains__(self, key):
+        try:
+            wr = ref(key)
+        except TypeError:
+            return False
+        return wr in self.data
+
+    def _items(self):
+        for wr, value in list(self.data.items()):
+            key = wr()
+            if key is not None:
+                yield key, value
+
+    def _keys(self):
+        for wr in list(self.data):
+            obj = wr()
+            if obj is not None:
+                yield obj
+
+    def _values(self):
+        for wr, value in list(self.data.items()):
+            if wr() is not None:
+                yield value
+
+    def items(self):
+        return _result(self._items())
+
+    def keys(self):
+        return _result(self._keys())
+
+    def values(self):
+        return _result(self._values())
+
+    def __iter__(self):
+        return self._keys()
+
+    iteritems = _items
+    iterkeys = _keys
+    itervalues = _values
+
+    def has_key(self, key):
+        return key in self
+
+    def keyrefs(self):
+        return list(self.data)
+
+    def popitem(self):
+        while True:
+            key, value = self.data.popitem()
+            o = key()
+            if o is not None:
+                return o, value
+
+    def pop(self, key, *args):
+        return self.data.pop(ref(key), *args)
+
+    def setdefault(self, key, default=None):
+        return self.data.setdefault(ref(key, self._remove), default)
+
     def update(self, dict=None, **kwargs):
+        d = self.data
         if dict is not None:
-            if hasattr(dict, 'items'):
-                dict = dict.items()
-            for k, v in dict:
-                self[k] = v
-        for k, v in kwargs.items():
-            self[k] = v
+            if not hasattr(dict, "items"):
+                dict = type({})(dict)
+            for key, value in list(dict.items()):
+                d[ref(key, self._remove)] = value
+        if len(kwargs):
+            self.update(kwargs)
 
-class WeakSet(set):
-    pass
+    def clear(self):
+        self.data.clear()
 
-class finalize:
+    def __or__(self, other):
+        if isinstance(other, (dict, MutableMapping)):
+            c = self.copy()
+            c.update(other)
+            return c
+        return NotImplemented
+
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+
+class WeakSet(object):
+    """Set whose members disappear when they are collected."""
+
+    def __init__(self, data=None):
+        self.data = set()
+        def _remove(item, selfref=ref(self)):
+            self = selfref()
+            if self is not None:
+                self.data.discard(item)
+        self._remove = _remove
+        if data is not None:
+            self.update(data)
+
+    def __iter__(self):
+        for itemref in list(self.data):
+            item = itemref()
+            if item is not None:
+                yield item
+
+    def __len__(self):
+        return len(self.data)
+
+    def __contains__(self, item):
+        try:
+            wr = ref(item)
+        except TypeError:
+            return False
+        return wr in self.data
+
+    def __reduce__(self):
+        return (self.__class__, (list(self),), getattr(self, '__dict__', None))
+
+    def add(self, item):
+        self.data.add(ref(item, self._remove))
+
+    def clear(self):
+        self.data.clear()
+
+    def copy(self):
+        return self.__class__(self)
+
+    def pop(self):
+        while True:
+            try:
+                itemref = self.data.pop()
+            except KeyError:
+                raise KeyError('pop from empty WeakSet') from None
+            item = itemref()
+            if item is not None:
+                return item
+
+    def remove(self, item):
+        self.data.remove(ref(item))
+
+    def discard(self, item):
+        self.data.discard(ref(item))
+
+    def update(self, other):
+        for element in other:
+            self.add(element)
+
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+    def difference(self, other):
+        newset = self.copy()
+        newset.difference_update(other)
+        return newset
+    __sub__ = difference
+
+    def difference_update(self, other):
+        self.__isub__(other)
+
+    def __isub__(self, other):
+        if self is other:
+            self.data.clear()
+        else:
+            self.data.difference_update([ref(item) for item in other])
+        return self
+
+    def intersection(self, other):
+        return self.__class__([item for item in other if item in self])
+    __and__ = intersection
+
+    def intersection_update(self, other):
+        self.__iand__(other)
+
+    def __iand__(self, other):
+        self.data.intersection_update([ref(item) for item in other])
+        return self
+
+    def issubset(self, other):
+        return self.data.issubset([ref(item) for item in other])
+    __le__ = issubset
+
+    def __lt__(self, other):
+        return self.data < set(map(ref, other))
+
+    def issuperset(self, other):
+        return self.data.issuperset([ref(item) for item in other])
+    __ge__ = issuperset
+
+    def __gt__(self, other):
+        return self.data > set(map(ref, other))
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        return self.data == set(map(ref, other))
+
+    def __ne__(self, other):
+        r = self.__eq__(other)
+        return r if r is NotImplemented else not r
+
+    def symmetric_difference(self, other):
+        newset = self.copy()
+        newset.symmetric_difference_update(other)
+        return newset
+    __xor__ = symmetric_difference
+
+    def symmetric_difference_update(self, other):
+        self.__ixor__(other)
+
+    def __ixor__(self, other):
+        if self is other:
+            self.data.clear()
+        else:
+            self.data.symmetric_difference_update([ref(item, self._remove) for item in other])
+        return self
+
+    def union(self, other):
+        return self.__class__([e for s in (self, other) for e in s])
+    __or__ = union
+
+    def isdisjoint(self, other):
+        return len(self.intersection(other)) == 0
+
+    def __repr__(self):
+        return repr(self.data)
+
+    __hash__ = None
+
+
+class _FinalizeInfo(object):
+    __slots__ = ("weakref", "func", "args", "kwargs", "atexit", "index")
+
+
+class finalize(object):
+    """Calls func(*args, **kwargs) once obj is collected (or at exit)."""
+
+    __slots__ = ()
+    _registry = {}
+    _shutdown = False
+    _index = [0]
+    _dirty = False
+    _registered_with_atexit = False
+    _Info = _FinalizeInfo
+
     def __init__(self, obj, func, *args, **kwargs):
-        self._func = func
-        self._args = args
-        self._kwargs = kwargs
-        self.alive = True
+        if not finalize._registered_with_atexit:
+            import atexit
+            atexit.register(finalize._exitfunc)
+            finalize._registered_with_atexit = True
+        info = _FinalizeInfo()
+        info.weakref = ref(obj, self)
+        info.func = func
+        info.args = args
+        info.kwargs = kwargs or None
+        info.atexit = True
+        info.index = finalize._index[0]
+        finalize._index[0] += 1
+        finalize._registry[self] = info
+        finalize._dirty = True
+
     def __call__(self, _=None):
-        if self.alive:
-            self.alive = False
-            return self._func(*self._args, **self._kwargs)
+        info = finalize._registry.pop(self, None)
+        if info and not finalize._shutdown:
+            return info.func(*info.args, **(info.kwargs or {}))
+
     def detach(self):
-        self.alive = False
+        info = finalize._registry.get(self)
+        obj = info and info.weakref()
+        if obj is not None and finalize._registry.pop(self, None):
+            return (obj, info.func, info.args, info.kwargs or {})
+
+    def peek(self):
+        info = finalize._registry.get(self)
+        obj = info and info.weakref()
+        if obj is not None:
+            return (obj, info.func, info.args, info.kwargs or {})
+
+    @property
+    def alive(self):
+        return self in finalize._registry
+
+    @property
+    def atexit(self):
+        info = finalize._registry.get(self)
+        return bool(info) and info.atexit
+
+    @atexit.setter
+    def atexit(self, value):
+        info = finalize._registry.get(self)
+        if info:
+            info.atexit = bool(value)
+
+    def __repr__(self):
+        info = finalize._registry.get(self)
+        obj = info and info.weakref()
+        if obj is None:
+            return '<%s object at %#x; dead>' % (type(self).__name__, id(self))
+        return '<%s object at %#x; for %r at %#x>' % (type(self).__name__, id(self), type(obj).__name__, id(obj))
+
+    @classmethod
+    def _select_for_exit(cls):
+        L = [(f, i) for (f, i) in list(cls._registry.items()) if i.atexit]
+        L.sort(key=lambda item: item[1].index)
+        return [f for (f, i) in L]
+
+    @classmethod
+    def _exitfunc(cls):
+        reenable_gc = False
+        try:
+            if cls._registry:
+                import gc
+                if gc.isenabled():
+                    reenable_gc = True
+                    gc.disable()
+                pending = None
+                while True:
+                    if pending is None or finalize._dirty:
+                        pending = cls._select_for_exit()
+                        finalize._dirty = False
+                    if not pending:
+                        break
+                    f = pending.pop()
+                    try:
+                        f()
+                    except Exception:
+                        import traceback
+                        traceback.print_exc()
+        finally:
+            finalize._shutdown = True
+            if reenable_gc:
+                gc.enable()
+"##;
+
+/// Handlers run when the embedding host calls `atexit._run_exitfuncs()`.
+const ATEXIT: &str = r##"
+_handlers = []
+def register(f, *args, **kwargs):
+    _handlers.append((f, args, kwargs))
+    return f
+def unregister(f):
+    _handlers[:] = [h for h in _handlers if h[0] is not f]
+def _clear():
+    del _handlers[:]
+def _ncallbacks():
+    return len(_handlers)
+def _run_exitfuncs():
+    while _handlers:
+        f, args, kwargs = _handlers.pop()
+        try:
+            f(*args, **kwargs)
+        except SystemExit:
+            pass
+        except BaseException:
+            import traceback
+            traceback.print_exc()
 "##;
 
 const WARNINGS: &str = r##"
@@ -2202,10 +2770,224 @@ randbytes = _inst.randbytes
 
 const IO: &str = r##"
 from _io import *
-from _io import StringIO, BytesIO, open, IOBase, RawIOBase, BufferedIOBase, TextIOBase, TextIOWrapper, BufferedReader, BufferedWriter, FileIO, UnsupportedOperation, DEFAULT_BUFFER_SIZE
+from _io import StringIO, BytesIO, open, IOBase, RawIOBase, BufferedIOBase, TextIOBase, UnsupportedOperation, DEFAULT_BUFFER_SIZE
 SEEK_SET = 0
 SEEK_CUR = 1
 SEEK_END = 2
+
+def FileIO(file, mode='r', closefd=True, opener=None):
+    if 'b' not in mode:
+        mode = mode + 'b'
+    return open(file, mode)
+
+class _WrappedStream:
+    def __init__(self, raw):
+        self.raw = raw
+        if hasattr(raw, 'name'):
+            self.name = raw.name
+        if hasattr(raw, 'mode'):
+            self.mode = raw.mode
+
+    @property
+    def closed(self):
+        return self.raw.closed
+
+    def close(self):
+        return self.raw.close()
+
+    def flush(self):
+        return self.raw.flush()
+
+    def seek(self, offset, whence=0):
+        return self.raw.seek(offset, whence)
+
+    def tell(self):
+        return self.raw.tell()
+
+    def seekable(self):
+        return self.raw.seekable() if hasattr(self.raw, 'seekable') else True
+
+    def isatty(self):
+        return self.raw.isatty() if hasattr(self.raw, 'isatty') else False
+
+    def __enter__(self):
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+class BufferedReader(_WrappedStream, BufferedIOBase):
+    def __init__(self, raw, buffer_size=DEFAULT_BUFFER_SIZE):
+        _WrappedStream.__init__(self, raw)
+
+    def readable(self):
+        return True
+
+    def writable(self):
+        return False
+
+    def read(self, size=-1):
+        return self.raw.read(size)
+
+    def read1(self, size=-1):
+        return self.raw.read(size)
+
+    def readline(self, size=-1):
+        return self.raw.readline(size)
+
+    def readlines(self, hint=-1):
+        return self.raw.readlines(hint)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
+
+    def next(self):
+        return self.__next__()
+
+class BufferedWriter(_WrappedStream, BufferedIOBase):
+    def __init__(self, raw, buffer_size=DEFAULT_BUFFER_SIZE):
+        _WrappedStream.__init__(self, raw)
+
+    def readable(self):
+        return False
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        return self.raw.write(b)
+
+    def writelines(self, lines):
+        return self.raw.writelines(lines)
+
+    def truncate(self, pos=None):
+        return self.raw.truncate(pos)
+
+class TextIOWrapper(TextIOBase):
+    def __init__(self, buffer, encoding=None, errors=None, newline=None, line_buffering=False, write_through=False):
+        self.buffer = buffer
+        self.encoding = encoding or 'utf-8'
+        self.errors = errors or 'strict'
+        self.newline = newline
+        self._buf = ''
+        if hasattr(buffer, 'name'):
+            self.name = buffer.name
+        if hasattr(buffer, 'mode'):
+            self.mode = buffer.mode
+
+    @property
+    def closed(self):
+        return self.buffer.closed
+
+    def close(self):
+        self._buf = ''
+        return self.buffer.close()
+
+    def flush(self):
+        return self.buffer.flush()
+
+    def seekable(self):
+        return self.buffer.seekable() if hasattr(self.buffer, 'seekable') else True
+
+    def readable(self):
+        return self.buffer.readable() if hasattr(self.buffer, 'readable') else True
+
+    def writable(self):
+        return self.buffer.writable() if hasattr(self.buffer, 'writable') else False
+
+    def isatty(self):
+        return self.buffer.isatty() if hasattr(self.buffer, 'isatty') else False
+
+    def seek(self, offset, whence=0):
+        self._buf = ''
+        return self.buffer.seek(offset, whence)
+
+    def tell(self):
+        return self.buffer.tell()
+
+    def _decode(self, data):
+        s = data.decode(self.encoding, self.errors)
+        if self.newline is None:
+            s = s.replace('\r\n', '\n').replace('\r', '\n')
+        return s
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            rest = self.buffer.read(-1)
+            out = self._buf + self._decode(rest)
+            self._buf = ''
+            return out
+        while len(self._buf) < size:
+            chunk = self.buffer.read(max(4096, size - len(self._buf)))
+            if not chunk:
+                break
+            self._buf += self._decode(chunk)
+        out = self._buf[:size]
+        self._buf = self._buf[size:]
+        return out
+
+    def readline(self, size=-1):
+        if self._buf:
+            idx = self._buf.find('\n')
+            if idx != -1:
+                end = idx + 1 if (size is None or size < 0) else min(idx + 1, size)
+                out = self._buf[:end]
+                self._buf = self._buf[end:]
+                return out
+        raw = self.buffer.readline()
+        text = self._buf + self._decode(raw)
+        self._buf = ''
+        if size is not None and size >= 0 and len(text) > size:
+            self._buf = text[size:]
+            return text[:size]
+        return text
+
+    def readlines(self, hint=-1):
+        lines = []
+        while True:
+            line = self.readline()
+            if not line:
+                break
+            lines.append(line)
+        return lines
+
+    def write(self, s):
+        data = s.encode(self.encoding, self.errors)
+        return self.buffer.write(data)
+
+    def writelines(self, lines):
+        for l in lines:
+            self.write(l)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
+
+    def next(self):
+        return self.__next__()
+
+    def __enter__(self):
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
 "##;
 
 const OS: &str = r##"
@@ -2880,6 +3662,25 @@ for _n in ['Any', 'Union', 'Optional', 'List', 'Dict', 'Tuple', 'Set', 'FrozenSe
 TYPE_CHECKING = False
 def TypeVar(name, *constraints, **kwargs):
     return _Special(name)
+def TypeVarTuple(name, **kwargs):
+    return _Special(name)
+class TypeAliasType:
+    """The value of a `type` statement; `__value__` is evaluated on use."""
+    def __init__(self, name, value, *, type_params=()):
+        self.__name__ = name
+        self._evaluate = value if callable(value) and getattr(value, '__name__', '') == '<lambda>' else (lambda: value)
+        self.__type_params__ = tuple(type_params)
+    @property
+    def __value__(self):
+        return self._evaluate()
+    def __getitem__(self, item):
+        return self
+    def __or__(self, other):
+        return Union
+    def __ror__(self, other):
+        return Union
+    def __repr__(self):
+        return self.__name__
 def NewType(name, tp):
     return lambda x: x
 def cast(typ, val):
@@ -3349,23 +4150,206 @@ class PrettyPrinter(object):
 "##;
 
 const REPRLIB: &str = r##"
-class Repr(object):
-    def __init__(self):
-        self.maxlevel = 6
-        self.maxstring = 30
-        self.maxother = 30
-        self.maxlist = 6
-    def repr(self, x):
-        s = repr(x)
-        if len(s) > self.maxother * 4:
-            s = s[:self.maxother * 2] + '...' + s[-self.maxother:]
-        return s
-aRepr = Repr()
-repr = aRepr.repr
+import builtins
+from itertools import islice
+try:
+    from _thread import get_ident
+except ImportError:
+    def get_ident():
+        return 0
+
+__all__ = ["Repr", "repr", "recursive_repr"]
+
+
 def recursive_repr(fillvalue='...'):
     def decorating_function(user_function):
-        return user_function
+        repr_running = set()
+
+        def wrapper(self):
+            key = id(self), get_ident()
+            if key in repr_running:
+                return fillvalue
+            repr_running.add(key)
+            try:
+                result = user_function(self)
+            finally:
+                repr_running.discard(key)
+            return result
+
+        for attr in ('__module__', '__doc__', '__name__', '__qualname__'):
+            try:
+                setattr(wrapper, attr, getattr(user_function, attr))
+            except AttributeError:
+                pass
+        wrapper.__wrapped__ = user_function
+        return wrapper
     return decorating_function
+
+
+class Repr(object):
+
+    def __init__(self, maxlevel=6, maxtuple=6, maxlist=6, maxarray=5, maxdict=4,
+                 maxset=6, maxfrozenset=6, maxdeque=6, maxstring=30, maxlong=40,
+                 maxother=30, fillvalue='...', indent=None):
+        self.maxlevel = maxlevel
+        self.maxtuple = maxtuple
+        self.maxlist = maxlist
+        self.maxarray = maxarray
+        self.maxdict = maxdict
+        self.maxset = maxset
+        self.maxfrozenset = maxfrozenset
+        self.maxdeque = maxdeque
+        self.maxstring = maxstring
+        self.maxlong = maxlong
+        self.maxother = maxother
+        self.fillvalue = fillvalue
+        self.indent = indent
+
+    def repr(self, x):
+        return self.repr1(x, self.maxlevel)
+
+    _lookup = {
+        'tuple': 'builtins',
+        'list': 'builtins',
+        'array': 'array',
+        'set': 'builtins',
+        'frozenset': 'builtins',
+        'deque': 'collections',
+        'dict': 'builtins',
+        'str': 'builtins',
+        'int': 'builtins'
+    }
+
+    def repr1(self, x, level):
+        cls = type(x)
+        typename = cls.__name__
+        if ' ' in typename:
+            parts = typename.split()
+            typename = '_'.join(parts)
+        method = getattr(self, 'repr_' + typename, None)
+        if method:
+            # Not one of this class's types: a method of a subclass.
+            if typename not in self._lookup:
+                return method(x, level)
+            module = getattr(cls, '__module__', None)
+            # One of this class's types, from the module it is meant for.
+            if module == self._lookup[typename]:
+                return method(x, level)
+        return self.repr_instance(x, level)
+
+    def _join(self, pieces, level):
+        if self.indent is None:
+            return ', '.join(pieces)
+        if not pieces:
+            return ''
+        indent = self.indent
+        if isinstance(indent, int):
+            indent = indent * ' '
+        sep = ',\n' + (self.maxlevel - level + 1) * indent
+        return sep.join(('',) + tuple(pieces) + ('',))[1:-len(indent) or None]
+
+    def _repr_iterable(self, x, level, left, right, maxiter, trail=''):
+        n = len(x)
+        if level <= 0 and n:
+            s = self.fillvalue
+        else:
+            newlevel = level - 1
+            repr1 = self.repr1
+            pieces = [repr1(elem, newlevel) for elem in islice(x, maxiter)]
+            if n > maxiter:
+                pieces.append(self.fillvalue)
+            s = self._join(pieces, level)
+            if n == 1 and trail and self.indent is None:
+                right = trail + right
+        return '%s%s%s' % (left, s, right)
+
+    def repr_tuple(self, x, level):
+        return self._repr_iterable(x, level, '(', ')', self.maxtuple, ',')
+
+    def repr_list(self, x, level):
+        return self._repr_iterable(x, level, '[', ']', self.maxlist)
+
+    def repr_array(self, x, level):
+        if not x:
+            return "array('%s')" % x.typecode
+        header = "array('%s', [" % x.typecode
+        return self._repr_iterable(x, level, header, '])', self.maxarray)
+
+    def repr_set(self, x, level):
+        if not x:
+            return 'set()'
+        x = _possibly_sorted(x)
+        return self._repr_iterable(x, level, '{', '}', self.maxset)
+
+    def repr_frozenset(self, x, level):
+        if not x:
+            return 'frozenset()'
+        x = _possibly_sorted(x)
+        return self._repr_iterable(x, level, 'frozenset({', '})', self.maxfrozenset)
+
+    def repr_deque(self, x, level):
+        return self._repr_iterable(x, level, 'deque([', '])', self.maxdeque)
+
+    def repr_dict(self, x, level):
+        n = len(x)
+        if n == 0:
+            return '{}'
+        if level <= 0:
+            return '{' + self.fillvalue + '}'
+        newlevel = level - 1
+        repr1 = self.repr1
+        pieces = []
+        for key in islice(_possibly_sorted(x), self.maxdict):
+            keyrepr = repr1(key, newlevel)
+            valrepr = repr1(x[key], newlevel)
+            pieces.append('%s: %s' % (keyrepr, valrepr))
+        if n > self.maxdict:
+            pieces.append(self.fillvalue)
+        s = self._join(pieces, level)
+        return '{%s}' % (s,)
+
+    def repr_str(self, x, level):
+        s = builtins.repr(x[:self.maxstring])
+        if len(s) > self.maxstring:
+            i = max(0, (self.maxstring - 3) // 2)
+            j = max(0, self.maxstring - 3 - i)
+            s = builtins.repr(x[:i] + x[len(x) - j:])
+            s = s[:i] + self.fillvalue + s[len(s) - j:]
+        return s
+
+    repr_unicode = repr_str
+
+    def repr_int(self, x, level):
+        s = builtins.repr(x)
+        if len(s) > self.maxlong:
+            i = max(0, (self.maxlong - 3) // 2)
+            j = max(0, self.maxlong - 3 - i)
+            s = s[:i] + self.fillvalue + s[len(s) - j:]
+        return s
+
+    repr_long = repr_int
+
+    def repr_instance(self, x, level):
+        try:
+            s = builtins.repr(x)
+        except Exception:
+            return '<%s instance at %#x>' % (x.__class__.__name__, id(x))
+        if len(s) > self.maxother:
+            i = max(0, (self.maxother - 3) // 2)
+            j = max(0, self.maxother - 3 - i)
+            s = s[:i] + self.fillvalue + s[len(s) - j:]
+        return s
+
+
+def _possibly_sorted(x):
+    try:
+        return sorted(x)
+    except Exception:
+        return list(x)
+
+
+aRepr = Repr()
+repr = aRepr.repr
 "##;
 
 const FRACTIONS: &str = r##"

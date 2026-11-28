@@ -58,7 +58,7 @@ impl StatusCapture {
 mod tests {
     use super::*;
     use crate::{
-        midori_state::{EntryAssignment, SceneDone},
+        midori_state::{EntryAssignment},
         registers::{Bank, Change, Limits, Value},
     };
 
@@ -92,10 +92,10 @@ mod tests {
         regs.set_system(217, -17)?;
         regs.set_system(4720, -46)?;
         regs.set_system(4721, 99)?;
-        names.set(EntryAssignment::parse(b"30,-1,2,4,synthetic")?);
-        names.set(EntryAssignment::parse(b"30,-1,2,7,ending")?);
+        names.set(EntryAssignment::parse(2,b"4,synthetic")?);
+        names.set(EntryAssignment::parse(2,b"7,ending")?);
         regs.change(Change::Experience(Bank::Cg, vec![0, 2499, 2499, 2500]))?;
-        regs.change(Change::MidoriSceneDone(SceneDone(12)))?;
+        regs.change(Change::MidoriDone(crate::registers::DoneFlags::parse(b"2,1,12")))?;
         regs.change(Change::Experience(Bank::Sound, vec![11, 99, 100]))?;
         for id in [0, 7, 24, 31, 32, 47999, 48000] {
             regs.mark_message(id)?;

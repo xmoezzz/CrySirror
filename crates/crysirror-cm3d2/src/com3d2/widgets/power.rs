@@ -305,6 +305,8 @@ impl Assets {
                         size,
                         align: (align % 3) as f32 / 2.,
                         vertical: (align / 3) as f32 / 2.,
+                        clamp_lines: None,
+                        spacing_y: 0.,
                         text: r.string()?,
                         measured_width: None,
                         ready: None,

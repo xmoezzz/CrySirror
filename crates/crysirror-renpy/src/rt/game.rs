@@ -33,6 +33,20 @@ fn f_context(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     ops::getitem(vm, &c, i)
 }
 
+/// A `RestartContext`/`RestartTopContext`, or from 8.5.1 any exception
+/// `run_context` performs (rollback, unfreeze, reset), which unwinds
+/// nested contexts the same way.
+fn is_restart(vm: &mut Vm, e: &PyErr) -> bool {
+    let module = super::state::restart_module(vm);
+    let isa = |vm: &mut Vm, m: &str, c: &str| super::execution::exc_isinstance(vm, e, m, c);
+    isa(vm, module, "RestartContext")
+        || isa(vm, module, "RestartTopContext")
+        || (super::state::deferred_rollback(vm)
+            && (isa(vm, "renpy.rollback", "RollbackException")
+                || isa(vm, "renpy.rollback", "UnfreezeException")
+                || isa(vm, "renpy.execution", "ResetAllContexts")))
+}
+
 fn exc_of(vm: &mut Vm, e: &PyErr, cls: &str) -> bool {
     super::execution::exc_isinstance(vm, e, MODULE, cls)
 }
@@ -58,7 +72,11 @@ fn push_context(vm: &mut Vm, clear: Value) -> PyResult<Value> {
     vm.call(&cf, Vec::new(), Vec::new())?;
     let ctx_c = py::import_attr(vm, "renpy.execution", "Context")?;
     let top = context(vm, -1)?;
-    let ctx = vm.call(&ctx_c, vec![Value::Bool(false), top], vec![("clear".into(), clear)])?;
+    let ctx = vm.call(
+        &ctx_c,
+        vec![Value::Bool(false), top],
+        vec![("clear".into(), clear)],
+    )?;
     let cs = contexts(vm)?;
     ops::list_append(vm, &cs, ctx.clone())?;
     let iface = py::import_attr(vm, "renpy.display", "interface").unwrap_or(Value::None);
@@ -104,7 +122,9 @@ fn jump_out(vm: &mut Vm, e: &PyErr) -> PyResult<PyErr> {
 }
 
 fn take(kw: &mut Vec<(Rc<str>, Value)>, n: &str) -> Option<Value> {
-    kw.iter().position(|(k, _)| &**k == n).map(|i| kw.remove(i).1)
+    kw.iter()
+        .position(|(k, _)| &**k == n)
+        .map(|i| kw.remove(i).1)
 }
 
 fn f_invoke_in_new_context(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -115,7 +135,7 @@ fn f_invoke_in_new_context(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Valu
     let r = vm.call(&callable, args[1..].to_vec(), kw);
     let mut restart = false;
     let r = match r {
-        Err(e) if exc_of(vm, &e, "RestartContext") || exc_of(vm, &e, "RestartTopContext") => {
+        Err(e) if is_restart(vm, &e) => {
             restart = true;
             Err(e)
         }
@@ -135,7 +155,11 @@ fn f_call_in_new_context(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value>
     let label = args[0].clone();
     let ctx = push_context(vm, clear)?;
     let store = super::python::store_dict(vm, "store")?;
-    let a = if args.len() > 1 { vm.types.new_tuple(args[1..].to_vec()) } else { Value::None };
+    let a = if args.len() > 1 {
+        vm.types.new_tuple(args[1..].to_vec())
+    } else {
+        Value::None
+    };
     py::dict_set(vm, &store, "_args", a)?;
     let k = if kw.is_empty() {
         Value::None
@@ -257,8 +281,18 @@ fn full_restart_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn quit_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     exc_base_init(vm, &args[0], Vec::new())?;
-    py::set(vm, &args[0], "relaunch", arg_or(args, kw, 1, "relaunch", Value::Bool(false)))?;
-    py::set(vm, &args[0], "status", arg_or(args, kw, 2, "status", Value::Int(0)))?;
+    py::set(
+        vm,
+        &args[0],
+        "relaunch",
+        arg_or(args, kw, 1, "relaunch", Value::Bool(false)),
+    )?;
+    py::set(
+        vm,
+        &args[0],
+        "status",
+        arg_or(args, kw, 2, "status", Value::Int(0)),
+    )?;
     Ok(Value::None)
 }
 
@@ -267,8 +301,18 @@ fn call_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     exc_base_init(vm, this, Vec::new())?;
     py::set(vm, this, "label", arg_or(args, kw, 1, "label", Value::None))?;
     py::set(vm, this, "args", arg_or(args, kw, 2, "args", Value::None))?;
-    py::set(vm, this, "kwargs", arg_or(args, kw, 3, "kwargs", Value::None))?;
-    py::set(vm, this, "from_current", arg_or(args, kw, 4, "from_current", Value::Bool(false)))?;
+    py::set(
+        vm,
+        this,
+        "kwargs",
+        arg_or(args, kw, 3, "kwargs", Value::None),
+    )?;
+    py::set(
+        vm,
+        this,
+        "from_current",
+        arg_or(args, kw, 4, "from_current", Value::Bool(false)),
+    )?;
     Ok(Value::None)
 }
 
@@ -284,14 +328,27 @@ fn call_reduce(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("context", f_context),
-        ("invoke_in_new_context", f_invoke_in_new_context),
-        ("call_in_new_context", f_call_in_new_context),
-        ("call_replay", f_call_replay),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("context", f_context),
+            ("invoke_in_new_context", f_invoke_in_new_context),
+            ("call_in_new_context", f_call_in_new_context),
+            ("call_replay", f_call_replay),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
-    for n in ["basepath", "args", "script", "interface", "log", "style", "persistent", "preferences"] {
+    for n in [
+        "basepath",
+        "args",
+        "script",
+        "interface",
+        "log",
+        "style",
+        "persistent",
+        "preferences",
+    ] {
         set(vm, n, Value::None);
     }
     set(vm, "searchpath", vm.types.new_list(Vec::new()));
@@ -299,17 +356,39 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     set(vm, "post_init", vm.types.new_list(Vec::new()));
     set(vm, "seen_session", vm.types.new_dict());
     set(vm, "exception_info", py::s(vm, ""));
-    for n in ["lint", "after_rollback", "less_memory", "less_updates", "less_mouse", "less_imagedissolve"] {
+    for n in [
+        "lint",
+        "after_rollback",
+        "less_memory",
+        "less_updates",
+        "less_mouse",
+        "less_imagedissolve",
+    ] {
         set(vm, n, Value::Bool(false));
     }
-    for n in ["seen_translates_count", "new_translates_count", "initcode_ast_id"] {
+    for n in [
+        "seen_translates_count",
+        "new_translates_count",
+        "initcode_ast_id",
+    ] {
         set(vm, n, Value::Int(0));
     }
     let bi = vm.types.new_dict();
     py::dict_set(vm, &bi, "info", vm.types.new_dict())?;
     set(vm, "build_info", bi);
     let obj = Value::Obj(vm.types.object.clone());
-    let ei = py::class(vm, MODULE, "ExceptionInfo", &[obj], &[("__init__", ei_init), ("__enter__", ei_enter), ("__exit__", ei_exit)], &[])?;
+    let ei = py::class(
+        vm,
+        MODULE,
+        "ExceptionInfo",
+        &[obj],
+        &[
+            ("__init__", ei_init),
+            ("__enter__", ei_enter),
+            ("__exit__", ei_exit),
+        ],
+        &[],
+    )?;
     set(vm, "ExceptionInfo", Value::Obj(ei));
     let exc = Value::Obj(vm.types.exc("Exception"));
     let mut control = Vec::new();
@@ -319,25 +398,78 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
         control.push(c.clone());
         Ok(c)
     };
-    simple(vm, "RestartContext", &mut control)?;
-    simple(vm, "RestartTopContext", &mut control)?;
-    let fr = Value::Obj(py::class(vm, MODULE, "FullRestartException", &[exc.clone()], &[("__init__", full_restart_init)], &[])?);
+    // From 8.5.1 the restarts are `BaseException`s in `renpy.execution`.
+    if !super::state::deferred_rollback(vm) {
+        simple(vm, "RestartContext", &mut control)?;
+        simple(vm, "RestartTopContext", &mut control)?;
+    }
+    let fr = Value::Obj(py::class(
+        vm,
+        MODULE,
+        "FullRestartException",
+        &[exc.clone()],
+        &[("__init__", full_restart_init)],
+        &[],
+    )?);
     set(vm, "FullRestartException", fr.clone());
     control.push(fr);
     simple(vm, "UtterRestartException", &mut control)?;
-    let q = Value::Obj(py::class(vm, MODULE, "QuitException", &[exc.clone()], &[("__init__", quit_init)], &[])?);
+    let q = Value::Obj(py::class(
+        vm,
+        MODULE,
+        "QuitException",
+        &[exc.clone()],
+        &[("__init__", quit_init)],
+        &[],
+    )?);
     set(vm, "QuitException", q.clone());
     control.push(q);
     simple(vm, "JumpException", &mut control)?;
     simple(vm, "JumpOutException", &mut control)?;
-    let ce = Value::Obj(py::class(vm, MODULE, "CallException", &[exc.clone()], &[("__init__", call_init), ("__reduce__", call_reduce)], &[("from_current", Value::Bool(false))])?);
+    let ce = Value::Obj(py::class(
+        vm,
+        MODULE,
+        "CallException",
+        &[exc.clone()],
+        &[("__init__", call_init), ("__reduce__", call_reduce)],
+        &[("from_current", Value::Bool(false))],
+    )?);
     set(vm, "CallException", ce.clone());
     control.push(ce);
     simple(vm, "EndReplay", &mut control)?;
     simple(vm, "ParseErrorException", &mut control)?;
     control.push(Value::Obj(vm.types.exc("KeyboardInterrupt")));
     set(vm, "CONTROL_EXCEPTIONS", vm.types.new_tuple(control));
+    if !super::state::rt(vm).profile.at_least(6, 14) {
+        old_names(vm, &m, &exc)?;
+    }
     Ok(m)
+}
+
+/// Through 6.13: the optparse `options` of the command line (the player
+/// passes none, so every option has its default), the `init_phase` flag
+/// and `RestartException(contexts, label)`, which old rollback raised.
+fn old_names(vm: &mut Vm, m: &ObjRef, exc: &Value) -> PyResult<()> {
+    let ns = py::import_attr(vm, "types", "SimpleNamespace")?;
+    let mut kw: Vec<(std::rc::Rc<str>, Value)> = vec![("args".into(), vm.types.new_list(Vec::new())), ("trace".into(), Value::Int(0))];
+    for n in ["version", "compile", "lint", "profile", "leak", "remote", "rmpersistent", "debug_image_cache"] {
+        kw.push((n.into(), Value::Bool(false)));
+    }
+    for n in ["game", "savedir", "lock", "python", "warp", "presplash", "log_startup"] {
+        kw.push((n.into(), Value::None));
+    }
+    let options = vm.call(&ns, Vec::new(), kw)?;
+    crysirror_python::modules::set(vm, m, "options", options);
+    crysirror_python::modules::set(vm, m, "init_phase", Value::Bool(false));
+    let re = py::class(vm, MODULE, "RestartException", &[exc.clone()], &[("__init__", restart_init)], &[])?;
+    crysirror_python::modules::set(vm, m, "RestartException", Value::Obj(re));
+    Ok(())
+}
+
+fn restart_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    py::set(vm, &args[0], "contexts", arg_or(args, kw, 1, "contexts", Value::None))?;
+    py::set(vm, &args[0], "label", arg_or(args, kw, 2, "label", Value::None))?;
+    Ok(Value::None)
 }
 
 pub fn install(vm: &mut Vm) {

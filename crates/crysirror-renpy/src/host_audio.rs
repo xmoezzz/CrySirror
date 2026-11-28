@@ -52,7 +52,12 @@ pub struct HostAudio {
 
 impl Default for HostAudio {
     fn default() -> Self {
-        HostAudio { channels: BTreeMap::new(), global_pause: false, diagnostics: Vec::new(), filter_reported: false }
+        HostAudio {
+            channels: BTreeMap::new(),
+            global_pause: false,
+            diagnostics: Vec::new(),
+            filter_reported: false,
+        }
     }
 }
 
@@ -77,18 +82,35 @@ fn channel_key(v: &J) -> String {
 impl HostAudio {
     fn channel(&mut self, name: &str) -> &mut Channel {
         let next = self.channels.len() as u32 + 1;
-        self.channels.entry(name.to_owned()).or_insert_with(|| Channel { id: next, volume: 1.0, secondary: 1.0, ..Channel::default() })
+        self.channels
+            .entry(name.to_owned())
+            .or_insert_with(|| Channel {
+                id: next,
+                volume: 1.0,
+                secondary: 1.0,
+                ..Channel::default()
+            })
     }
 
     fn gain(c: &Channel, sample: &Sample) -> f32 {
         (c.volume * c.secondary * sample.relative_volume).clamp(0.0, 4.0) as f32
     }
 
-    fn start(&mut self, host: &mut dyn HostServices, client: ClientId, files: &ScopedFiles, name: &str, sample: Sample) -> Result<()> {
+    fn start(
+        &mut self,
+        host: &mut dyn HostServices,
+        client: ClientId,
+        files: &ScopedFiles,
+        name: &str,
+        sample: Sample,
+    ) -> Result<()> {
         let paused = self.global_pause;
         let c = self.channel(name);
         let Some(path) = files.asset_path(&sample.file).cloned() else {
-            return Err(Error::Io(format!("Ren'Py audio file missing: {}", sample.file)));
+            return Err(Error::Io(format!(
+                "Ren'Py audio file missing: {}",
+                sample.file
+            )));
         };
         let parameters = AudioParameters {
             gain: Self::gain(c, &sample),
@@ -99,7 +121,18 @@ impl HostAudio {
             bus: PcmBus::Sfx,
             ..AudioParameters::default()
         };
-        let ticket = host.begin_audio(client, AudioRequest::PlayAsset { channel: c.id, source: AudioAsset { path, frame_limit: None }, intro: None, parameters })?;
+        let ticket = host.begin_audio(
+            client,
+            AudioRequest::PlayAsset {
+                channel: c.id,
+                source: AudioAsset {
+                    path,
+                    frame_limit: None,
+                },
+                intro: None,
+                parameters,
+            },
+        )?;
         if let Some(old) = c.ticket.replace(ticket) {
             host.release_audio(client, old)?;
         }
@@ -107,18 +140,36 @@ impl HostAudio {
         Ok(())
     }
 
-    fn stop(&mut self, host: &mut dyn HostServices, client: ClientId, name: &str, fade_ms: f32) -> Result<()> {
+    fn stop(
+        &mut self,
+        host: &mut dyn HostServices,
+        client: ClientId,
+        name: &str,
+        fade_ms: f32,
+    ) -> Result<()> {
         let c = self.channel(name);
         if let Some(t) = c.ticket.take() {
             host.release_audio(client, t)?;
         }
         c.playing = None;
         let id = c.id;
-        host.submit_audio(client, AudioRequest::Stop { channel: id, fade_ms })
+        host.submit_audio(
+            client,
+            AudioRequest::Stop {
+                channel: id,
+                fade_ms,
+            },
+        )
     }
 
     /// Applies one tick's commands in issue order.
-    pub fn apply(&mut self, host: &mut dyn HostServices, client: ClientId, files: &ScopedFiles, commands: Vec<J>) -> Result<()> {
+    pub fn apply(
+        &mut self,
+        host: &mut dyn HostServices,
+        client: ClientId,
+        files: &ScopedFiles,
+        commands: Vec<J>,
+    ) -> Result<()> {
         for cmd in commands {
             let op = s(&cmd, "op");
             let name = channel_key(&cmd);
@@ -159,7 +210,14 @@ impl HostAudio {
                     let c = self.channel(&name);
                     c.paused = paused;
                     let id = c.id;
-                    host.submit_audio(client, AudioRequest::Pause { channel: id, paused, fade_ms: 0.0 })?;
+                    host.submit_audio(
+                        client,
+                        AudioRequest::Pause {
+                            channel: id,
+                            paused,
+                            fade_ms: 0.0,
+                        },
+                    )?;
                 }
                 "volume" | "secondary_volume" => {
                     let v = f(&cmd, "volume", 1.0);
@@ -172,7 +230,14 @@ impl HostAudio {
                     }
                     if let Some(p) = c.playing.clone() {
                         let (id, gain) = (c.id, Self::gain(c, &p));
-                        host.submit_audio(client, AudioRequest::SetGain { channel: id, gain, fade_ms: ms })?;
+                        host.submit_audio(
+                            client,
+                            AudioRequest::SetGain {
+                                channel: id,
+                                gain,
+                                fade_ms: ms,
+                            },
+                        )?;
                     }
                 }
                 "pan" => {
@@ -181,23 +246,43 @@ impl HostAudio {
                     let c = self.channel(&name);
                     c.pan = pan;
                     let id = c.id;
-                    host.submit_audio(client, AudioRequest::SetPan { channel: id, pan: ((pan + 1.0) / 2.0).clamp(0.0, 1.0) as f32, fade_ms: ms })?;
+                    host.submit_audio(
+                        client,
+                        AudioRequest::SetPan {
+                            channel: id,
+                            pan: ((pan + 1.0) / 2.0).clamp(0.0, 1.0) as f32,
+                            fade_ms: ms,
+                        },
+                    )?;
                 }
                 "global_pause" => {
                     let paused = cmd.get("pause").and_then(J::as_bool).unwrap_or(false);
                     self.global_pause = paused;
-                    let ids: Vec<(u32, bool)> = self.channels.values().map(|c| (c.id, c.paused)).collect();
+                    let ids: Vec<(u32, bool)> =
+                        self.channels.values().map(|c| (c.id, c.paused)).collect();
                     for (id, own) in ids {
-                        host.submit_audio(client, AudioRequest::Pause { channel: id, paused: paused || own, fade_ms: 0.0 })?;
+                        host.submit_audio(
+                            client,
+                            AudioRequest::Pause {
+                                channel: id,
+                                paused: paused || own,
+                                fade_ms: 0.0,
+                            },
+                        )?;
                     }
                 }
                 "filter" => {
                     if !self.filter_reported {
                         self.filter_reported = true;
-                        self.diagnostics.push("Ren'Py audio filters are not supported by the host audio service".into());
+                        self.diagnostics.push(
+                            "Ren'Py audio filters are not supported by the host audio service"
+                                .into(),
+                        );
                     }
                 }
-                other => self.diagnostics.push(format!("unknown Ren'Py audio command {other:?}")),
+                other => self
+                    .diagnostics
+                    .push(format!("unknown Ren'Py audio command {other:?}")),
             }
         }
         Ok(())
@@ -205,7 +290,12 @@ impl HostAudio {
 
     /// Advances finished channels to their queued samples and reports the
     /// playing state of every channel for the next tick.
-    pub fn status(&mut self, host: &mut dyn HostServices, client: ClientId, files: &ScopedFiles) -> Result<Vec<AudioStatus>> {
+    pub fn status(
+        &mut self,
+        host: &mut dyn HostServices,
+        client: ClientId,
+        files: &ScopedFiles,
+    ) -> Result<Vec<AudioStatus>> {
         let names: Vec<String> = self.channels.keys().cloned().collect();
         let mut out = Vec::with_capacity(names.len());
         for name in names {
@@ -227,11 +317,15 @@ impl HostAudio {
                         let c = self.channel(&name);
                         c.ticket = None;
                         let file = c.playing.take().map(|s| s.file).unwrap_or_default();
-                        self.diagnostics.push(format!("Ren'Py audio failed: {file}: {}", p.error.unwrap_or_default()));
+                        self.diagnostics.push(format!(
+                            "Ren'Py audio failed: {file}: {}",
+                            p.error.unwrap_or_default()
+                        ));
                     }
                 }
             }
-            let playing = preparing || (self.channel(&name).playing.is_some() && host.audio_playing(client, id)?);
+            let playing = preparing
+                || (self.channel(&name).playing.is_some() && host.audio_playing(client, id)?);
             if !playing {
                 let c = self.channel(&name);
                 c.playing = None;
@@ -247,7 +341,9 @@ impl HostAudio {
                 && info.source_rate > 0
             {
                 position_ms = Some(info.position_frames * 1000 / info.source_rate as u64);
-                duration_ms = info.source_frames.map(|f| f * 1000 / info.source_rate as u64);
+                duration_ms = info
+                    .source_frames
+                    .map(|f| f * 1000 / info.source_rate as u64);
             }
             let c = self.channel(&name);
             out.push(AudioStatus {

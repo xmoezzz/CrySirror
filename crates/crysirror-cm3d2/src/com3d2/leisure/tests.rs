@@ -205,3 +205,81 @@ fn installed_casino() -> Result<()> {
     click(&mut m, "/CasinoMenu/Cancel_Button")?;
     m.wait(Scene::Daily(daily::Period::Night))
 }
+
+#[test]
+#[ignore = "installed standalone 1.0.4 casino shop"]
+fn installed_casino_shop_purchase_and_return() -> Result<()> {
+    let mut m = Menu::with_motion(true)?;
+    {
+        let mut vm = m.game.script.tjs.lock().unwrap();
+        let s = &mut vm.runtime.host_mut().state;
+        let cat = crate::tjs::retail::construction::Catalog::load(&mut s.retail)?;
+        s.player.money = cat.get(170)?.cost;
+        cat.reserve(s, 8, Some(170))?;
+        crate::tjs::retail::operations::start_day(s)?;
+        s.retail.casino_coins = 900_000;
+    }
+    open_daily_button(&mut m, true, daily::Button::Casino, Casino)?;
+    click(&mut m, "/CasinoMenu/ItemExchange")?;
+    m.wait(Scene::Leisure(CasinoShop))?;
+    m.tick(500)?;
+    click(&mut m, "casino-shop/category/1")?;
+    let key = m.game.widgets.iter().find(|w| {
+        w.path.starts_with("casino-shop/item/") && w.path.ends_with("/BuyButton") && w.collider.is_some()
+    }).context("casino material purchase button")?.path.clone();
+    click(&mut m, &key)?;
+    click(&mut m, "/Base/Cancel")?;
+    m.tick(301)?;
+    {
+        let vm = m.game.script.tjs.lock().unwrap();
+        assert_eq!(vm.runtime.host().state.retail.casino_coins, 900_000);
+    }
+    click(&mut m, &key)?;
+    click(&mut m, "/Base/Ok")?;
+    click(&mut m, "/Base/Ok")?;
+    {
+        let vm = m.game.script.tjs.lock().unwrap();
+        let s = &vm.runtime.host().state.retail;
+        assert!(s.casino_coins < 900_000);
+        assert!(s.casino_sold_out.contains(&1000));
+        assert!(s.materials.contains(&30));
+    }
+    assert!(!m.game.widgets.iter().any(|w| w.path == key));
+    click(&mut m, "UI Root/Parent/OK")?;
+    m.wait(Scene::Leisure(Casino))
+}
+
+#[test]
+#[ignore = "installed standalone 1.0.4 blackjack"]
+fn installed_blackjack_bet_settle_and_return() -> Result<()> {
+    let mut m = Menu::with_motion(true)?;
+    {
+        let mut vm = m.game.script.tjs.lock().unwrap();
+        let s = &mut vm.runtime.host_mut().state;
+        let cat = crate::tjs::retail::construction::Catalog::load(&mut s.retail)?;
+        s.player.money = cat.get(170)?.cost;
+        cat.reserve(s, 8, Some(170))?;
+        crate::tjs::retail::operations::start_day(s)?;
+        s.retail.casino_coins = 10_000;
+        s.player.generic_flag.insert("BJ最終プレイ日".into(), s.player.days);
+    }
+    open_daily_button(&mut m, true, daily::Button::Casino, Casino)?;
+    click(&mut m, "/CasinoMenu/BlackJack")?;
+    m.wait(Scene::Leisure(Blackjack))?;
+    m.tick(500)?;
+    let actor = m.game.actors.actor(false, 0).context("blackjack dealer")?;
+    assert!(actor.visible);
+    assert!(!actor.anims.is_empty());
+    let stage = m.rt.render_pbr()?.context("blackjack world")?;
+    assert!(stage.instances.iter().any(|i| (i.key as u32) >= 0x1000));
+    click(&mut m, "/Frame/StartButton")?;
+    click(&mut m, "/BetSetUI/OK")?;
+    if m.game.widgets.iter().any(|w| w.path == "/CallUIPanel/Stand" && w.collider.is_some()) {
+        click(&mut m, "/CallUIPanel/Stand")?;
+    }
+    assert!(m.game.widgets.iter().any(|w| w.path == "/ResultBG/GetMoneyText"));
+    click(&mut m, "/ResultBG/Next")?;
+    click(&mut m, "/Frame/EndButton")?;
+    click(&mut m, "/Base/Ok")?;
+    m.wait(Scene::Leisure(Casino))
+}

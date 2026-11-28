@@ -6,6 +6,8 @@ struct View {
     view: mat4x4<f32>,
     model: mat4x4<f32>,
     camera: vec4<f32>,
+    emitter_right: vec4<f32>,
+    emitter_up: vec4<f32>,
     // renderer (sprite=0/mesh=1), facing (camera, velocity, axis, local
     // plane), sheet columns, sheet rows
     mode: vec4<u32>,
@@ -17,6 +19,7 @@ struct View {
     fog_color: vec4<f32>,
     // density, height falloff, base height, start distance
     fog_params: vec4<f32>,
+    coverage: vec4<f32>,
 }
 struct Particle {
     position_age: vec4<f32>,
@@ -32,6 +35,7 @@ struct Particle {
 @group(1) @binding(0) var image: texture_2d<f32>;
 @group(1) @binding(1) var image_sampler: sampler;
 @group(1) @binding(2) var opaque_depth: texture_depth_2d;
+@group(1) @binding(3) var coverage_image: texture_2d<f32>;
 
 struct Out {
     @builtin(position) clip: vec4<f32>,
@@ -59,17 +63,18 @@ fn vs_sprite(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance
     var up=vec3<f32>(frame.view[0][1],frame.view[1][1],frame.view[2][1]);
     if frame.mode.y==3u {
         // Fixed in the emitter's local XY plane.
-        right=safe_normal(frame.model[0].xyz,right);
-        up=safe_normal(frame.model[1].xyz,up);
+        right=safe_normal(frame.emitter_right.xyz,right);
+        up=safe_normal(frame.emitter_up.xyz,up);
     } else if frame.mode.y>0u {
         var axis=(frame.model*vec4<f32>(p.velocity_lifetime.xyz,0.0)).xyz;
-        if frame.mode.y==2u {axis=(frame.model*vec4<f32>(frame.axis.xyz,0.0)).xyz;}
+        if frame.mode.y==2u {axis=frame.axis.xyz;}
         up=safe_normal(axis,up);
         right=safe_normal(cross(up,frame.camera.xyz-center),right);
     }
     let angle=p.previous_position_rotation.w;
     let cs=cos(angle);let sn=sin(angle);
-    let q=vec2<f32>(cs*corner.x-sn*corner.y,sn*corner.x+cs*corner.y)*p.size.xy*0.5;
+    let half_corner=corner*p.size.xy*0.5;
+    let q=vec2<f32>(cs*half_corner.x-sn*half_corner.y,sn*half_corner.x+cs*half_corner.y);
     let scale=vec2<f32>(length(frame.model[0].xyz),length(frame.model[1].xyz));
     let world=center+right*q.x*scale.x+up*q.y*scale.y;
     let life=max(p.velocity_lifetime.w,1e-6);
@@ -113,6 +118,18 @@ fn rgba(i:Out)->vec4<f32> {
     }
     let tex=textureSample(image,image_sampler,uv);
     var color=tex*i.color;
+    if frame.coverage.w > 0.0 {
+        let n=abs(normalize(vec3<f32>(frame.view[0].z,frame.view[1].z,frame.view[2].z)));
+        let center=frame.coverage.w*i.world+fract(frame.coverage.xyz*frame.screen.z);
+        let offset=n*(0.5*frame.coverage.w);
+        let a=center+offset;
+        let b=center+vec3<f32>(0.5)-offset;
+        let taps=vec3<f32>(
+            textureSampleLevel(coverage_image,image_sampler,a.yz,0.0).a + textureSampleLevel(coverage_image,image_sampler,b.yz,0.0).a,
+            textureSampleLevel(coverage_image,image_sampler,a.xz,0.0).a + textureSampleLevel(coverage_image,image_sampler,b.xz,0.0).a,
+            textureSampleLevel(coverage_image,image_sampler,a.xy,0.0).a + textureSampleLevel(coverage_image,image_sampler,b.xy,0.0).a);
+        color.a=i.color.a*dot(n,taps)*0.5;
+    }
     if frame.animation.w>0.5 {
         let xy=i.uv*2.0-vec2<f32>(1.0);
         let r2=dot(xy,xy);
@@ -131,6 +148,7 @@ fn rgba(i:Out)->vec4<f32> {
             color.a*=clamp((seen-point)/frame.animation.z,0.0,1.0);
         }
     }
+    if frame.coverage.w > 0.0 { color.a=clamp(color.a,0.0,1.0); }
     return color;
 }
 // Fog opacity at the fragment (0 without fog).
@@ -154,4 +172,5 @@ fn fogged(i:Out)->vec4<f32> {
 @fragment fn fs_alpha(i:Out)->@location(0) vec4<f32> {return fogged(i);}
 @fragment fn fs_premultiplied(i:Out)->@location(0) vec4<f32> {let c=fogged(i);return vec4<f32>(c.rgb*c.a,c.a);}
 @fragment fn fs_additive(i:Out)->@location(0) vec4<f32> {let c=rgba(i);return vec4<f32>(c.rgb*c.a*(1.0-fog_amount(i)),0.0);}
+@fragment fn fs_additive_color(i:Out)->@location(0) vec4<f32> {let c=rgba(i);return vec4<f32>(c.rgb*(1.0-fog_amount(i)),c.a);}
 @fragment fn fs_multiply(i:Out)->@location(0) vec4<f32> {let c=fogged(i);return vec4<f32>(mix(vec3<f32>(1.0),c.rgb,c.a),0.0);}

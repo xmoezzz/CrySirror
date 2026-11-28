@@ -53,6 +53,8 @@ struct Frame {
     // Toon key light: xyz direction light travels, w intensity; rgb colour.
     toon_dir: vec4<f32>,
     toon_color: vec4<f32>,
+    // x: scene multiplier for baked vertex irradiance.
+    baked_lighting: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;

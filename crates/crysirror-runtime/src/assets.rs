@@ -31,6 +31,9 @@ pub struct Assets {
     storage: BTreeMap<ClientId, Arc<dyn ClientStorage>>,
     bytes: BTreeMap<String, Arc<[u8]>>,
     total: usize,
+    /// Immutable GLBs with explicit release_model ownership on native 64-bit hosts.
+    models: BTreeMap<String, Arc<[u8]>>,
+    model_bytes: usize,
     limit: usize,
     surfaces: BTreeMap<(ClientId, u32), Surface>,
 }
@@ -100,6 +103,8 @@ impl Assets {
             storage: BTreeMap::new(),
             bytes: BTreeMap::new(),
             total: 0,
+            models: BTreeMap::new(),
+            model_bytes: 0,
             limit: 256 * 1024 * 1024,
             surfaces: BTreeMap::new(),
         })
@@ -149,6 +154,9 @@ impl Assets {
             }
         }
     }
+    fn cached(&self, key: &str) -> Option<&Arc<[u8]>> {
+        self.bytes.get(key).or_else(|| self.models.get(key))
+    }
     fn insert(&mut self, key: String, bytes: Vec<u8>) -> Result<Arc<[u8]>> {
         self.purge_released_generated();
         if !self.total.checked_add(bytes.len()).is_some_and(|n| n <= self.limit) {
@@ -167,7 +175,7 @@ impl Assets {
     pub fn read(&mut self, path: &str) -> Result<Arc<[u8]>> {
         let path = VfsPath::new(Mount::Asset, path).map_err(|e| anyhow::anyhow!("{e}"))?;
         let key = format!("project:{}", path.relative());
-        if let Some(bytes) = self.bytes.get(&key) {
+        if let Some(bytes) = self.cached(&key) {
             return Ok(bytes.clone());
         }
         let bytes = self.root.read(&path)
@@ -200,7 +208,7 @@ impl Assets {
     /// world videos, which would otherwise exceed the cache budget.
     pub fn read_uncached_for(&mut self, client: ClientId, path: &str) -> Result<Arc<[u8]>> {
         let key = self.key(client, path)?;
-        if let Some(bytes) = self.bytes.get(&key) {
+        if let Some(bytes) = self.cached(&key) {
             return Ok(bytes.clone());
         }
         let logical = VfsPath::new(Mount::Asset, path).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -214,7 +222,7 @@ impl Assets {
     }
     pub fn read_for(&mut self, client: ClientId, path: &str) -> Result<Arc<[u8]>> {
         let key = self.key(client, path)?;
-        if let Some(bytes) = self.bytes.get(&key) {
+        if let Some(bytes) = self.cached(&key) {
             return Ok(bytes.clone());
         }
         self.poll_tasks();
@@ -266,14 +274,23 @@ impl Assets {
             "generated resource namespace"
         );
         let key = self.key(client, path)?;
-        if let Some(old) = self.bytes.get(&key) {
+        if let Some(old) = self.cached(&key) {
             ensure!(
                 old.as_ref() == data.as_slice(),
                 "immutable generated resource changed"
             );
             return Ok(());
         }
-        self.insert(key, data)?;
+        if asynchronous::DEFAULT_PREPARED_BUDGET.is_none() && path.ends_with(".glb") {
+            let total = self.model_bytes.checked_add(data.len()).context("generated model byte count overflow")?;
+            if let Some(limit) = self.asynchronous.budget {
+                ensure!(total <= limit, "generated models exceed {} MiB budget (resident={}, incoming={})", limit >> 20, self.model_bytes, data.len());
+            }
+            self.models.insert(key, data.into());
+            self.model_bytes = total;
+        } else {
+            self.insert(key, data)?;
+        }
         Ok(())
     }
     /// Drop a generated resource's bytes (`release_model`); an identical
@@ -283,6 +300,9 @@ impl Assets {
         let key = self.key(client, path)?;
         if let Some(bytes) = self.bytes.remove(&key) {
             self.total -= bytes.len();
+        }
+        if let Some(bytes) = self.models.remove(&key) {
+            self.model_bytes -= bytes.len();
         }
         self.release_prepared_path(client, path);
         Ok(())
@@ -303,7 +323,7 @@ impl Assets {
             "generated resource namespace"
         );
         let key = self.key(client, path)?;
-        Ok(self.bytes.get(&key).cloned())
+        Ok(self.cached(&key).cloned())
     }
     pub fn put_surface(
         &mut self,
@@ -425,6 +445,8 @@ impl Assets {
             self.asynchronous.invalidate(client);
         }
         self.bytes.clear();
+        self.models.clear();
+        self.model_bytes = 0;
         self.total = 0;
         self.surfaces.clear();
     }
@@ -433,6 +455,26 @@ impl Assets {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn live_model_backing_does_not_consume_the_file_cache_on_modern_hosts() {
+        if asynchronous::DEFAULT_PREPARED_BUDGET.is_some() { return; }
+        let tmp = tempfile::tempdir().unwrap();
+        let mut assets = Assets::new(tmp.path()).unwrap();
+        assets.register(ClientId(1), "").unwrap();
+        assets.limit = 4;
+        let path = "__crysirror/example.glb";
+        assets.register_generated(ClientId(1), path, vec![1; 12]).unwrap();
+        assets.register_generated(ClientId(1), path, vec![1; 12]).unwrap();
+        assert_eq!(assets.model_bytes, 12);
+        assert_eq!(assets.read_for(ClientId(1), path).unwrap().len(), 12);
+        assert!(assets.register_generated(ClientId(1), "__crysirror/image.png", vec![0; 5]).is_err());
+        assets.set_prepared_budget(16 << 20).unwrap();
+        assert!(assets.register_generated(ClientId(1), "__crysirror/oversize.glb", vec![0; 16 << 20]).is_err());
+        assets.release_generated(ClientId(1), path).unwrap();
+        assert_eq!(assets.model_bytes, 0);
+        assert!(assets.generated_for(ClientId(1), path).unwrap().is_none());
+    }
+
     #[test]
     fn identical_names_use_separate_client_roots() {
         let tmp = tempfile::tempdir().unwrap();

@@ -1,6 +1,6 @@
 # ADR 0105 — Self-admitted technical debt tracks unfinished work
 
-Status accepted 2026-11-19.
+Accepted 2026-11-19. Retired 2026-11-26.
 
 ## Context
 
@@ -32,6 +32,3 @@ Keep draft native syscalls isolated until their full ABI contract is
 implemented. SATD tracks incomplete drafts and existing defects. The
 activation and acceptance rules remain in the
 [engine semantics skill](../../.agents/skills/crysirror-engine-semantics/SKILL.md).
-
-Use the [SATD skill](../../.agents/skills/crysirror-satd/SKILL.md) when creating,
-changing, moving or closing these records.

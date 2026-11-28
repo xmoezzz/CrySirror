@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
-//! Loose RLD v3 initialization for the 2011 layout of RetouchSystem::liteInit.
-use anyhow::{ensure, Context, Result};
+//! Loose RLD v3 initialization from the installed layouts of RetouchSystem::liteInit.
+use anyhow::{Context, Result, ensure};
 use crysirror_core::{
     path::{Mount, VfsPath},
     service::ClientStorage,
 };
 use crysirror_resource::{
     legacy_stream::Mt19937Split,
-    pe::{PeData, PeRawResource, PeResourceName, MAX_PE_BYTES},
+    pe::{MAX_PE_BYTES, PeData, PeRawResource, PeResourceName},
 };
 use serde::Deserialize;
 
@@ -21,13 +21,28 @@ pub(super) struct Sources {
 
 /// Neither the export immediate nor the per-installation bitmap word is
 /// written into the launch plan, diagnostics or snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Resident {
+    Midori2011,
+    LateVol1,
+    LateVol2,
+}
+
+impl Resident {
+    pub(super) fn late(self) -> bool {
+        matches!(self, Self::LateVol1 | Self::LateVol2)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct Seeds {
-    normal: u32,
+    pub(super) resident: Resident,
+    pub(super) checkpoint_layout: bool,
+    normal: Option<u32>,
     definition: u32,
 }
 
-fn settings_sum(bytes: &[u8]) -> Result<u32> {
+fn setting_fields(bytes: &[u8]) -> std::collections::BTreeMap<Vec<u8>, &[u8]> {
     let mut fields = std::collections::BTreeMap::new();
     let mut setting = false;
     for line in bytes.split(|b| *b == b'\n') {
@@ -45,6 +60,16 @@ fn settings_sum(bytes: &[u8]) -> Result<u32> {
             fields.entry(key).or_insert(v);
         }
     }
+    fields
+}
+
+fn default_marker_settings(bytes: &[u8]) -> bool {
+    let fields = setting_fields(bytes);
+    [b"hit".as_slice(), b"hitpos"].iter().all(|key| fields.get(*key).is_none_or(|value| value.is_empty()))
+}
+
+fn settings_sum(bytes: &[u8], resident: Resident) -> Result<u32> {
+    let fields = setting_fields(bytes);
     let mut lanes = [0u8; 4];
     let mut index = 0;
     let flags = fields
@@ -52,6 +77,10 @@ fn settings_sum(bytes: &[u8]) -> Result<u32> {
         .and_then(|v| std::str::from_utf8(v).ok())
         .unwrap_or("0")
         .parse::<u32>()?;
+    let omit_title = resident.late()
+        && fields
+            .get(b"sysver".as_slice())
+            .is_some_and(|v| crate::native_numbers::integer2011(v) != 0);
     let keys = [
         "class",
         "title",
@@ -70,10 +99,14 @@ fn settings_sum(bytes: &[u8]) -> Result<u32> {
         "n_sound",
         "flags",
         "guid",
+        "svdata",
     ];
     for key in keys {
         if key == "flags" && flags & 4 == 0 {
             break;
+        }
+        if key == "title" && omit_title || key == "svdata" && !resident.late() {
+            continue;
         }
         for &byte in fields.get(key.as_bytes()).copied().unwrap_or_default() {
             lanes[index] = lanes[index].wrapping_add(byte);
@@ -132,6 +165,17 @@ fn initialization_word(bitmaps: &[PeRawResource]) -> Result<u32> {
 }
 
 impl Seeds {
+    pub fn midori_system_path(storage: &dyn ClientStorage, sources: &Sources) -> Result<VfsPath> {
+        let ini = VfsPath::new(Mount::Asset, &sources.ini)?;
+        let reader = storage.open_read(&ini)?;
+        let data = crysirror_resource::read_all(reader.as_ref(), 65536)?;
+        let fields = setting_fields(&data);
+        let class = fields.get(b"class".as_slice()).copied().unwrap_or(b"ExHIBIT");
+        let class = crysirror_resource::text_stream::decode_shift_jis(class, 512)?;
+        ensure!(!class.is_empty() && !class.contains(['/', '\\']), "invalid ExHibit system class");
+        Ok(VfsPath::new(Mount::Save, &format!("{class}.system.dat"))?)
+    }
+
     pub fn read(storage: &dyn ClientStorage, s: &Sources) -> Result<Self> {
         let read = |path: &str, limit| -> Result<Vec<u8>> {
             let r = storage.open_read(&VfsPath::new(Mount::Asset, path)?)?;
@@ -140,33 +184,73 @@ impl Seeds {
         let resident = read(&s.resident, MAX_PE_BYTES as u64)?;
         let pe = PeData::parse(&resident)?;
         let export = pe.export_rva("?liteInit@RetouchSystem@@QAEXXZ")?;
-        let code = pe.rva_slice(export, 0xa0)?;
-        ensure!(
-            code[0x84..0x8a] == [0xc7, 0x86, 0xc8, 0x11, 0, 0]
-                && code[0x8e..0x98] == [0xc7, 0x86, 0x38, 0x80, 0, 0, 255, 255, 255, 255],
-            "unsupported ExHibit RLD v3 initialization ABI"
-        );
-        let definition = u32::from_le_bytes(code[0x8a..0x8e].try_into()?);
-        let exe = read(&s.exe, MAX_PE_BYTES as u64)?;
-        let bitmaps = PeData::parse(&exe)?.raw_resources(&PeResourceName::Id(2), &|| Ok(()))?;
-        let value = initialization_word(&bitmaps)?;
-        let normal = if value == 0 {
-            0
+        let code = pe.rva_slice(export, 0xaf)?;
+        let (resident, immediate) = if code[0x84..0x8a] == [0xc7, 0x86, 0xc8, 0x11, 0, 0]
+            && code[0x8e..0x98] == [0xc7, 0x86, 0x38, 0x80, 0, 0, 255, 255, 255, 255]
+        {
+            (Resident::Midori2011, 0x8a)
         } else {
-            settings_sum(&read(&s.ini, 65536)?)? ^ value
+            ensure!(
+                code[0x9b..0xa1] == [0xc7, 0x83, 0x44, 0x1e, 0, 0]
+                    && code[0xa5..0xaf] == [0xc7, 0x83, 0x48, 0x98, 0, 0, 255, 255, 255, 255],
+                "unsupported ExHibit RLD v3 initialization ABI"
+            );
+            let layout = match export {
+                0x1d2b00 => Resident::LateVol1,
+                0x1d3080 => Resident::LateVol2,
+                _ => anyhow::bail!("unverified ExHibit late resident layout"),
+            };
+            (layout, 0xa1)
         };
-        Ok(Self { normal, definition })
+        let definition = u32::from_le_bytes(code[immediate..immediate + 4].try_into()?);
+        let ini = read(&s.ini, 65536)?;
+        let checkpoint_layout = default_marker_settings(&ini)
+            && matches!(storage.metadata(Mount::Asset, "res/g/gn/hit.gyu"), Ok(Some(_)))
+            && matches!(storage.metadata(Mount::Asset, "res/g/gn/default.cur"), Ok(None));
+        let exe = read(&s.exe, MAX_PE_BYTES as u64)?;
+        let image = PeData::parse(&exe)?;
+        let bitmaps = image.raw_resources(&PeResourceName::Id(2), &|| Ok(()))?;
+        let normal =
+            if resident.late() && !bitmaps.iter().any(|r| r.name == PeResourceName::Id(152)) {
+                let rcg = image.raw_resources(&PeResourceName::Name("RCG".into()), &|| Ok(()))?;
+                if rcg.iter().any(|r| r.name == PeResourceName::Id(152)) {
+                    None
+                } else {
+                    // FCDib's missing image converts to a 32x32 red surface.
+                    // Every blue sample in column 31 is zero, and liteInit
+                    // leaves the ordinary transform disabled.
+                    Some(0)
+                }
+            } else {
+                let value = initialization_word(&bitmaps)?;
+                Some(if value == 0 {
+                    0
+                } else {
+                    settings_sum(&ini, resident)? ^ value
+                })
+            };
+        Ok(Self {
+            resident,
+            checkpoint_layout,
+            normal,
+            definition,
+        })
     }
     #[cfg(test)]
     pub(super) fn unencoded_fixture() -> Self {
-        Self { normal: 0, definition: 0 }
+        Self {
+            resident: Resident::Midori2011,
+            checkpoint_layout: false,
+            normal: Some(0),
+            definition: 0,
+        }
     }
     pub fn decode(self, name: &str, bytes: &mut [u8]) -> Result<()> {
         let payload = bytes.get_mut(16..).context("truncated RLD payload")?;
         let seed = if name.eq_ignore_ascii_case("def") || name.starts_with('$') {
             self.definition
         } else {
-            self.normal
+            self.normal.with_context(|| format!("ExHibit {:?} {name}.rld uses an unsupported RCG/152 initialization resource", self.resident))?
         };
         if seed != 0 {
             let mut generator = Mt19937Split::new(seed);

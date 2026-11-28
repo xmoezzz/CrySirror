@@ -11,7 +11,9 @@ pub struct ImageCache {
 }
 
 fn cache(vm: &Vm) -> std::rc::Rc<RefCell<ImageCache>> {
-    vm.ext_get::<std::rc::Rc<RefCell<ImageCache>>>().expect("image cache").clone()
+    vm.ext_get::<std::rc::Rc<RefCell<ImageCache>>>()
+        .expect("image cache")
+        .clone()
 }
 
 /// Pixel size of a game image file.
@@ -19,8 +21,13 @@ pub fn image_size(vm: &Vm, name: &str) -> Result<[u32; 2], String> {
     if let Some(s) = cache(vm).borrow_mut().sizes.get(name) {
         return Ok(*s);
     }
-    let asset = super::asset_path(vm, name).ok_or_else(|| format!("Couldn't find file '{name}'."))?;
-    let images = super::host(vm).borrow_mut().images.clone().ok_or("image service unavailable")?;
+    let asset =
+        super::asset_path(vm, name).ok_or_else(|| format!("Couldn't find file '{name}'."))?;
+    let images = super::host(vm)
+        .borrow_mut()
+        .images
+        .clone()
+        .ok_or("image service unavailable")?;
     let size = images.size(&asset).map_err(|e| format!("{name}: {e}"))?;
     cache(vm).borrow_mut().sizes.insert(name.to_owned(), size);
     Ok(size)
@@ -72,11 +79,14 @@ fn name_tuple(vm: &mut Vm, name: &Value) -> PyResult<Vec<Value>> {
 }
 
 fn strs(v: &[Value]) -> Vec<String> {
-    v.iter().map(|x| x.as_str().unwrap_or("").to_owned()).collect()
+    v.iter()
+        .map(|x| x.as_str().unwrap_or("").to_owned())
+        .collect()
 }
 
 fn tuple_of(vm: &Vm, v: &[String]) -> Value {
-    vm.types.new_tuple(v.iter().map(|s| vm.types.new_str(s)).collect())
+    vm.types
+        .new_tuple(v.iter().map(|s| vm.types.new_str(s)).collect())
 }
 
 fn f_list_images(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
@@ -124,7 +134,11 @@ fn f_get_available_image_attributes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyRe
 
 fn f_get_tag_method(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let tag = args.first().cloned().unwrap_or(Value::None);
-    let method = args.get(1).and_then(|m| m.as_str()).unwrap_or("").to_owned();
+    let method = args
+        .get(1)
+        .and_then(|m| m.as_str())
+        .unwrap_or("")
+        .to_owned();
     let images = module_attr(vm, "images")?;
     let key = vm.types.new_tuple(vec![tag]);
     let ti = vm.call_method(&images, "get", vec![key, Value::None])?;
@@ -134,13 +148,28 @@ fn f_get_tag_method(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     py::get_or_none(vm, &ti, &method)
 }
 
-fn choose_attributes(vm: &mut Vm, d: &Value, tag: &Value, required: &[String], optional: Option<&[String]>) -> PyResult<Option<Option<Vec<String>>>> {
-    let Some(ca) = py::get_opt(vm, d, "_choose_attributes")? else { return Ok(None) };
+fn choose_attributes(
+    vm: &mut Vm,
+    d: &Value,
+    tag: &Value,
+    required: &[String],
+    optional: Option<&[String]>,
+) -> PyResult<Option<Option<Vec<String>>>> {
+    let Some(ca) = py::get_opt(vm, d, "_choose_attributes")? else {
+        return Ok(None);
+    };
     if py::is_none(&ca) {
         return Ok(None);
     }
-    let r = vm.types.new_list(required.iter().map(|s| vm.types.new_str(s)).collect());
-    let o = match optional { Some(o) => vm.types.new_list(o.iter().map(|s| vm.types.new_str(s)).collect()), None => Value::None };
+    let r = vm
+        .types
+        .new_list(required.iter().map(|s| vm.types.new_str(s)).collect());
+    let o = match optional {
+        Some(o) => vm
+            .types
+            .new_list(o.iter().map(|s| vm.types.new_str(s)).collect()),
+        None => Value::None,
+    };
     let res = vm.call(&ca, vec![tag.clone(), r, o], Vec::new())?;
     if py::is_none(&res) {
         return Ok(Some(None));
@@ -151,12 +180,27 @@ fn choose_attributes(vm: &mut Vm, d: &Value, tag: &Value, required: &[String], o
 /// `check_image_attributes(tag, attributes)`.
 fn f_check_image_attributes(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let tag = args.first().cloned().unwrap_or(Value::None);
-    let attrs = strs(&py::items(vm, &args.get(1).cloned().unwrap_or(Value::None))?);
-    let negative: Vec<String> = attrs.iter().filter(|a| a.starts_with('-')).cloned().collect();
-    let positive: Vec<String> = attrs.iter().filter(|a| !a.starts_with('-')).cloned().collect();
+    let attrs = strs(&py::items(
+        vm,
+        &args.get(1).cloned().unwrap_or(Value::None),
+    )?);
+    let negative: Vec<String> = attrs
+        .iter()
+        .filter(|a| a.starts_with('-'))
+        .cloned()
+        .collect();
+    let positive: Vec<String> = attrs
+        .iter()
+        .filter(|a| !a.starts_with('-'))
+        .cloned()
+        .collect();
     let mut l: Vec<Vec<String>> = Vec::new();
     for (at, d) in tag_attrs(vm, &tag)? {
-        let remainder: Vec<String> = positive.iter().filter(|a| !at.contains(a)).cloned().collect();
+        let remainder: Vec<String> = positive
+            .iter()
+            .filter(|a| !at.contains(a))
+            .cloned()
+            .collect();
         match choose_attributes(vm, &d, &tag, &remainder, None)? {
             Some(Some(chosen)) => {
                 let mut v = at.clone();
@@ -193,7 +237,10 @@ fn f_check_image_attributes(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Valu
 /// `get_ordered_image_attributes(tag, attributes=(), sort=None)`.
 fn f_get_ordered_image_attributes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let tag = arg_or(args, kw, 0, "tag", Value::None);
-    let attributes = strs(&py::items(vm, &arg_or(args, kw, 1, "attributes", vm.types.empty_tuple.clone()))?);
+    let attributes = strs(&py::items(
+        vm,
+        &arg_or(args, kw, 1, "attributes", vm.types.empty_tuple.clone()),
+    )?);
     let sort = arg_or(args, kw, 2, "sort", Value::None);
     let mut entries = tag_attrs(vm, &tag)?;
     entries.sort_by(|a, b| a.0.cmp(&b.0));
@@ -201,7 +248,11 @@ fn f_get_ordered_image_attributes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResu
     let mut count: Vec<(String, usize, f64)> = Vec::new();
     for (attrs, d) in entries {
         if let Some(la) = py::get_opt(vm, &d, "_list_attributes")?.filter(|v| !py::is_none(v)) {
-            let rest: Vec<Value> = attributes.iter().filter(|a| !attrs.contains(a)).map(|a| vm.types.new_str(a)).collect();
+            let rest: Vec<Value> = attributes
+                .iter()
+                .filter(|a| !attrs.contains(a))
+                .map(|a| vm.types.new_str(a))
+                .collect();
             let rest = vm.types.new_list(rest);
             let r = vm.call(&la, vec![tag.clone(), rest], Vec::new())?;
             let mut seq = attrs.clone();
@@ -264,7 +315,11 @@ fn f_get_ordered_image_attributes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResu
     let mut rv: Vec<String> = Vec::new();
     while !after.is_empty() {
         let minc = after.iter().map(|a| a.1.len()).min().unwrap_or(0);
-        let ready: Vec<String> = after.iter().filter(|a| a.1.len() == minc).map(|a| a.0.clone()).collect();
+        let ready: Vec<String> = after
+            .iter()
+            .filter(|a| a.1.len() == minc)
+            .map(|a| a.0.clone())
+            .collect();
         after.retain(|a| !ready.contains(&a.0));
         for a in after.iter_mut() {
             a.1.retain(|x| !ready.contains(x));
@@ -274,12 +329,14 @@ fn f_get_ordered_image_attributes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResu
             keyed.push((sort_key(vm, r)?, r.clone()));
         }
         let mut err = None;
-        keyed.sort_by(|a, b| match ops::compare(vm, &a.0, &b.0, crysirror_python::ast::CmpOp::Lt) {
-            Ok(v) if ops::truthy(vm, &v).unwrap_or(false) => std::cmp::Ordering::Less,
-            Ok(_) => std::cmp::Ordering::Greater,
-            Err(e) => {
-                err = Some(e);
-                std::cmp::Ordering::Equal
+        keyed.sort_by(|a, b| {
+            match ops::compare(vm, &a.0, &b.0, crysirror_python::ast::CmpOp::Lt) {
+                Ok(v) if ops::truthy(vm, &v).unwrap_or(false) => std::cmp::Ordering::Less,
+                Ok(_) => std::cmp::Ordering::Greater,
+                Err(e) => {
+                    err = Some(e);
+                    std::cmp::Ordering::Equal
+                }
             }
         });
         if let Some(e) = err {
@@ -296,14 +353,20 @@ fn f_get_ordered_image_attributes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResu
         }
     }
     let mut err = None;
-    tail.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal).then_with(|| match ops::compare(vm, &a.1, &b.1, crysirror_python::ast::CmpOp::Lt) {
-        Ok(v) if ops::truthy(vm, &v).unwrap_or(false) => std::cmp::Ordering::Less,
-        Ok(_) => a.2.cmp(&b.2),
-        Err(e) => {
-            err = Some(e);
-            std::cmp::Ordering::Equal
-        }
-    }));
+    tail.sort_by(|a, b| {
+        a.0.partial_cmp(&b.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(
+                || match ops::compare(vm, &a.1, &b.1, crysirror_python::ast::CmpOp::Lt) {
+                    Ok(v) if ops::truthy(vm, &v).unwrap_or(false) => std::cmp::Ordering::Less,
+                    Ok(_) => a.2.cmp(&b.2),
+                    Err(e) => {
+                        err = Some(e);
+                        std::cmp::Ordering::Equal
+                    }
+                },
+            )
+    });
     if let Some(e) = err {
         return Err(e);
     }
@@ -354,7 +417,10 @@ pub fn image_exists(vm: &mut Vm, name: &Value, exact: bool) -> PyResult<bool> {
 
 fn f_image_exists(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let name = arg_or(args, kw, 0, "name", Value::None);
-    let exact = match py::arg(args, kw, 1, "exact") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let exact = match py::arg(args, kw, 1, "exact") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     Ok(Value::Bool(image_exists(vm, &name, exact)?))
 }
 
@@ -383,7 +449,20 @@ fn f_wrap_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn error_text(vm: &mut Vm, msg: String) -> PyResult<Value> {
     let text = py::import_attr(vm, "renpy.text.text", "Text")?;
     let m = vm.types.new_string(msg);
-    vm.call(&text, vec![m], vec![("style".into(), vm.types.new_str("_image_error"))])
+    // Style `_image_error` from 7.8 / 8.3; red text at the origin before.
+    let kw = if super::state::rt(vm).profile.since_pair(8, 3) {
+        vec![("style".into(), vm.types.new_str("_image_error"))]
+    } else {
+        let red = vm.types.new_tuple(vec![Value::Int(255), Value::Int(0), Value::Int(0), Value::Int(255)]);
+        vec![
+            ("color".into(), red),
+            ("xanchor".into(), Value::Int(0)),
+            ("xpos".into(), Value::Int(0)),
+            ("yanchor".into(), Value::Int(0)),
+            ("ypos".into(), Value::Int(0)),
+        ]
+    };
+    vm.call(&text, vec![m], kw)
 }
 
 // ImageReference -------------------------------------------------------------------------
@@ -485,20 +564,34 @@ fn ir_find_target(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let da_name = py::get_or_none(vm, &da, "name")?;
     let key = vm.types.new_tuple(n.clone());
     if ops::eq(vm, &da_name, &key)? {
-        return err(vm, format!("Image '{}' refers to itself.", strs(&n).join(" ")));
+        return err(
+            vm,
+            format!("Image '{}' refers to itself.", strs(&n).join(" ")),
+        );
     }
     let da_args = py::get_or_none(vm, &da, "args")?;
     extra.extend(py::items(vm, &da_args).unwrap_or_default());
     let copy = py::get(vm, &da, "copy")?;
     let ea = vm.types.new_tuple(extra);
-    let r = vm.call(&copy, Vec::new(), vec![("name".into(), key), ("args".into(), ea)]).and_then(|a| vm.call_method(&target, "_duplicate", vec![a]));
+    let r = vm
+        .call(
+            &copy,
+            Vec::new(),
+            vec![("name".into(), key), ("args".into(), ea)],
+        )
+        .and_then(|a| vm.call_method(&target, "_duplicate", vec![a]));
     match r {
         Ok(t) => py::set(vm, this, "target", t)?,
         Err(e) => {
             if py::config_bool(vm, "raise_image_exceptions").unwrap_or(true) {
                 return Err(e);
             }
-            let msg = match &e { crysirror_python::PyErr::Exc(o) => ops::str(vm, &Value::Obj(o.clone()))?.to_string(), _ => "image error".into() };
+            let msg = match &e {
+                crysirror_python::PyErr::Exc(o) => {
+                    ops::str(vm, &Value::Obj(o.clone()))?.to_string()
+                }
+                _ => "image error".into(),
+            };
             return err(vm, msg);
         }
     }
@@ -604,7 +697,11 @@ fn di_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let name = arg_or(args, kw, 1, "name", Value::None);
     let scope = arg_or(args, kw, 2, "scope", Value::None);
-    let props: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "name" | "scope")).cloned().collect();
+    let props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "name" | "scope"))
+        .cloned()
+        .collect();
     super::core::d_init(vm, &[this.clone()], &props)?;
     py::set(vm, this, "name", name.clone())?;
     let mut uses = false;
@@ -643,7 +740,13 @@ fn di_hash(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let mut hn = py::get_or_none(vm, this, "hash_name")?;
     if py::is_none(&hn) {
         let n = py::get(vm, this, "name")?;
-        hn = if let Some(l) = py::seq(&n).filter(|_| matches!(n.payload(), Some(crysirror_python::Payload::List(_)))) { vm.types.new_tuple(l) } else { n };
+        hn = if let Some(l) =
+            py::seq(&n).filter(|_| matches!(n.payload(), Some(crysirror_python::Payload::List(_))))
+        {
+            vm.types.new_tuple(l)
+        } else {
+            n
+        };
         py::set(vm, this, "hash_name", hn.clone())?;
     }
     Ok(Value::Int(ops::hash(vm, &hn)?))
@@ -691,41 +794,68 @@ fn di_set_style_prefix(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn di_find_target(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let mut scope = arg_or(args, kw, 1, "scope", Value::None);
-    let update = match py::arg(args, kw, 2, "update") { Some(v) => ops::truthy(vm, v)?, None => true };
+    let update = match py::arg(args, kw, 2, "update") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => true,
+    };
     let locked = py::get_or_none(vm, this, "locked")?;
     let target0 = py::get_or_none(vm, this, "target")?;
     if ops::truthy(vm, &locked)? && !py::is_none(&target0) {
         return Ok(Value::None);
     }
-    let uses = { let v = py::get_or_none(vm, this, "_uses_scope")?; ops::truthy(vm, &v)? };
-    let dup = { let v = py::get_or_none(vm, this, "_duplicatable")?; ops::truthy(vm, &v)? };
+    let uses = {
+        let v = py::get_or_none(vm, this, "_uses_scope")?;
+        ops::truthy(vm, &v)?
+    };
+    let dup = {
+        let v = py::get_or_none(vm, this, "_duplicatable")?;
+        ops::truthy(vm, &v)?
+    };
     let da = py::get(vm, this, "_args")?;
     let da_prefix = py::get_or_none(vm, &da, "prefix")?;
     if !py::is_none(&scope) {
         if uses && (dup || !py::is_none(&da_prefix)) {
-            let d = vm.call(&Value::Obj(vm.types.dict.clone()), vec![scope.clone()], Vec::new())?;
+            let d = vm.call(
+                &Value::Obj(vm.types.dict.clone()),
+                vec![scope.clone()],
+                Vec::new(),
+            )?;
             py::set(vm, this, "scope", d)?;
         }
     } else if uses {
         scope = py::get_or_none(vm, this, "scope")?;
     }
     let prefix = if py::is_none(&da_prefix) {
-        if dup { let s = py::get(vm, this, "style")?; py::get(vm, &s, "prefix")? } else { vm.types.new_str("") }
+        if dup {
+            let s = py::get(vm, this, "style")?;
+            py::get(vm, &s, "prefix")?
+        } else {
+            vm.types.new_str("")
+        }
     } else {
         da_prefix
     };
     let name = py::get(vm, this, "name")?;
     let search = vm.types.new_list(Vec::new());
     let di = py::import_attr(vm, "renpy.easy", "dynamic_image")?;
-    let target = match vm.call(&di, vec![name.clone(), scope], vec![("prefix".into(), prefix), ("search".into(), search.clone())]) {
+    let target = match vm.call(
+        &di,
+        vec![name.clone(), scope],
+        vec![("prefix".into(), prefix), ("search".into(), search.clone())],
+    ) {
         Ok(t) => t,
         Err(e) => {
             let nr = ops::repr(vm, &name)?;
-            let msg = match &e { crysirror_python::PyErr::Exc(o) => {
-                let cls = o.class_name();
-                let s = ops::repr(vm, &Value::Obj(o.clone()))?;
-                if cls == "KeyError" { format!("In DynamicImage {nr}: Could not find substitution {s}.") } else { format!("In DynamicImage {nr}: {s}") }
-            }
+            let msg = match &e {
+                crysirror_python::PyErr::Exc(o) => {
+                    let cls = o.class_name();
+                    let s = ops::repr(vm, &Value::Obj(o.clone()))?;
+                    if cls == "KeyError" {
+                        format!("In DynamicImage {nr}: Could not find substitution {s}.")
+                    } else {
+                        format!("In DynamicImage {nr}: {s}")
+                    }
+                }
                 _ => return Err(e),
             };
             return Err(py::error(vm, msg));
@@ -740,7 +870,14 @@ fn di_find_target(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             0 => {}
             1 => msg += &format!(" ({})", r(vm, &s[0])?),
             2 => msg += &format!(" ({}, {})", r(vm, &s[0])?, r(vm, &s[1])?),
-            n => msg += &format!(" ({}, {}, and {} more.)", r(vm, &s[0])?, r(vm, &s[1])?, n - 2),
+            n => {
+                msg += &format!(
+                    " ({}, {}, and {} more.)",
+                    r(vm, &s[0])?,
+                    r(vm, &s[1])?,
+                    n - 2
+                )
+            }
         }
         return Err(py::error(vm, msg));
     }
@@ -752,7 +889,10 @@ fn di_find_target(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         return Ok(Value::Bool(true));
     }
     let old = py::get_or_none(vm, this, "target")?;
-    let tdup = { let v = py::get_or_none(vm, &target, "_duplicatable")?; ops::truthy(vm, &v)? };
+    let tdup = {
+        let v = py::get_or_none(vm, &target, "_duplicatable")?;
+        ops::truthy(vm, &v)?
+    };
     let mut t = target.clone();
     if tdup {
         t = vm.call_method(&target, "_duplicate", vec![da])?;
@@ -767,7 +907,9 @@ fn di_find_target(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         return Ok(Value::Bool(true));
     }
     let tc = py::import_attr(vm, "renpy.display.motion", "Transform")?;
-    let Some(tco) = tc.obj().cloned() else { return Ok(Value::Bool(true)) };
+    let Some(tco) = tc.obj().cloned() else {
+        return Ok(Value::Bool(true));
+    };
     if !ops::isinstance(vm, &old, &tco) {
         return Ok(Value::Bool(true));
     }
@@ -827,7 +969,9 @@ fn di_per_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let t = py::get_or_none(vm, this, "target")?;
     if !py::same(&old, &t) && !py::is_none(&t) {
-        let cb = py::builtin(vm, "per_interact_visitor", |vm, a, _| vm.call_method(&a[0], "per_interact", Vec::new()));
+        let cb = py::builtin(vm, "per_interact_visitor", |vm, a, _| {
+            vm.call_method(&a[0], "per_interact", Vec::new())
+        });
         vm.call_method(&t, "visit_all", vec![cb])?;
     }
     Ok(Value::None)
@@ -897,7 +1041,10 @@ fn sii_showing(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let layer = arg_or(args, kw, 1, "layer", Value::None);
     let name = arg_or(args, kw, 2, "name", Value::None);
-    let exact = match py::arg(args, kw, 3, "exact") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let exact = match py::arg(args, kw, 3, "exact") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     let n = py::items(vm, &name)?;
     let tag = n.first().cloned().unwrap_or(Value::None);
     let layer = default_layer(vm, &layer, &tag)?;
@@ -972,7 +1119,10 @@ fn sii_predict_show(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let layer = arg_or(args, kw, 1, "layer", Value::None);
     let name = arg_or(args, kw, 2, "name", Value::None);
-    let show = match py::arg(args, kw, 3, "show") { Some(v) => ops::truthy(vm, v)?, None => true };
+    let show = match py::arg(args, kw, 3, "show") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => true,
+    };
     let n = py::items(vm, &name)?;
     let tag = n.first().cloned().unwrap_or(Value::None);
     let layer = default_layer(vm, &layer, &tag)?;
@@ -1045,7 +1195,11 @@ fn sii_apply_attributes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> 
             defaults = vm.call(&f, vec![nt.clone()], Vec::new())?;
         }
     }
-    let mut optional = if ops::truthy(vm, &defaults)? { strs(&py::items(vm, &defaults)?) } else { Vec::new() };
+    let mut optional = if ops::truthy(vm, &defaults)? {
+        strs(&py::items(vm, &defaults)?)
+    } else {
+        Vec::new()
+    };
     let mut required: Vec<String> = Vec::new();
     for i in strs(&n[1..]) {
         if let Some(x) = i.strip_prefix('-') {
@@ -1058,15 +1212,32 @@ fn sii_apply_attributes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> 
     choose_image(vm, &nametag, &required, &optional, Some(&nt))
 }
 
-fn choose_image(vm: &mut Vm, tag: &Value, required: &[String], optional: &[String], exception_name: Option<&Value>) -> PyResult<Value> {
+fn choose_image(
+    vm: &mut Vm,
+    tag: &Value,
+    required: &[String],
+    optional: &[String],
+    exception_name: Option<&Value>,
+) -> PyResult<Value> {
     let mut max_len: i64 = -1;
     let mut matches: Option<Vec<Vec<String>>> = None;
     for (mut attrs, d) in tag_attrs(vm, tag)? {
-        if !attrs.iter().all(|i| required.contains(i) || optional.contains(i)) {
+        if !attrs
+            .iter()
+            .all(|i| required.contains(i) || optional.contains(i))
+        {
             continue;
         }
-        let car: Vec<String> = required.iter().filter(|i| !attrs.contains(i)).cloned().collect();
-        let cao: Vec<String> = optional.iter().filter(|i| !attrs.contains(i) && !required.contains(i)).cloned().collect();
+        let car: Vec<String> = required
+            .iter()
+            .filter(|i| !attrs.contains(i))
+            .cloned()
+            .collect();
+        let cao: Vec<String> = optional
+            .iter()
+            .filter(|i| !attrs.contains(i) && !required.contains(i))
+            .cloned()
+            .collect();
         match choose_attributes(vm, &d, tag, &car, Some(&cao))? {
             Some(None) => continue,
             Some(Some(new)) => attrs.extend(new),
@@ -1092,40 +1263,64 @@ fn choose_image(vm: &mut Vm, tag: &Value, required: &[String], optional: &[Strin
         full.extend(attrs);
         matches.get_or_insert_with(Vec::new).push(full);
     }
-    let Some(m) = matches else { return Ok(Value::None) };
+    let Some(m) = matches else {
+        return Ok(Value::None);
+    };
     if m.len() == 1 {
         return Ok(tuple_of(vm, &m[0]));
     }
     if let Some(n) = exception_name {
         let n = strs(&py::items(vm, n)?).join(" ");
         let opts: Vec<String> = m.iter().map(|i| i.join(" ")).collect();
-        return Err(py::error(vm, format!("Showing '{n}' is ambiguous, possible images include: {}", opts.join(", "))));
+        return Err(py::error(
+            vm,
+            format!(
+                "Showing '{n}' is ambiguous, possible images include: {}",
+                opts.join(", ")
+            ),
+        ));
     }
     Ok(Value::None)
 }
 
 fn sii_choose_image(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let tag = arg_or(args, kw, 1, "tag", Value::None);
-    let req = strs(&py::items(vm, &arg_or(args, kw, 2, "required", Value::None))?);
-    let opt = strs(&py::items(vm, &arg_or(args, kw, 3, "optional", Value::None))?);
+    let req = strs(&py::items(
+        vm,
+        &arg_or(args, kw, 2, "required", Value::None),
+    )?);
+    let opt = strs(&py::items(
+        vm,
+        &arg_or(args, kw, 3, "optional", Value::None),
+    )?);
     let en = arg_or(args, kw, 4, "exception_name", Value::None);
     let has = ops::truthy(vm, &en)?;
     choose_image(vm, &tag, &req, &opt, if has { Some(&en) } else { None })
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("list_images", f_list_images),
-        ("get_available_image_tags", f_get_available_image_tags),
-        ("get_available_image_attributes", f_get_available_image_attributes),
-        ("get_tag_method", f_get_tag_method),
-        ("check_image_attributes", f_check_image_attributes),
-        ("get_ordered_image_attributes", f_get_ordered_image_attributes),
-        ("register_image", f_register_image),
-        ("image_exists", f_image_exists),
-        ("get_registered_image", f_get_registered_image),
-        ("wrap_render", f_wrap_render),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("list_images", f_list_images),
+            ("get_available_image_tags", f_get_available_image_tags),
+            (
+                "get_available_image_attributes",
+                f_get_available_image_attributes,
+            ),
+            ("get_tag_method", f_get_tag_method),
+            ("check_image_attributes", f_check_image_attributes),
+            (
+                "get_ordered_image_attributes",
+                f_get_ordered_image_attributes,
+            ),
+            ("register_image", f_register_image),
+            ("image_exists", f_image_exists),
+            ("get_registered_image", f_get_registered_image),
+            ("wrap_render", f_wrap_render),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     set(vm, "images", vm.types.new_dict());
     let dd = py::import_attr(vm, "collections", "defaultdict")?;
@@ -1133,68 +1328,111 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     set(vm, "image_attributes", ia);
     set(vm, "image_names", vm.types.new_list(Vec::new()));
     let d = Value::Obj(super::core::displayable_class(vm));
-    let c = |vm: &mut Vm, name: &str, bases: &[Value], methods: py::Methods, attrs: &[(&str, Value)]| -> PyResult<Value> {
+    let c = |vm: &mut Vm,
+             name: &str,
+             bases: &[Value],
+             methods: py::Methods,
+             attrs: &[(&str, Value)]|
+     -> PyResult<Value> {
         let cls = py::class(vm, MODULE, name, bases, methods, attrs)?;
         let v = Value::Obj(cls);
         crysirror_python::modules::set(vm, &m, name, v.clone());
         Ok(v)
     };
     let nosave_t = vm.types.new_list(vec![vm.types.new_str("target")]);
-    c(vm, "ImageReference", &[d.clone()], &[
-        ("__init__", ir_init),
-        ("after_upgrade", ir_after_upgrade),
-        ("_repr_info", repr_info_name),
-        ("__hash__", ir_hash),
-        ("__eq__", ir_eq),
-        ("_target", ir_target),
-        ("find_target", ir_find_target),
-        ("_duplicate", ir_duplicate),
-        ("_unique", ir_unique),
-        ("_in_current_store", ir_in_current_store),
-        ("_handles_event", fwd_handles_event),
-        ("_hide", fwd_hide),
-        ("set_transform_event", fwd_set_transform_event),
-        ("event", fwd_event),
-        ("render", fwd_render),
-        ("get_placement", ir_get_placement),
-        ("visit", fwd_visit),
-    ], &[("nosave", nosave_t), ("target", Value::None), ("old_transform", Value::None), ("param_target", Value::None), ("__version__", Value::Int(1)), ("_duplicatable", Value::Bool(true))])?;
+    c(
+        vm,
+        "ImageReference",
+        &[d.clone()],
+        &[
+            ("__init__", ir_init),
+            ("after_upgrade", ir_after_upgrade),
+            ("_repr_info", repr_info_name),
+            ("__hash__", ir_hash),
+            ("__eq__", ir_eq),
+            ("_target", ir_target),
+            ("find_target", ir_find_target),
+            ("_duplicate", ir_duplicate),
+            ("_unique", ir_unique),
+            ("_in_current_store", ir_in_current_store),
+            ("_handles_event", fwd_handles_event),
+            ("_hide", fwd_hide),
+            ("set_transform_event", fwd_set_transform_event),
+            ("event", fwd_event),
+            ("render", fwd_render),
+            ("get_placement", ir_get_placement),
+            ("visit", fwd_visit),
+        ],
+        &[
+            ("nosave", nosave_t),
+            ("target", Value::None),
+            ("old_transform", Value::None),
+            ("param_target", Value::None),
+            ("__version__", Value::Int(1)),
+            ("_duplicatable", Value::Bool(true)),
+        ],
+    )?;
     let nosave_r = vm.types.new_list(vec![vm.types.new_str("raw_target")]);
-    c(vm, "DynamicImage", &[d], &[
-        ("__init__", di_init),
-        ("_scope", di_scope),
-        ("_repr_info", repr_info_name),
-        ("__hash__", di_hash),
-        ("__eq__", di_eq),
-        ("_target", di_target),
-        ("set_style_prefix", di_set_style_prefix),
-        ("find_target", di_find_target),
-        ("_duplicate", di_duplicate),
-        ("_unique", di_unique),
-        ("_in_current_store", di_in_current_store),
-        ("_handles_event", fwd_handles_event),
-        ("_hide", fwd_hide),
-        ("set_transform_event", fwd_set_transform_event),
-        ("event", fwd_event),
-        ("render", fwd_render),
-        ("get_placement", di_get_placement),
-        ("visit", fwd_visit),
-        ("per_interact", di_per_interact),
-    ], &[("nosave", nosave_r), ("target", Value::None), ("raw_target", Value::None), ("locked", Value::Bool(false)), ("hash_name", Value::None), ("scope", Value::None), ("_duplicatable", Value::Bool(true))])?;
+    c(
+        vm,
+        "DynamicImage",
+        &[d],
+        &[
+            ("__init__", di_init),
+            ("_scope", di_scope),
+            ("_repr_info", repr_info_name),
+            ("__hash__", di_hash),
+            ("__eq__", di_eq),
+            ("_target", di_target),
+            ("set_style_prefix", di_set_style_prefix),
+            ("find_target", di_find_target),
+            ("_duplicate", di_duplicate),
+            ("_unique", di_unique),
+            ("_in_current_store", di_in_current_store),
+            ("_handles_event", fwd_handles_event),
+            ("_hide", fwd_hide),
+            ("set_transform_event", fwd_set_transform_event),
+            ("event", fwd_event),
+            ("render", fwd_render),
+            ("get_placement", di_get_placement),
+            ("visit", fwd_visit),
+            ("per_interact", di_per_interact),
+        ],
+        &[
+            ("nosave", nosave_r),
+            ("target", Value::None),
+            ("raw_target", Value::None),
+            ("locked", Value::Bool(false)),
+            ("hash_name", Value::None),
+            ("scope", Value::None),
+            ("_duplicatable", Value::Bool(true)),
+        ],
+    )?;
     let object = py::import_attr(vm, "renpy.object", "Object")?;
-    c(vm, "ShownImageInfo", &[object], &[
-        ("__init__", sii_init),
-        ("after_upgrade", sii_after_upgrade),
-        ("get_attributes", sii_get_attributes),
-        ("showing", sii_showing),
-        ("get_showing_tags", sii_get_showing_tags),
-        ("get_hidden_tags", sii_get_hidden_tags),
-        ("predict_scene", sii_predict_scene),
-        ("predict_show", sii_predict_show),
-        ("predict_hide", sii_predict_hide),
-        ("apply_attributes", sii_apply_attributes),
-        ("choose_image", sii_choose_image),
-    ], &[("__version__", Value::Int(2))])?;
+    c(
+        vm,
+        "ShownImageInfo",
+        &[object],
+        &[
+            ("__init__", sii_init),
+            ("after_upgrade", sii_after_upgrade),
+            ("get_attributes", sii_get_attributes),
+            ("showing", sii_showing),
+            ("get_showing_tags", sii_get_showing_tags),
+            ("get_hidden_tags", sii_get_hidden_tags),
+            ("predict_scene", sii_predict_scene),
+            ("predict_show", sii_predict_show),
+            ("predict_hide", sii_predict_hide),
+            ("apply_attributes", sii_apply_attributes),
+            ("choose_image", sii_choose_image),
+        ],
+        &[("__version__", Value::Int(2))],
+    )?;
+    // Compatibility names at the end of upstream image.py (all releases).
+    for n in ["Solid", "Frame"] {
+        let v = py::import_attr(vm, "renpy.display.imagelike", n)?;
+        set(vm, n, v);
+    }
     Ok(m)
 }
 

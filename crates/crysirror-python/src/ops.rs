@@ -180,7 +180,12 @@ pub fn getattr_v(vm: &mut Vm, obj: &Value, name: &Value) -> PyResult<Value> {
                 if let Payload::Type(td) = &o.payload {
                     return Err(vm.attr_error(format!("type object '{}' has no attribute '{}'", td.name.borrow(), n)));
                 }
-                if let Payload::Module(m, _) = &o.payload {
+                if let Payload::Module(m, ns) = &o.payload {
+                    // PEP 562: a module-level `__getattr__` answers misses.
+                    let hook = ns.dict_get_str_raw("__getattr__");
+                    if let Some(g) = hook {
+                        return vm.call(&g, vec![name.clone()], Vec::new());
+                    }
                     return Err(vm.attr_error(format!("module '{m}' has no attribute '{n}'")));
                 }
             }
@@ -272,8 +277,26 @@ pub fn setattr(vm: &mut Vm, obj: &Value, name: &Value, v: Value) -> PyResult<()>
             vm.call(&sa, vec![obj.clone(), name.clone(), v], Vec::new())?;
             return Ok(());
         }
+    } else if let Some(sa) = lookup_native_slot(vm, &t, "__setattr__") {
+        vm.call(&sa, vec![obj.clone(), name.clone(), v], Vec::new())?;
+        return Ok(());
     }
     generic_setattr(vm, obj, name, v)
+}
+
+/// A slot method a host-defined native type declares itself (CPython's
+/// `tp_setattro` of an extension type); `object`'s own is the default.
+fn lookup_native_slot(vm: &Vm, t: &ObjRef, name: &str) -> Option<Value> {
+    let td = t.type_data()?;
+    for c in td.mro.borrow().iter() {
+        if let Some(v) = c.dict.as_ref().and_then(|d| d.borrow().get_str(name).cloned()) {
+            if Rc::ptr_eq(c, &vm.types.object) {
+                return None;
+            }
+            return matches!(&v, Value::Obj(o) if matches!(o.payload, Payload::Builtin(..))).then_some(v);
+        }
+    }
+    None
 }
 
 pub fn generic_setattr(vm: &mut Vm, obj: &Value, name: &Value, v: Value) -> PyResult<()> {
@@ -315,6 +338,9 @@ pub fn generic_setattr(vm: &mut Vm, obj: &Value, name: &Value, v: Value) -> PyRe
         }
         if crate::builtins::builtin_setattr(vm, o, key, &v)? {
             return Ok(());
+        }
+        if key == "__del__" && o.type_data().is_some() {
+            crate::gc::note_del_assigned(o);
         }
         if let Some(d) = o.attr_table() {
             if key == "__dict__" {
@@ -649,6 +675,15 @@ pub fn hash(vm: &mut Vm, v: &Value) -> PyResult<i64> {
                     a ^ b
                 }
                 Payload::Slice(..) => return Err(vm.type_error("unhashable type: 'slice'")),
+                Payload::WeakRef(d) => {
+                    if let Some(h) = d.hash.get() {
+                        return Ok(h);
+                    }
+                    let Some(t) = d.upgrade() else { return Err(vm.type_error("weak object has gone away")) };
+                    let h = hash(vm, &Value::Obj(t))?;
+                    d.hash.set(Some(h));
+                    h
+                }
                 _ => {
                     // Classes defining __eq__ without __hash__ are unhashable.
                     if is_user_type(&t) && lookup_user(&t, "__eq__").is_some() && lookup_user(&t, "__hash__").is_none() && vm_dialect(vm) == Dialect::Py3 {
@@ -725,6 +760,11 @@ fn native_eq(vm: &mut Vm, a: &Value, b: &Value) -> PyResult<Option<bool>> {
         }
         (Payload::Slice(a1, b1, c1), Payload::Slice(a2, b2, c2)) => eq(vm, a1, a2)? && eq(vm, b1, b2)? && eq(vm, c1, c2)?,
         (Payload::Method { func: f1, slf: s1 }, Payload::Method { func: f2, slf: s2 }) => f1.is(f2) && s1.is(s2),
+        // Live weak references compare their referents, dead ones identity.
+        (Payload::WeakRef(x), Payload::WeakRef(y)) => match (x.upgrade(), y.upgrade()) {
+            (Some(p), Some(q)) => eq(vm, &Value::Obj(p), &Value::Obj(q))?,
+            _ => Rc::ptr_eq(oa, ob),
+        },
         (Payload::DictView { dict: d1, kind: k1 }, Payload::DictView { dict: d2, kind: k2 }) if *k1 == 0 && *k2 == 0 => {
             let a = Value::Obj(d1.clone());
             let b = Value::Obj(d2.clone());
@@ -2177,12 +2217,24 @@ pub fn binary_op(vm: &mut Vm, a: &Value, b: &Value, op: BinOp, inplace: bool, cl
     if let Some(r) = native_binary(vm, a, b, op, classic_div)? {
         return Ok(r);
     }
+    if op == BinOp::BitOr && union_operand(vm, a) && union_operand(vm, b) && !(a.is_none() && b.is_none()) {
+        // PEP 604: `int | str | None`.
+        let types = crate::import::import_module(vm, "types")?;
+        let union = getattr(vm, &types, "UnionType")?;
+        let make = getattr(vm, &union, "_make")?;
+        return vm.call(&make, vec![a.clone(), b.clone()], Vec::new());
+    }
     Err(vm.type_error(format!(
         "unsupported operand type(s) for {}: '{}' and '{}'",
         op_symbol(op),
         type_name(vm, a),
         type_name(vm, b)
     )))
+}
+
+/// A class, None or a `types.UnionType`: an operand of a type union.
+fn union_operand(vm: &Vm, v: &Value) -> bool {
+    v.is_none() || matches!(v.payload(), Some(Payload::Type(_))) || type_name(vm, v) == "UnionType"
 }
 
 fn native_inplace(vm: &mut Vm, a: &Value, b: &Value, op: BinOp) -> PyResult<Option<Value>> {

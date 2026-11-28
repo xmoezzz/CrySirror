@@ -2,7 +2,7 @@
 //! Parses the reference games' scripts (local corpus, skipped when absent).
 
 use crysirror_renpy::ast::{Arena, NodeKind};
-use crysirror_renpy::lexer::{lex_file, Lexer, PResult};
+use crysirror_renpy::lexer::{Lexer, PResult, lex_file};
 use crysirror_renpy::parser::{Parser, ScriptContext};
 use std::rc::Rc;
 
@@ -16,7 +16,13 @@ impl ScriptContext for Cx {
     fn user_statement_names(&self) -> Vec<Vec<String>> {
         Vec::new()
     }
-    fn parse_user_statement(&self, _a: &mut Arena, _n: &[String], _l: &mut Lexer, _loc: &(Rc<str>, u32)) -> PResult<Vec<usize>> {
+    fn parse_user_statement(
+        &self,
+        _a: &mut Arena,
+        _n: &[String],
+        _l: &mut Lexer,
+        _loc: &(Rc<str>, u32),
+    ) -> PResult<Vec<usize>> {
         unreachable!()
     }
     fn sl2_registry(&self) -> &crysirror_renpy::sl2::Registry {
@@ -42,9 +48,21 @@ fn the_question_script() {
         eprintln!("{e}");
     }
     assert!(p.errors.is_empty());
-    let says = arena.nodes.iter().filter(|n| matches!(n.kind, NodeKind::Say { .. })).count();
-    let menus = arena.nodes.iter().filter(|n| matches!(n.kind, NodeKind::Menu { .. })).count();
-    eprintln!("top-level {} nodes, {} total, {says} say, {menus} menu", nodes.len(), arena.nodes.len());
+    let says = arena
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::Say { .. }))
+        .count();
+    let menus = arena
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::Menu { .. }))
+        .count();
+    eprintln!(
+        "top-level {} nodes, {} total, {says} say, {menus} menu",
+        nodes.len(),
+        arena.nodes.len()
+    );
     assert!(says > 20 && menus >= 1);
 }
 
@@ -52,8 +70,16 @@ fn the_question_script() {
 fn whole_corpus_statement_errors() {
     let Some(root) = reference() else { return };
     let mut files = Vec::new();
-    for dir in ["renpy/common", "the_question/game", "tutorial/game", "launcher/game", "gui/game"] {
-        let Ok(rd) = std::fs::read_dir(root.join(dir)) else { continue };
+    for dir in [
+        "renpy/common",
+        "the_question/game",
+        "tutorial/game",
+        "launcher/game",
+        "gui/game",
+    ] {
+        let Ok(rd) = std::fs::read_dir(root.join(dir)) else {
+            continue;
+        };
         for e in rd.flatten() {
             let p = e.path();
             if p.extension().and_then(|x| x.to_str()) == Some("rpy") {
@@ -127,5 +153,11 @@ fn the_question_translation_identifiers_match_upstream() {
     }
     assert!(expected.len() > 20);
     let missing: Vec<_> = expected.iter().filter(|i| !ours.contains(*i)).collect();
-    assert!(missing.is_empty(), "{} of {} upstream identifiers missing, e.g. {:?}", missing.len(), expected.len(), &missing[..missing.len().min(5)]);
+    assert!(
+        missing.is_empty(),
+        "{} of {} upstream identifiers missing, e.g. {:?}",
+        missing.len(),
+        expected.len(),
+        &missing[..missing.len().min(5)]
+    );
 }

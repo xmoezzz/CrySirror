@@ -22,7 +22,16 @@ fn showif_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let cond = py::truthy(vm, &condition)?;
     py::set(vm, this, "condition", condition.clone())?;
     if py::is_none(&replaces) {
-        py::set(vm, this, "pending_event", if cond { py::s(vm, "appear") } else { Value::None })?;
+        py::set(
+            vm,
+            this,
+            "pending_event",
+            if cond {
+                py::s(vm, "appear")
+            } else {
+                Value::None
+            },
+        )?;
         py::set(vm, this, "show_child", condition)?;
     } else {
         let rc = py::get(vm, &replaces, "condition")?;
@@ -121,7 +130,9 @@ fn showif_tts(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 // Factories ---------------------------------------------------------------------------------------------
 
 fn take(kw: &mut Vec<(Rc<str>, Value)>, n: &str) -> Option<Value> {
-    kw.iter().position(|(k, _)| &**k == n).map(|i| kw.remove(i).1)
+    kw.iter()
+        .position(|(k, _)| &**k == n)
+        .map(|i| kw.remove(i).1)
 }
 
 fn bar(vm: &mut Vm, kw: Kw, vertical: bool) -> PyResult<Value> {
@@ -136,7 +147,11 @@ fn bar(vm: &mut Vm, kw: Kw, vertical: bool) -> PyResult<Value> {
         if bv.obj().is_some_and(|c| ops::isinstance(vm, &value, c)) {
             let styles = vm.call_method(&value, "get_style", Vec::new())?;
             let st = ops::getitem(vm, &styles, Value::Int(vertical as i64))?;
-            let prefix = if py::is_none(&context) { Value::None } else { py::get_or_none(vm, &context, "style_prefix")? };
+            let prefix = if py::is_none(&context) {
+                Value::None
+            } else {
+                py::get_or_none(vm, &context, "style_prefix")?
+            };
             let combine = py::import_attr(vm, "renpy.ui", "combine_style")?;
             let style = vm.call(&combine, vec![prefix, st], Vec::new())?;
             props.push(("style".into(), style));
@@ -195,7 +210,7 @@ fn sl2add(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     };
     let replaces = take(&mut kwargs, "replaces").unwrap_or(Value::None);
     let scope = take(&mut kwargs, "scope").unwrap_or(Value::None);
-    if py::is_none(&d) {
+    if py::is_none(&d) && super::state::rt(vm).profile.at_least(6, 99) {
         return py::import_attr(vm, "renpy.sl2.slast", "NO_DISPLAYABLE");
     }
     let mut d = super::easy::displayable(vm, &d, &scope, false)?;
@@ -219,25 +234,87 @@ fn sl2add(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
+    let mut funcs: Vec<(&'static str, crysirror_python::object::NativeFn)> = vec![
         ("sl2bar", sl2bar),
         ("sl2vbar", sl2vbar),
         ("sl2viewport", sl2viewport),
-        ("sl2vpgrid", sl2vpgrid),
         ("sl2add", sl2add),
-    ]);
+    ];
+    let rel = super::slparser::release(vm);
+    if rel >= (6, 99) {
+        funcs.push(("sl2vpgrid", sl2vpgrid));
+    }
+    let m = crysirror_python::modules::module_with(vm, MODULE, &funcs);
     let container = py::import_attr(vm, "renpy.display.layout", "Container")?;
     let skip = vm.types.new_builtin("_box_skip", showif_box_skip);
     let skip = py::property(vm, skip, None)?;
-    let cls = py::class(vm, MODULE, "ShowIf", &[container], &[
-        ("__init__", showif_init),
-        ("per_interact", showif_per_interact),
-        ("render", showif_render),
-        ("event", showif_event),
-        ("get_placement", showif_get_placement),
-        ("_tts", showif_tts),
-    ], &[("_box_skip", skip)])?;
+    let cls = py::class(
+        vm,
+        MODULE,
+        "ShowIf",
+        &[container],
+        &[
+            ("__init__", showif_init),
+            ("per_interact", showif_per_interact),
+            ("render", showif_render),
+            ("event", showif_event),
+            ("get_placement", showif_get_placement),
+            ("_tts", showif_tts),
+        ],
+        &[("_box_skip", skip)],
+    )?;
     crysirror_python::modules::set(vm, &m, "ShowIf", Value::Obj(cls));
+    // `from renpy.sl2.slparser import ...` and the property lists this
+    // release's sldisplayables.py imports from slproperties (6.18 defines
+    // them here; they are shared with slproperties).
+    for n in [
+        "Positional",
+        "Keyword",
+        "Style",
+        "PrefixStyle",
+        "add",
+        "DisplayableParser",
+        "many",
+    ] {
+        let v = py::import_attr(vm, "renpy.sl2.slparser", n)?;
+        crysirror_python::modules::set(vm, &m, n, v);
+    }
+    let tags: Vec<[u32; 2]> = super::sl_tables::SL2.iter().map(|(t, _)| *t).collect();
+    let t = super::sl_tables::SL2[super::slparser::ref_tag(vm, &tags)].1;
+    let mut lists: Vec<&str> = vec![
+        "text_properties",
+        "box_properties",
+        "window_properties",
+        "bar_properties",
+        "button_properties",
+        "text_position_properties",
+        "text_text_properties",
+        "side_position_properties",
+    ];
+    if rel < (6, 99) {
+        lists = t.displayable_lists.iter().map(|(n, _)| *n).collect();
+    }
+    if rel >= (7, 0) {
+        lists.extend([
+            "grid_properties",
+            "scrollbar_bar_properties",
+            "scrollbar_position_properties",
+            "viewport_position_properties",
+            "vscrollbar_bar_properties",
+            "vscrollbar_position_properties",
+        ]);
+    }
+    if rel >= (7, 5) {
+        lists.push("position_properties");
+    }
+    for n in lists {
+        let v = py::import_attr(vm, "renpy.sl2.slproperties", n)?;
+        crysirror_python::modules::set(vm, &m, n, v);
+    }
+    // The statement definitions of this release, as sldisplayables.py
+    // makes them at import.
+    let lookup = |vm: &mut Vm, n: &str| py::import_attr(vm, "renpy.sl2.slproperties", n);
+    super::slparser::replay_statements(vm, t.displayables, &lookup)?;
     Ok(m)
 }
 

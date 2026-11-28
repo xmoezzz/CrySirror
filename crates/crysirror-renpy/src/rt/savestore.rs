@@ -54,7 +54,8 @@ impl SaveStore {
                 if let Some((dir, _)) = name.rsplit_once('/') {
                     let _ = s.create_directory(&Self::path(dir)?);
                 }
-                s.write_atomic(&Self::path(name)?, data).map_err(|e| e.to_string())
+                s.write_atomic(&Self::path(name)?, data)
+                    .map_err(|e| e.to_string())
             }
             SaveStore::Memory(m, clock) => {
                 let mut c = clock.borrow_mut();
@@ -83,8 +84,17 @@ impl SaveStore {
         match self {
             SaveStore::Client(s) => s.list(Mount::Save, dir).unwrap_or_default(),
             SaveStore::Memory(m, _) => {
-                let prefix = if dir.is_empty() { String::new() } else { format!("{}/", dir.trim_end_matches('/')) };
-                m.borrow().keys().filter_map(|k| k.strip_prefix(&prefix)).filter(|k| !k.contains('/')).map(str::to_owned).collect()
+                let prefix = if dir.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}/", dir.trim_end_matches('/'))
+                };
+                m.borrow()
+                    .keys()
+                    .filter_map(|k| k.strip_prefix(&prefix))
+                    .filter(|k| !k.contains('/'))
+                    .map(str::to_owned)
+                    .collect()
             }
         }
     }
@@ -139,7 +149,10 @@ fn u32le(b: &[u8], o: usize) -> Option<u32> {
 pub fn zip_read(b: &[u8]) -> Result<Vec<ZipEntry>, String> {
     let bad = || "not a zip file".to_string();
     let min = b.len().saturating_sub(22 + 65535);
-    let eocd = (min..=b.len().saturating_sub(22)).rev().find(|&i| u32le(b, i) == Some(0x0605_4b50)).ok_or_else(bad)?;
+    let eocd = (min..=b.len().saturating_sub(22))
+        .rev()
+        .find(|&i| u32le(b, i) == Some(0x0605_4b50))
+        .ok_or_else(bad)?;
     let count = u16le(b, eocd + 10).ok_or_else(bad)? as usize;
     let mut off = u32le(b, eocd + 16).ok_or_else(bad)? as usize;
     let mut out = Vec::with_capacity(count);
@@ -154,7 +167,8 @@ pub fn zip_read(b: &[u8]) -> Result<Vec<ZipEntry>, String> {
         let elen = u16le(b, off + 30).ok_or_else(bad)? as usize;
         let clen = u16le(b, off + 32).ok_or_else(bad)? as usize;
         let local = u32le(b, off + 42).ok_or_else(bad)? as usize;
-        let name = String::from_utf8_lossy(b.get(off + 46..off + 46 + nlen).ok_or_else(bad)?).into_owned();
+        let name =
+            String::from_utf8_lossy(b.get(off + 46..off + 46 + nlen).ok_or_else(bad)?).into_owned();
         off += 46 + nlen + elen + clen;
         if u32le(b, local) != Some(0x0403_4b50) {
             return Err(bad());
@@ -170,7 +184,10 @@ pub fn zip_read(b: &[u8]) -> Result<Vec<ZipEntry>, String> {
             0 => raw.to_vec(),
             8 => {
                 let mut d = Vec::with_capacity(usize_ as usize);
-                DeflateDecoder::new(raw).take(MAX_FILE).read_to_end(&mut d).map_err(|e| e.to_string())?;
+                DeflateDecoder::new(raw)
+                    .take(MAX_FILE)
+                    .read_to_end(&mut d)
+                    .map_err(|e| e.to_string())?;
                 d
             }
             m => return Err(format!("zip member {name} uses unsupported method {m}")),
@@ -181,7 +198,11 @@ pub fn zip_read(b: &[u8]) -> Result<Vec<ZipEntry>, String> {
 }
 
 pub fn zip_member(b: &[u8], name: &str) -> Option<Vec<u8>> {
-    zip_read(b).ok()?.into_iter().find(|e| e.name == name).map(|e| e.data)
+    zip_read(b)
+        .ok()?
+        .into_iter()
+        .find(|e| e.name == name)
+        .map(|e| e.data)
 }
 
 fn crc32(data: &[u8]) -> u32 {
@@ -189,7 +210,11 @@ fn crc32(data: &[u8]) -> u32 {
     for &x in data {
         c ^= x as u32;
         for _ in 0..8 {
-            c = if c & 1 != 0 { (c >> 1) ^ 0xedb8_8320 } else { c >> 1 };
+            c = if c & 1 != 0 {
+                (c >> 1) ^ 0xedb8_8320
+            } else {
+                c >> 1
+            };
         }
     }
     !c
@@ -275,7 +300,10 @@ mod tests {
 
     #[test]
     fn zip_round_trips() {
-        let z = zip_write(&[("log", b"hello hello hello"), ("json", b"{}")], dos_time(1_700_000_000.0));
+        let z = zip_write(
+            &[("log", b"hello hello hello"), ("json", b"{}")],
+            dos_time(1_700_000_000.0),
+        );
         let e = zip_read(&z).unwrap();
         assert_eq!(e.len(), 2);
         assert_eq!(e[0].name, "log");

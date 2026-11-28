@@ -133,6 +133,9 @@ pub fn open_memory(bytes: Arc<[u8]>, extension: Option<&str>) -> Result<Box<dyn 
     if crate::wave_box::WaveBoxInfo::parse(&bytes).is_some() {
         return open_asset(Arc::new(crysirror_core::service::MemoryAssetReader(bytes)),extension);
     }
+    if bytes.starts_with(b"XVAG") {
+        return crate::xvag::open(Box::new(Cursor::new(bytes)));
+    }
     if bytes.starts_with(b"MV2X") {
         return crate::mv2::open(Box::new(Cursor::new(bytes)));
     }
@@ -173,6 +176,9 @@ pub fn open_reader(
             count += n;
         }
         reader.seek(SeekFrom::Start(start))?;
+        if &prefix[..count] == b"XVAG" {
+            return crate::xvag::open(reader);
+        }
         if &prefix[..count] == b"MV2X" {
             return crate::mv2::open(reader);
         }

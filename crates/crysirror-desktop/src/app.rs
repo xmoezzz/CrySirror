@@ -193,6 +193,7 @@ struct WindowState {
     config: wgpu::SurfaceConfiguration,
     minimized: bool,
     window_policy: Option<(bool, bool)>,
+    fps_sample: (Instant, u32),
 }
 pub struct App {
     core: Core,
@@ -336,12 +337,14 @@ fn capture_ready_with_renderer(
     renderer.set_engine_frame(snapshot.layers)?;
     renderer.set_transition(snapshot.transition)?;
     load_fonts(rt, font)?;
+    let scale = rt.host.engine.ui.capture_scale.map_or(1, |(_, scale)| scale);
     let image = rt.assets.with_frame_surfaces(snapshot.surfaces, |assets| {
-        renderer.capture(
+        renderer.capture_scaled(
             &snapshot.scene,
             assets,
             rt.project.canvas,
             rt.project.background,
+            scale,
         )
     })?;
     if let Some(parent) = path.parent() {
@@ -622,6 +625,7 @@ impl App {
             renderer,
             config,
             minimized: false,
+            fps_sample: (Instant::now(), 0),
             window_policy: None,
         });
         self.core.rt().host.note_pointer_activity()?;
@@ -913,6 +917,13 @@ impl App {
         }
         if reconfigure {
             w.surface.configure(&w.renderer.gpu.device, &w.config);
+        }
+        let now = Instant::now();
+        w.fps_sample.1 += 1;
+        let elapsed = now.duration_since(w.fps_sample.0).as_secs_f64();
+        if elapsed >= 1.0 {
+            rt.host.presentation_fps = Some((f64::from(w.fps_sample.1) / elapsed).round() as u32);
+            w.fps_sample = (now, 0);
         }
         self.presented += 1;
         if self.presented % 120 == 0 {
@@ -1230,6 +1241,7 @@ impl ApplicationHandler for App {
         self.core.rt().host.window_focused = None;
         if let Err(error)=crate::desktop_provider::install(self.core.rt(),false){self.fail(el,error);return;}
         self.core.rt().host.window_minimized=None;
+        self.core.rt().host.presentation_fps=None;
         self.core.rt().host.window_maximized = None;
         self.core.rt().host.window_fullscreen=None;
         self.core.rt().host.window_geometry=None;

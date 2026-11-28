@@ -12,7 +12,9 @@ use crysirror_python::{ObjRef, PyResult, Value, Vm, builtins::Kw, ops};
 const MODULE: &str = "renpy.display.anim";
 
 fn less_updates(vm: &mut Vm) -> bool {
-    py::import_attr(vm, "renpy.game", "less_updates").map(|v| ops::truthy(vm, &v).unwrap_or(false)).unwrap_or(false)
+    py::import_attr(vm, "renpy.game", "less_updates")
+        .map(|v| ops::truthy(vm, &v).unwrap_or(false))
+        .unwrap_or(false)
 }
 
 fn mget(vm: &mut Vm, n: &str) -> PyResult<Value> {
@@ -69,7 +71,11 @@ fn state_get_image(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn state_motion_copy(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let image = py::get_or_none(vm, this, "image")?;
-    let child = if py::is_none(&image) { args[1].clone() } else { image };
+    let child = if py::is_none(&image) {
+        args[1].clone()
+    } else {
+        image
+    };
     let mut a = vec![py::get(vm, this, "name")?, child];
     a.extend(py::get_items(vm, this, "atlist")?);
     let c = mget(vm, "State")?;
@@ -78,7 +84,16 @@ fn state_motion_copy(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn edge_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    for (i, (n, d)) in [("old", Value::None), ("delay", Value::None), ("new", Value::None), ("trans", Value::None), ("prob", Value::Int(1))].into_iter().enumerate() {
+    for (i, (n, d)) in [
+        ("old", Value::None),
+        ("delay", Value::None),
+        ("new", Value::None),
+        ("trans", Value::None),
+        ("prob", Value::Int(1)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         py::set(vm, this, n, arg_or(args, kw, i + 1, n, d))?;
     }
     Ok(Value::None)
@@ -86,11 +101,18 @@ fn edge_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn edge_add(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let prob = { let v = py::get(vm, this, "prob")?; py::int(vm, &v)? };
+    let prob = {
+        let v = py::get(vm, this, "prob")?;
+        py::int(vm, &v)?
+    };
     let edges = py::get(vm, &args[1], "edges")?;
     let old = py::get(vm, this, "old")?;
     for _ in 0..prob {
-        let l = vm.call_method(&edges, "setdefault", vec![old.clone(), vm.types.new_list(Vec::new())])?;
+        let l = vm.call_method(
+            &edges,
+            "setdefault",
+            vec![old.clone(), vm.types.new_list(Vec::new())],
+        )?;
         vm.call_method(&l, "append", vec![this.clone()])?;
     }
     Ok(Value::None)
@@ -118,7 +140,12 @@ fn sma_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     super::core::d_init(vm, &[this.clone()], &props)?;
     let pd = py::kwargs_dict(vm, &props)?;
     py::set(vm, this, "properties", pd)?;
-    py::set(vm, this, "initial", args.get(1).cloned().unwrap_or(Value::None))?;
+    py::set(
+        vm,
+        this,
+        "initial",
+        args.get(1).cloned().unwrap_or(Value::None),
+    )?;
     py::set(vm, this, "states", vm.types.new_dict())?;
     py::set(vm, this, "edges", vm.types.new_dict())?;
     for a in args.iter().skip(2) {
@@ -174,9 +201,16 @@ fn sma_update_cache(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let im = if ops::truthy(vm, &trans)? {
         let o = state_image(vm, this, old)?;
         let n = state_image(vm, this, new)?;
-        vm.call(&trans, Vec::new(), vec![("old_widget".into(), o), ("new_widget".into(), n)])?
+        vm.call(
+            &trans,
+            Vec::new(),
+            vec![("old_widget".into(), o), ("new_widget".into(), n)],
+        )?
     } else {
-        let so = { let v = py::get_or_none(vm, this, "showold")?; ops::truthy(vm, &v)? };
+        let so = {
+            let v = py::get_or_none(vm, this, "showold")?;
+            ops::truthy(vm, &v)?
+        };
         state_image(vm, this, if so { old } else { new })?
     };
     py::set(vm, this, "edge_cache", im)?;
@@ -207,7 +241,10 @@ fn fget(vm: &mut Vm, o: &Value, n: &str) -> PyResult<f64> {
 fn sma_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (w, h, st, at) = rargs(vm, args)?;
-    let tb = { let v = py::get_or_none(vm, this, "anim_timebase")?; ops::truthy(vm, &v)? };
+    let tb = {
+        let v = py::get_or_none(vm, this, "anim_timebase")?;
+        ops::truthy(vm, &v)?
+    };
     let t = if tb { at } else { st };
     let es = py::get_or_none(vm, this, "edge_start")?;
     if py::is_none(&es) || t < py::f64_of(vm, &es)? {
@@ -336,7 +373,10 @@ fn ta_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn ta_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (w, h, st, at) = rargs(vm, args)?;
-    let tb = { let v = py::get_or_none(vm, this, "anim_timebase")?; ops::truthy(vm, &v)? };
+    let tb = {
+        let v = py::get_or_none(vm, this, "anim_timebase")?;
+        ops::truthy(vm, &v)?
+    };
     let orig_t = if tb { at } else { st };
     let images = py::get_items(vm, this, "images")?;
     let prev = py::get_items(vm, this, "prev_images")?;
@@ -346,7 +386,11 @@ fn ta_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         delays.push(py::f64_of(vm, &d)?);
     }
     let total: f64 = delays.iter().sum();
-    let mut t = if total > 0. { orig_t.rem_euclid(total) } else { 0. };
+    let mut t = if total > 0. {
+        orig_t.rem_euclid(total)
+    } else {
+        0.
+    };
     for i in 0..images.len().min(delays.len()) {
         let delay = delays[i];
         if t < delay {
@@ -356,7 +400,14 @@ fn ta_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             let mut image = images[i].clone();
             let tr = trans.get(i).cloned().unwrap_or(Value::None);
             if ops::truthy(vm, &tr)? && orig_t >= delays[0] {
-                image = vm.call(&tr, Vec::new(), vec![("old_widget".into(), prev[i].clone()), ("new_widget".into(), image)])?;
+                image = vm.call(
+                    &tr,
+                    Vec::new(),
+                    vec![
+                        ("old_widget".into(), prev[i].clone()),
+                        ("new_widget".into(), image),
+                    ],
+                )?;
             }
             let im = render::render(vm, &image, w, h, t, at)?;
             return wrap(vm, &im);
@@ -372,11 +423,31 @@ fn ta_visit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 // Blink -----------------------------------------------------------------------------------------------
 
-const BLINK: &[&str] = &["image", "on", "off", "rise", "set", "high", "low", "offset", "anim_timebase"];
+const BLINK: &[&str] = &[
+    "image",
+    "on",
+    "off",
+    "rise",
+    "set",
+    "high",
+    "low",
+    "offset",
+    "anim_timebase",
+];
 
 fn blink_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let mut vals = vec![Value::None, Value::Float(0.5), Value::Float(0.5), Value::Float(0.5), Value::Float(0.5), Value::Float(1.), Value::Float(0.), Value::Float(0.), Value::Bool(false)];
+    let mut vals = vec![
+        Value::None,
+        Value::Float(0.5),
+        Value::Float(0.5),
+        Value::Float(0.5),
+        Value::Float(0.5),
+        Value::Float(1.),
+        Value::Float(0.),
+        Value::Float(0.),
+        Value::Bool(false),
+    ];
     for (i, v) in args.iter().skip(1).enumerate().take(BLINK.len()) {
         vals[i] = v.clone();
     }
@@ -408,12 +479,24 @@ fn blink_visit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn blink_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (w, h, st, at) = rargs(vm, args)?;
-    let tb = { let v = py::get_or_none(vm, this, "anim_timebase")?; ops::truthy(vm, &v)? };
+    let tb = {
+        let v = py::get_or_none(vm, this, "anim_timebase")?;
+        ops::truthy(vm, &v)?
+    };
     let t = if tb { at } else { st };
     let g = |vm: &mut Vm, n: &str| fget(vm, this, n);
     let (on, set, off, rise) = (g(vm, "on")?, g(vm, "set")?, g(vm, "off")?, g(vm, "rise")?);
-    let (high, low, offset, cycle) = (g(vm, "high")?, g(vm, "low")?, g(vm, "offset")?, g(vm, "cycle")?);
-    let mut time = if cycle > 0. { (offset + t).rem_euclid(cycle) } else { 0. };
+    let (high, low, offset, cycle) = (
+        g(vm, "high")?,
+        g(vm, "low")?,
+        g(vm, "offset")?,
+        g(vm, "cycle")?,
+    );
+    let mut time = if cycle > 0. {
+        (offset + t).rem_euclid(cycle)
+    } else {
+        0.
+    };
     let mut delay = 0.;
     let mut alpha = high;
     if (0. ..on).contains(&time) {
@@ -443,8 +526,16 @@ fn blink_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let rv = wrap(vm, &rend)?;
     py::set(vm, &rv, "alpha", Value::Float(alpha))?;
     vm.call_method(&rv, "add_shader", vec![vm.types.new_str("renpy.alpha")])?;
-    vm.call_method(&rv, "add_uniform", vec![vm.types.new_str("u_renpy_alpha"), Value::Float(alpha)])?;
-    vm.call_method(&rv, "add_uniform", vec![vm.types.new_str("u_renpy_over"), Value::Float(1.)])?;
+    vm.call_method(
+        &rv,
+        "add_uniform",
+        vec![vm.types.new_str("u_renpy_alpha"), Value::Float(alpha)],
+    )?;
+    vm.call_method(
+        &rv,
+        "add_uniform",
+        vec![vm.types.new_str("u_renpy_over"), Value::Float(1.)],
+    )?;
     if !less_updates(vm) {
         render::redraw(vm, this, delay);
     }
@@ -460,17 +551,35 @@ fn f_filmstrip(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let delay = arg_or(args, kw, 3, "delay", Value::None);
     let frames = arg_or(args, kw, 4, "frames", Value::None);
     let lp = arg_or(args, kw, 5, "loop", Value::Bool(true));
-    let props: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "image" | "framesize" | "gridsize" | "delay" | "frames" | "loop")).cloned().collect();
+    let props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| {
+            !matches!(
+                &**k,
+                "image" | "framesize" | "gridsize" | "delay" | "frames" | "loop"
+            )
+        })
+        .cloned()
+        .collect();
     let (w, h) = (fs[0].clone(), fs[1].clone());
     let (cols, rows) = (py::int(vm, &gs[0])?, py::int(vm, &gs[1])?);
-    let frames = if py::is_none(&frames) { cols * rows } else { py::int(vm, &frames)? };
+    let frames = if py::is_none(&frames) {
+        cols * rows
+    } else {
+        py::int(vm, &frames)?
+    };
     let tcls = py::import_attr(vm, "renpy.display.transform", "Transform")?;
     let (wi, hi) = (py::f64_of(vm, &w)?, py::f64_of(vm, &h)?);
     let mut a = Vec::new();
     let mut i = 0;
     'outer: for r in 0..rows {
         for c in 0..cols {
-            let crop = vm.types.new_tuple(vec![Value::Float(c as f64 * wi), Value::Float(r as f64 * hi), w.clone(), h.clone()]);
+            let crop = vm.types.new_tuple(vec![
+                Value::Float(c as f64 * wi),
+                Value::Float(r as f64 * hi),
+                w.clone(),
+                h.clone(),
+            ]);
             a.push(vm.call(&tcls, vec![image.clone()], vec![("crop".into(), crop)])?);
             a.push(delay.clone());
             i += 1;
@@ -486,7 +595,11 @@ fn f_filmstrip(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[("Animation", f_animation), ("Filmstrip", f_filmstrip)]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[("Animation", f_animation), ("Filmstrip", f_filmstrip)],
+    );
     let d = Value::Obj(super::core::displayable_class(vm));
     let object = vm.types.object.clone();
     let mut c = |vm: &mut Vm, name: &str, bases: &[Value], methods: Methods| -> PyResult<()> {
@@ -495,14 +608,57 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
         Ok(())
     };
     let o = Value::Obj(object);
-    c(vm, "State", &[o.clone()], &[("__init__", state_init), ("add", state_add), ("get_image", state_get_image), ("motion_copy", state_motion_copy)])?;
-    c(vm, "Edge", &[o], &[("__init__", edge_init), ("add", edge_add)])?;
-    c(vm, "SMAnimation", &[d.clone()], &[
-        ("__init__", sma_init), ("visit", sma_visit), ("pick_edge", sma_pick_edge), ("update_cache", sma_update_cache),
-        ("get_placement", sma_get_placement), ("render", sma_render), ("__call__", sma_call),
-    ])?;
-    c(vm, "TransitionAnimation", &[d.clone()], &[("__init__", ta_init), ("render", ta_render), ("visit", ta_visit)])?;
-    c(vm, "Blink", &[d], &[("__init__", blink_init), ("visit", blink_visit), ("render", blink_render)])?;
+    c(
+        vm,
+        "State",
+        &[o.clone()],
+        &[
+            ("__init__", state_init),
+            ("add", state_add),
+            ("get_image", state_get_image),
+            ("motion_copy", state_motion_copy),
+        ],
+    )?;
+    c(
+        vm,
+        "Edge",
+        &[o],
+        &[("__init__", edge_init), ("add", edge_add)],
+    )?;
+    c(
+        vm,
+        "SMAnimation",
+        &[d.clone()],
+        &[
+            ("__init__", sma_init),
+            ("visit", sma_visit),
+            ("pick_edge", sma_pick_edge),
+            ("update_cache", sma_update_cache),
+            ("get_placement", sma_get_placement),
+            ("render", sma_render),
+            ("__call__", sma_call),
+        ],
+    )?;
+    c(
+        vm,
+        "TransitionAnimation",
+        &[d.clone()],
+        &[
+            ("__init__", ta_init),
+            ("render", ta_render),
+            ("visit", ta_visit),
+        ],
+    )?;
+    c(
+        vm,
+        "Blink",
+        &[d],
+        &[
+            ("__init__", blink_init),
+            ("visit", blink_visit),
+            ("render", blink_render),
+        ],
+    )?;
     Ok(m)
 }
 

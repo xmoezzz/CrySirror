@@ -1,11 +1,57 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Authored control parts and plain system-SE table in the 2011 prelude.
-use crate::branch::number;
+use crate::{branch::number, native_numbers::integer2011};
 use anyhow::{Result, ensure};
 use crysirror_core::path::{Mount, VfsPath};
 use std::collections::BTreeMap;
 
 const SOUND_SLOTS: usize = 100;
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+pub(super) struct Notification {
+    pub slot: u8,
+    position: [i32; 2],
+    resource: Vec<u8>,
+}
+
+impl Notification {
+    pub fn parse(raw: &[u8]) -> Option<Self> {
+        // The two later cmdDefNotify handlers feed UxLocalCtrl::defParts mode
+        // 3. The unsigned slot check precedes the owned string assignment.
+        let mut fields = raw.splitn(4, |&b| b == b',');
+        let slot = integer2011(fields.next().unwrap_or_default()) as u32;
+        if slot >= 32 {
+            return None;
+        }
+        let position = std::array::from_fn(|_| integer2011(fields.next().unwrap_or_default()));
+        Some(Self {
+            slot: slot as u8,
+            position,
+            resource: fields.next().unwrap_or_default().to_vec(),
+        })
+    }
+
+    pub fn bundle(raw: &[u8]) -> Option<Vec<Self>> {
+        let mut fields = raw.split(|&b| b == b',');
+        if integer2011(fields.next().unwrap_or_default()) != 3 {
+            return None;
+        }
+        Some(
+            (0..8)
+                .filter_map(|slot| {
+                    let resource = fields.next().unwrap_or_default();
+                    let position =
+                        std::array::from_fn(|_| integer2011(fields.next().unwrap_or_default()));
+                    (integer2011(resource) != -1).then(|| Self {
+                        slot,
+                        position,
+                        resource: resource.to_vec(),
+                    })
+                })
+                .collect(),
+        )
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Part {
@@ -147,11 +193,29 @@ impl SoundUpdate {
 #[derive(Default)]
 pub(super) struct Definitions {
     parts: BTreeMap<u8, Part>,
+    notifications: BTreeMap<u8, Notification>,
+    controls: BTreeMap<u8, crate::v3_control::Definition>,
     // Missing/unconfigured and explicit silent (-1) are distinct. No
     // fabricated native constructor/default table enters this owner.
-    sounds: BTreeMap<u8, i32>,
+    pub sounds: crate::midori_control_sound::Catalog,
 }
 impl Definitions {
+    pub fn set_notification(&mut self, notification: Notification) {
+        self.notifications.insert(notification.slot, notification);
+    }
+
+    pub fn set_control(&mut self, definition: crate::v3_control::Definition) {
+        self.controls.insert(definition.slot, definition);
+    }
+
+    pub fn control_slots(&self) -> &BTreeMap<u8, crate::v3_control::Definition> {
+        &self.controls
+    }
+
+    pub fn notification_slots(&self) -> &BTreeMap<u8, Notification> {
+        &self.notifications
+    }
+
     pub fn set_part(&mut self, part: Part) {
         self.parts.insert(part.slot, part);
     }
@@ -163,12 +227,12 @@ impl Definitions {
     pub fn update_sound(&mut self, update: SoundUpdate) {
         if update.execute {
             for (slot, id) in (update.first..).zip(update.values) {
-                self.sounds.insert(slot, id);
+                self.sounds.plain(slot, id);
             }
         }
     }
     pub fn sound_slots(&self) -> &BTreeMap<u8, i32> {
-        &self.sounds
+        &self.sounds.ids
     }
     pub fn part_status(&self) -> Result<Vec<(u8, String, [i32; 2])>> {
         self.parts

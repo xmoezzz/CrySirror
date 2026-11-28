@@ -17,6 +17,32 @@ struct Catalog {
     names: BTreeMap<String, i32>,
     ids: BTreeSet<i32>,
 }
+
+pub(super) fn restore_slot(state: &mut State, saved: &crate::save::management_1040::Scenario) -> Result<()> {
+    let catalog = Catalog::load(state)?;
+    state.events.played = saved.played.iter()
+        .filter_map(|&(id, played)| (played && catalog.ids.contains(&id)).then_some(id))
+        .collect();
+    state.events.previous = saved.selectable.iter().copied().filter(|id| catalog.ids.contains(id)).collect();
+    state.events.fixed.clear();
+    state.events.added.clear();
+    Ok(())
+}
+
+pub(super) fn capture_slot(state: &mut State) -> Result<crate::save::management_1040::Scenario> {
+    let catalog = Catalog::load(state)?;
+    let mut seen = BTreeSet::new();
+    let played = (1..catalog.table.rows)
+        .filter(|&r| catalog.table.exists(0, r))
+        .map(|r| catalog.table.int(0, r))
+        .filter(|id| catalog.ids.contains(id) && seen.insert(*id))
+        .map(|id| (id, state.events.played.contains(&id)))
+        .collect();
+    Ok(crate::save::management_1040::Scenario {
+        played,
+        selectable: state.events.previous.iter().copied().collect(),
+    })
+}
 impl Catalog {
     fn load(s: &mut State) -> Result<Arc<Self>> {
         if let Some(catalog) = &s.events.catalog {

@@ -22,7 +22,11 @@ fn adjustment(vm: &mut Vm) -> PyResult<Value> {
 
 fn fget(vm: &mut Vm, o: &Value, n: &str) -> PyResult<f64> {
     let v = py::get_or_none(vm, o, n)?;
-    if py::is_none(&v) { Ok(0.) } else { py::f64_of(vm, &v) }
+    if py::is_none(&v) {
+        Ok(0.)
+    } else {
+        py::f64_of(vm, &v)
+    }
 }
 
 fn bget(vm: &mut Vm, o: &Value, n: &str) -> PyResult<bool> {
@@ -38,7 +42,13 @@ fn vp_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let y = adjustment(vm)?;
         py::set(vm, this, "xadjustment", x)?;
         py::set(vm, this, "yadjustment", y)?;
-        for (n, v) in [("set_adjustments", Value::Bool(false)), ("mousewheel", Value::Bool(false)), ("draggable", Value::Bool(false)), ("width", Value::Int(0)), ("height", Value::Int(0))] {
+        for (n, v) in [
+            ("set_adjustments", Value::Bool(false)),
+            ("mousewheel", Value::Bool(false)),
+            ("draggable", Value::Bool(false)),
+            ("width", Value::Int(0)),
+            ("height", Value::Int(0)),
+        ] {
             py::set(vm, this, n, v)?;
         }
     }
@@ -47,7 +57,14 @@ fn vp_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     if version < 3 {
         let ef = py::import_attr(vm, MODULE, "edgescroll_proportional")?;
-        for (n, v) in [("edge_size", Value::Bool(false)), ("edge_speed", Value::Bool(false)), ("edge_function", ef), ("edge_xspeed", Value::Int(0)), ("edge_yspeed", Value::Int(0)), ("edge_last_st", Value::None)] {
+        for (n, v) in [
+            ("edge_size", Value::Bool(false)),
+            ("edge_speed", Value::Bool(false)),
+            ("edge_function", ef),
+            ("edge_xspeed", Value::Int(0)),
+            ("edge_yspeed", Value::Int(0)),
+            ("edge_last_st", Value::None),
+        ] {
             py::set(vm, this, n, v)?;
         }
     }
@@ -58,14 +75,43 @@ fn vp_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
-const VP_NAMES: &[&str] = &["child", "child_size", "offsets", "xadjustment", "yadjustment", "set_adjustments", "mousewheel", "draggable", "edgescroll", "style", "xinitial", "yinitial", "replaces", "arrowkeys", "pagekeys"];
+const VP_NAMES: &[&str] = &[
+    "child",
+    "child_size",
+    "offsets",
+    "xadjustment",
+    "yadjustment",
+    "set_adjustments",
+    "mousewheel",
+    "draggable",
+    "edgescroll",
+    "style",
+    "xinitial",
+    "yinitial",
+    "replaces",
+    "arrowkeys",
+    "pagekeys",
+];
 
 fn vp_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let pair = vm.types.new_tuple(vec![Value::None, Value::None]);
     let mut v = vec![
-        Value::None, pair.clone(), pair, Value::None, Value::None, Value::Bool(true), Value::Bool(false), Value::Bool(false), Value::None,
-        vm.types.new_str("viewport"), Value::None, Value::None, Value::None, Value::Bool(false), Value::Bool(false),
+        Value::None,
+        pair.clone(),
+        pair,
+        Value::None,
+        Value::None,
+        Value::Bool(true),
+        Value::Bool(false),
+        Value::Bool(false),
+        Value::None,
+        vm.types.new_str("viewport"),
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::Bool(false),
+        Value::Bool(false),
     ];
     for (i, a) in args.iter().skip(1).enumerate().take(VP_NAMES.len()) {
         v[i] = a.clone();
@@ -85,8 +131,16 @@ fn vp_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !py::is_none(&v[0]) {
         vm.call_method(this, "add", vec![v[0].clone()])?;
     }
-    let xa = if py::is_none(&v[3]) { adjustment(vm)? } else { v[3].clone() };
-    let ya = if py::is_none(&v[4]) { adjustment(vm)? } else { v[4].clone() };
+    let xa = if py::is_none(&v[3]) {
+        adjustment(vm)?
+    } else {
+        v[3].clone()
+    };
+    let ya = if py::is_none(&v[4]) {
+        adjustment(vm)?
+    } else {
+        v[4].clone()
+    };
     for a in [&xa, &ya] {
         if py::is_none(&py::get_or_none(vm, a, "adjustable")?) {
             py::set(vm, a, "adjustable", Value::Bool(true))?;
@@ -96,14 +150,26 @@ fn vp_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     py::set(vm, this, "yadjustment", ya.clone())?;
     py::set(vm, this, "set_adjustments", v[5].clone())?;
     let offsets = py::items(vm, &v[2])?;
-    let xo = if py::is_none(&offsets[0]) { v[10].clone() } else { offsets[0].clone() };
-    let yo = if py::is_none(&offsets[1]) { v[11].clone() } else { offsets[1].clone() };
+    let xo = if py::is_none(&offsets[0]) {
+        v[10].clone()
+    } else {
+        offsets[0].clone()
+    };
+    let yo = if py::is_none(&offsets[1]) {
+        v[11].clone()
+    } else {
+        offsets[1].clone()
+    };
     py::set(vm, this, "xoffset", xo)?;
     py::set(vm, this, "yoffset", yo)?;
     let vpc = py::import_attr(vm, MODULE, "Viewport")?;
     let replaces = v[12].clone();
     let is_vp = vpc.obj().is_some_and(|c| ops::isinstance(vm, &replaces, c));
-    let r_offsets = if is_vp { py::get_or_none(vm, &replaces, "offsets")? } else { Value::None };
+    let r_offsets = if is_vp {
+        py::get_or_none(vm, &replaces, "offsets")?
+    } else {
+        Value::None
+    };
     if is_vp && ops::truthy(vm, &r_offsets)? {
         let rxa = py::get(vm, &replaces, "xadjustment")?;
         let rya = py::get(vm, &replaces, "yadjustment")?;
@@ -115,7 +181,13 @@ fn vp_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
                 py::set(vm, a, n, x)?;
             }
         }
-        for n in ["xoffset", "yoffset", "drag_position", "drag_position_time", "drag_speed"] {
+        for n in [
+            "xoffset",
+            "yoffset",
+            "drag_position",
+            "drag_position_time",
+            "drag_speed",
+        ] {
             let x = py::get_or_none(vm, &replaces, n)?;
             py::set(vm, this, n, x)?;
         }
@@ -173,7 +245,13 @@ fn adj_set(vm: &mut Vm, a: &Value, n: &str, v: f64) -> PyResult<()> {
     py::set(vm, a, n, Value::Float(v))
 }
 
-fn update_offsets(vm: &mut Vm, this: &Value, cw: f64, ch: f64, st: f64) -> PyResult<(f64, f64, f64, f64)> {
+fn update_offsets(
+    vm: &mut Vm,
+    this: &Value,
+    cw: f64,
+    ch: f64,
+    st: f64,
+) -> PyResult<(f64, f64, f64, f64)> {
     let cw = cw.ceil();
     let ch = ch.ceil();
     let mut width = fget(vm, this, "width")?;
@@ -203,12 +281,19 @@ fn update_offsets(vm: &mut Vm, this: &Value, cw: f64, ch: f64, st: f64) -> PyRes
     for (n, a, c, d) in [("xoffset", &xa, cw, width), ("yoffset", &ya, ch, height)] {
         let o = py::get_or_none(vm, this, n)?;
         if !py::is_none(&o) {
-            let value = if matches!(o, Value::Int(_)) { o.clone() } else { Value::Float((c - d).max(0.) * py::f64_of(vm, &o)?) };
+            let value = if matches!(o, Value::Int(_)) {
+                o.clone()
+            } else {
+                Value::Float((c - d).max(0.) * py::f64_of(vm, &o)?)
+            };
             py::set(vm, a, "value", value)?;
         }
     }
     let es = py::get_or_none(vm, this, "edge_last_st")?;
-    let (exs, eys) = (fget(vm, this, "edge_xspeed")?, fget(vm, this, "edge_yspeed")?);
+    let (exs, eys) = (
+        fget(vm, this, "edge_xspeed")?,
+        fget(vm, this, "edge_yspeed")?,
+    );
     if bget(vm, this, "edge_size")? && !py::is_none(&es) && (exs != 0. || eys != 0.) {
         let dur = (st - py::f64_of(vm, &es)?).max(0.);
         for (a, s) in [(&xa, exs), (&ya, eys)] {
@@ -236,14 +321,27 @@ fn vp_update_offsets(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let ch = py::f64_of(vm, &args[2])?;
     let st = py::f64_of(vm, &args[3])?;
     let (a, b, c, d) = update_offsets(vm, &args[0], cw, ch, st)?;
-    Ok(vm.types.new_tuple(vec![Value::Int(a as i64), Value::Int(b as i64), Value::Float(c), Value::Float(d)]))
+    Ok(vm.types.new_tuple(vec![
+        Value::Int(a as i64),
+        Value::Int(b as i64),
+        Value::Float(c),
+        Value::Float(d),
+    ]))
 }
 
 fn child_room(vm: &mut Vm, this: &Value, w: f64, h: f64) -> PyResult<(f64, f64)> {
     let cw = py::get_or_none(vm, this, "child_width")?;
     let ch = py::get_or_none(vm, this, "child_height")?;
-    let cw = if ops::truthy(vm, &cw)? { py::f64_of(vm, &cw)? } else { w };
-    let ch = if ops::truthy(vm, &ch)? { py::f64_of(vm, &ch)? } else { h };
+    let cw = if ops::truthy(vm, &cw)? {
+        py::f64_of(vm, &cw)?
+    } else {
+        w
+    };
+    let ch = if ops::truthy(vm, &ch)? {
+        py::f64_of(vm, &ch)?
+    } else {
+        h
+    };
     Ok((cw, ch))
 }
 
@@ -251,7 +349,18 @@ fn finish(vm: &mut Vm, this: &Value, rv: &Value, w: f64, h: f64) -> PyResult<Val
     let rv = render::subsurface(vm, rv, [0., 0., w, h], true, false)?;
     if bget(vm, this, "arrowkeys")? || bget(vm, this, "draggable")? {
         let nmf = vm.types.new_str("NO_MOUSE_FOCUS");
-        vm.call_method(&rv, "add_focus", vec![this.clone(), nmf, Value::Int(0), Value::Int(0), Value::Float(w), Value::Float(h)])?;
+        vm.call_method(
+            &rv,
+            "add_focus",
+            vec![
+                this.clone(),
+                nmf,
+                Value::Int(0),
+                Value::Int(0),
+                Value::Float(w),
+                Value::Float(h),
+            ],
+        )?;
     }
     Ok(rv)
 }
@@ -266,7 +375,9 @@ fn vp_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let surf = render::render(vm, &child, cw, ch, st, at)?;
     let (sw, sh) = super::layout::size(&surf);
     let (cxo, cyo, w, h) = update_offsets(vm, this, sw, sh, st)?;
-    let off = vm.types.new_tuple(vec![Value::Int(cxo as i64), Value::Int(cyo as i64)]);
+    let off = vm
+        .types
+        .new_tuple(vec![Value::Int(cxo as i64), Value::Int(cyo as i64)]);
     py::set(vm, this, "offsets", vm.types.new_list(vec![off]))?;
     let rv = super::layout::new(vm, w, h);
     super::layout::blit(vm, &rv, &surf, cxo, cyo)?;
@@ -276,10 +387,16 @@ fn vp_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn check_edge_redraw(vm: &mut Vm, this: &Value, st: f64, reset_st: bool) -> PyResult<()> {
     let xa = py::get(vm, this, "xadjustment")?;
     let ya = py::get(vm, this, "yadjustment")?;
-    let (exs, eys) = (fget(vm, this, "edge_xspeed")?, fget(vm, this, "edge_yspeed")?);
+    let (exs, eys) = (
+        fget(vm, this, "edge_xspeed")?,
+        fget(vm, this, "edge_yspeed")?,
+    );
     let (xv, xr) = (fget(vm, &xa, "value")?, fget(vm, &xa, "range")?);
     let (yv, yr) = (fget(vm, &ya, "value")?, fget(vm, &ya, "range")?);
-    let redraw = (exs > 0. && xv < xr) || (exs < 0. && xv > 0.) || (eys > 0. && yv < yr) || (eys < 0. && yv > 0.);
+    let redraw = (exs > 0. && xv < xr)
+        || (exs < 0. && xv > 0.)
+        || (eys > 0. && yv < yr)
+        || (eys < 0. && yv > 0.);
     if redraw {
         render::redraw(vm, this, 0.);
         let es = py::get_or_none(vm, this, "edge_last_st")?;
@@ -294,7 +411,10 @@ fn check_edge_redraw(vm: &mut Vm, this: &Value, st: f64, reset_st: bool) -> PyRe
 
 fn vp_check_edge_redraw(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let st = py::f64_of(vm, &args[1])?;
-    let r = { let v = arg_or(args, kw, 2, "reset_st", Value::Bool(true)); ops::truthy(vm, &v)? };
+    let r = {
+        let v = arg_or(args, kw, 2, "reset_st", Value::Bool(true));
+        ops::truthy(vm, &v)?
+    };
     check_edge_redraw(vm, &args[0], st, r)?;
     Ok(Value::None)
 }
@@ -323,20 +443,55 @@ fn pair(vm: &mut Vm, v: &Value) -> PyResult<(f64, f64)> {
     Ok((py::f64_of(vm, &p[0])?, py::f64_of(vm, &p[1])?))
 }
 
-fn release_axis(vm: &mut Vm, a: &Value, old: f64, speed: f64, screen: &str, st: f64) -> PyResult<()> {
+fn release_axis(
+    vm: &mut Vm,
+    a: &Value,
+    old: f64,
+    speed: f64,
+    screen: &str,
+    st: f64,
+) -> PyResult<()> {
     let amp = py::config_f64(vm, "viewport_inertia_amplitude").unwrap_or(0.);
     let fs = py::get_or_none(vm, a, "force_step")?;
     if speed != 0. && amp != 0. && !ops::truthy(vm, &fs)? {
-        let tc = py::config_f64(vm, "viewport_inertia_time_constant").unwrap_or(0.)  ;
-        vm.call_method(a, "inertia", vec![Value::Float(amp * speed), Value::Float(tc), Value::Float(st)])?;
+        let tc = py::config_f64(vm, "viewport_inertia_time_constant").unwrap_or(0.);
+        vm.call_method(
+            a,
+            "inertia",
+            vec![
+                Value::Float(amp * speed),
+                Value::Float(tc),
+                Value::Float(st),
+            ],
+        )?;
     } else if fs.as_str() == Some("release") {
-        let v = py::method_kw(vm, a, "round_value", vec![Value::Float(old)], vec![("release".into(), Value::Bool(true))])?;
+        let v = py::method_kw(
+            vm,
+            a,
+            "round_value",
+            vec![Value::Float(old)],
+            vec![("release".into(), Value::Bool(true))],
+        )?;
         let v = py::f64_of(vm, &v)?;
         let step = fget(vm, a, "step")?;
         let sw = py::config_f64(vm, screen)?;
-        vm.call_method(a, "inertia", vec![Value::Float(v - old), Value::Float(step / (sw * 2.)), Value::Float(st)])?;
+        vm.call_method(
+            a,
+            "inertia",
+            vec![
+                Value::Float(v - old),
+                Value::Float(step / (sw * 2.)),
+                Value::Float(st),
+            ],
+        )?;
     } else {
-        let v = py::method_kw(vm, a, "round_value", vec![Value::Float(old)], vec![("release".into(), Value::Bool(true))])?;
+        let v = py::method_kw(
+            vm,
+            a,
+            "round_value",
+            vec![Value::Float(old)],
+            vec![("release".into(), Value::Bool(true))],
+        )?;
         vm.call_method(a, "change", vec![v])?;
     }
     Ok(())
@@ -364,9 +519,13 @@ fn vp_event(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let xa = py::get(vm, this, "xadjustment")?;
     let ya = py::get(vm, this, "yadjustment")?;
-    let draggable = bget(vm, this, "draggable")? && (fget(vm, &xa, "range")? != 0. || fget(vm, &ya, "range")? != 0.);
+    let draggable = bget(vm, this, "draggable")?
+        && (fget(vm, &xa, "range")? != 0. || fget(vm, &ya, "range")? != 0.);
     let mut grab = get_grab(vm)?;
-    let grab_draggable = !py::is_none(&grab) && { let v = py::get_opt(vm, &grab, "_draggable")?.unwrap_or(Value::Bool(false)); ops::truthy(vm, &v)? };
+    let grab_draggable = !py::is_none(&grab) && {
+        let v = py::get_opt(vm, &grab, "_draggable")?.unwrap_or(Value::Bool(false));
+        ops::truthy(vm, &v)?
+    };
     if grab_draggable && !py::same(&grab, this) {
         py::set(vm, this, "drag_position", Value::None)?;
     } else if draggable {
@@ -377,17 +536,35 @@ fn vp_event(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         py::set(vm, this, "drag_position", Value::None)?;
     }
     let dp = py::get_or_none(vm, this, "drag_position")?;
-    if inside && draggable && !py::is_none(&dp) && !py::same(&grab, this) && events::is_type(vm, &ev, events::MOUSEMOTION)? {
+    if inside
+        && draggable
+        && !py::is_none(&dp)
+        && !py::same(&grab, this)
+        && events::is_type(vm, &ev, events::MOUSEMOTION)?
+    {
         let (ox, oy) = pair(vm, &dp)?;
-        let grabbed = grab_draggable && { let f = vm.call_method(&grab, "is_focused", Vec::new())?; ops::truthy(vm, &f)? };
+        let grabbed = grab_draggable && {
+            let f = vm.call_method(&grab, "is_focused", Vec::new())?;
+            ops::truthy(vm, &f)?
+        };
         let radius = py::config_f64(vm, "viewport_drag_radius").unwrap_or(10.);
         if (ox - x).hypot(oy - y) >= radius && !grabbed {
             let ff = py::import_attr(vm, "renpy.display.focus", "force_focus")?;
             let rv = vm.call(&ff, vec![this.clone()], Vec::new())?;
             set_grab(vm, this.clone())?;
-            py::set(vm, this, "drag_position", vm.types.new_tuple(vec![Value::Float(x), Value::Float(y)]))?;
+            py::set(
+                vm,
+                this,
+                "drag_position",
+                vm.types.new_tuple(vec![Value::Float(x), Value::Float(y)]),
+            )?;
             py::set(vm, this, "drag_position_time", Value::Float(st))?;
-            py::set(vm, this, "drag_speed", vm.types.new_tuple(vec![Value::Float(0.), Value::Float(0.)]))?;
+            py::set(
+                vm,
+                this,
+                "drag_speed",
+                vm.types.new_tuple(vec![Value::Float(0.), Value::Float(0.)]),
+            )?;
             grab = this.clone();
             let _ = &grab;
             if !py::is_none(&rv) {
@@ -407,7 +584,10 @@ fn vp_event(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             let (osx, osy) = pair(vm, &ds)?;
             let (nsx, nsy) = (-dx / dt / 60., -dy / dt / 60.);
             let done = (dt / (1. / 60.)).min(1.);
-            let s = vm.types.new_tuple(vec![Value::Float(osx + done * (nsx - osx)), Value::Float(osy + done * (nsy - osy))]);
+            let s = vm.types.new_tuple(vec![
+                Value::Float(osx + done * (nsx - osx)),
+                Value::Float(osy + done * (nsy - osy)),
+            ]);
             py::set(vm, this, "drag_speed", s)?;
         }
         if map_name(vm, &ev, "viewport_drag_end")? {
@@ -420,11 +600,39 @@ fn vp_event(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             py::set(vm, this, "drag_position_time", Value::None)?;
             return Err(ignore_event(vm));
         }
-        let nx = py::method_kw(vm, &xa, "round_value", vec![Value::Float(old_x - dx)], vec![("release".into(), Value::Bool(false))])?;
-        let newx = if py::f64_of(vm, &nx)? == old_x { ox } else { vm.call_method(&xa, "change", vec![nx])?; x };
-        let ny = py::method_kw(vm, &ya, "round_value", vec![Value::Float(old_y - dy)], vec![("release".into(), Value::Bool(false))])?;
-        let newy = if py::f64_of(vm, &ny)? == old_y { oy } else { vm.call_method(&ya, "change", vec![ny])?; y };
-        py::set(vm, this, "drag_position", vm.types.new_tuple(vec![Value::Float(newx), Value::Float(newy)]))?;
+        let nx = py::method_kw(
+            vm,
+            &xa,
+            "round_value",
+            vec![Value::Float(old_x - dx)],
+            vec![("release".into(), Value::Bool(false))],
+        )?;
+        let newx = if py::f64_of(vm, &nx)? == old_x {
+            ox
+        } else {
+            vm.call_method(&xa, "change", vec![nx])?;
+            x
+        };
+        let ny = py::method_kw(
+            vm,
+            &ya,
+            "round_value",
+            vec![Value::Float(old_y - dy)],
+            vec![("release".into(), Value::Bool(false))],
+        )?;
+        let newy = if py::f64_of(vm, &ny)? == old_y {
+            oy
+        } else {
+            vm.call_method(&ya, "change", vec![ny])?;
+            y
+        };
+        py::set(
+            vm,
+            this,
+            "drag_position",
+            vm.types
+                .new_tuple(vec![Value::Float(newx), Value::Float(newy)]),
+        )?;
         py::set(vm, this, "drag_position_time", Value::Float(st))?;
     }
     let mw = py::get_or_none(vm, this, "mousewheel")?;
@@ -435,7 +643,11 @@ fn vp_event(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             Some("horizontal") => (&xa, false),
             _ => (&ya, false),
         };
-        let (v, r, step) = (fget(vm, adj, "value")?, fget(vm, adj, "range")?, fget(vm, adj, "step")?);
+        let (v, r, step) = (
+            fget(vm, adj, "value")?,
+            fget(vm, adj, "range")?,
+            fget(vm, adj, "step")?,
+        );
         if map_name(vm, &ev, "viewport_wheelup")? {
             if ch && v == 0. {
                 return Ok(Value::None);
@@ -450,9 +662,18 @@ fn vp_event(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         }
     }
     if bget(vm, this, "arrowkeys")? {
-        for (name, adj, dir) in [("viewport_leftarrow", &xa, -1.), ("viewport_rightarrow", &xa, 1.), ("viewport_uparrow", &ya, -1.), ("viewport_downarrow", &ya, 1.)] {
+        for (name, adj, dir) in [
+            ("viewport_leftarrow", &xa, -1.),
+            ("viewport_rightarrow", &xa, 1.),
+            ("viewport_uparrow", &ya, -1.),
+            ("viewport_downarrow", &ya, 1.),
+        ] {
             if map_name(vm, &ev, name)? {
-                let (v, r, step) = (fget(vm, adj, "value")?, fget(vm, adj, "range")?, fget(vm, adj, "step")?);
+                let (v, r, step) = (
+                    fget(vm, adj, "value")?,
+                    fget(vm, adj, "range")?,
+                    fget(vm, adj, "step")?,
+                );
                 if (dir < 0. && v == 0.) || (dir > 0. && v == r) {
                     return Ok(Value::None);
                 }
@@ -469,8 +690,17 @@ fn vp_event(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         }
     }
     let edge_size = fget(vm, this, "edge_size")?;
-    let ty = { let t = py::get_or_none(vm, &ev, "type")?; py::int(vm, &t).unwrap_or(0) };
-    if inside && edge_size != 0. && matches!(ty, events::MOUSEMOTION | events::MOUSEBUTTONDOWN | events::MOUSEBUTTONUP) {
+    let ty = {
+        let t = py::get_or_none(vm, &ev, "type")?;
+        py::int(vm, &t).unwrap_or(0)
+    };
+    if inside
+        && edge_size != 0.
+        && matches!(
+            ty,
+            events::MOUSEMOTION | events::MOUSEBUTTONDOWN | events::MOUSEBUTTONUP
+        )
+    {
         let speed = fget(vm, this, "edge_speed")?;
         let ef = py::get(vm, this, "edge_function")?;
         let xs = edge_speed(x, w - edge_size, w) - edge_speed(x, edge_size, 0.);
@@ -488,11 +718,27 @@ fn vp_event(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let mut ignore = false;
     if inside && draggable && map_name(vm, &ev, "viewport_drag_start")? {
-        py::set(vm, this, "drag_position", vm.types.new_tuple(vec![Value::Float(x), Value::Float(y)]))?;
+        py::set(
+            vm,
+            this,
+            "drag_position",
+            vm.types.new_tuple(vec![Value::Float(x), Value::Float(y)]),
+        )?;
         py::set(vm, this, "drag_position_time", Value::Float(st))?;
-        py::set(vm, this, "drag_speed", vm.types.new_tuple(vec![Value::Float(0.), Value::Float(0.)]))?;
+        py::set(
+            vm,
+            this,
+            "drag_speed",
+            vm.types.new_tuple(vec![Value::Float(0.), Value::Float(0.)]),
+        )?;
         for a in [&xa, &ya] {
-            py::method_kw(vm, a, "end_animation", Vec::new(), vec![("instantly".into(), Value::Bool(true))])?;
+            py::method_kw(
+                vm,
+                a,
+                "end_animation",
+                Vec::new(),
+                vec![("instantly".into(), Value::Bool(true))],
+            )?;
         }
         ignore = true;
     }
@@ -523,7 +769,13 @@ fn vp_set_yoffset(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn vpg_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let names = ["cols", "rows", "transpose", "style", "allow_underfull"];
-    let mut v = vec![Value::None, Value::None, Value::None, vm.types.new_str("vpgrid"), Value::None];
+    let mut v = vec![
+        Value::None,
+        Value::None,
+        Value::None,
+        vm.types.new_str("vpgrid"),
+        Value::None,
+    ];
     for (i, a) in args.iter().skip(1).enumerate().take(names.len()) {
         v[i] = a.clone();
     }
@@ -537,7 +789,10 @@ fn vpg_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     props.push(("style".into(), v[3].clone()));
     vp_init(vm, &[this.clone()], &props)?;
     if py::is_none(&v[0]) && py::is_none(&v[1]) {
-        return Err(py::error(vm, "A VPGrid must be given the rows or cols property."));
+        return Err(py::error(
+            vm,
+            "A VPGrid must be given the rows or cols property.",
+        ));
     }
     let mut transpose = v[2].clone();
     if !py::is_none(&v[1]) && py::is_none(&v[0]) && py::is_none(&transpose) {
@@ -564,7 +819,18 @@ fn vpg_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let lc = children.len() as i64;
     let gc = py::get_or_none(vm, this, "grid_cols")?;
     let gr = py::get_or_none(vm, this, "grid_rows")?;
-    let (mut cols, mut rows) = (if py::is_none(&gc) { 0 } else { py::int(vm, &gc)? }, if py::is_none(&gr) { 0 } else { py::int(vm, &gr)? });
+    let (mut cols, mut rows) = (
+        if py::is_none(&gc) {
+            0
+        } else {
+            py::int(vm, &gc)?
+        },
+        if py::is_none(&gr) {
+            0
+        } else {
+            py::int(vm, &gr)?
+        },
+    );
     if py::is_none(&gc) {
         cols = (lc + rows - 1) / rows.max(1);
     }
@@ -583,7 +849,10 @@ fn vpg_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (xs, ys) = if py::config_bool(vm, "relative_spacing").unwrap_or(false) {
         (compute_raw(vm, &xs, w)?, compute_raw(vm, &ys, h)?)
     } else {
-        (py::f64_of(vm, &xs).unwrap_or(0.), py::f64_of(vm, &ys).unwrap_or(0.))
+        (
+            py::f64_of(vm, &xs).unwrap_or(0.),
+            py::f64_of(vm, &ys).unwrap_or(0.),
+        )
     };
     let lm = style_f(vm, this, "left_margin", w)?;
     let rm = style_f(vm, this, "right_margin", w)?;
@@ -609,7 +878,11 @@ fn vpg_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let mut offsets = Vec::new();
     for (index, c) in children.iter().enumerate() {
         let index = index as i64;
-        let (gx, gy) = if transpose { (index / rows.max(1), index % rows.max(1)) } else { (index % cols.max(1), index / cols.max(1)) };
+        let (gx, gy) = if transpose {
+            (index / rows.max(1), index % rows.max(1))
+        } else {
+            (index % cols.max(1), index / cols.max(1))
+        };
         let x = gx as f64 * (cw + xs) + cxo;
         let y = gy as f64 * (ch + ys) + cyo;
         if x + cw < 0. || y + ch < 0. || x >= w || y >= h {
@@ -617,7 +890,18 @@ fn vpg_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             continue;
         }
         let surf = render::render(vm, c, cw, ch, st, at)?;
-        let pos = vm.call_method(c, "place", vec![rv.clone(), Value::Float(x), Value::Float(y), Value::Float(cw), Value::Float(ch), surf])?;
+        let pos = vm.call_method(
+            c,
+            "place",
+            vec![
+                rv.clone(),
+                Value::Float(x),
+                Value::Float(y),
+                Value::Float(cw),
+                Value::Float(ch),
+                surf,
+            ],
+        )?;
         offsets.push(pos);
     }
     py::set(vm, this, "offsets", vm.types.new_list(offsets))?;
@@ -633,7 +917,9 @@ fn vpg_add(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let gr = py::get_or_none(vm, this, "grid_rows")?;
     if !py::is_none(&gc) && !py::is_none(&gr) {
         let n = py::get_items(vm, this, "children")?.len() as i64;
-        if n > py::int(vm, &gc)? * py::int(vm, &gr)? && !py::config_bool(vm, "allow_unfull_vpgrids").unwrap_or(false) {
+        if n > py::int(vm, &gc)? * py::int(vm, &gr)?
+            && !py::config_bool(vm, "allow_unfull_vpgrids").unwrap_or(false)
+        {
             return Err(py::error(vm, "VPGrid overfull."));
         }
     }
@@ -646,8 +932,16 @@ fn vpg_per_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let children = py::get_items(vm, this, "children")?.len() as i64;
     let gc = py::get_or_none(vm, this, "grid_cols")?;
     let gr = py::get_or_none(vm, this, "grid_rows")?;
-    let given_v = if ops::truthy(vm, &gc)? { gc.clone() } else { gr.clone() };
-    let given = if py::is_none(&given_v) { 0 } else { py::int(vm, &given_v)? };
+    let given_v = if ops::truthy(vm, &gc)? {
+        gc.clone()
+    } else {
+        gr.clone()
+    };
+    let given = if py::is_none(&given_v) {
+        0
+    } else {
+        py::int(vm, &given_v)?
+    };
     let delta = if py::is_none(&gc) || py::is_none(&gr) {
         if given != 0 {
             let m = children % given;
@@ -664,7 +958,8 @@ fn vpg_per_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if py::config_bool(vm, "developer").unwrap_or(false) {
         let mut au = py::get_or_none(vm, this, "allow_underfull")?;
         if py::is_none(&au) {
-            let a = py::config_bool(vm, "allow_underfull_grids").unwrap_or(false) || py::config_bool(vm, "allow_unfull_vpgrids").unwrap_or(false);
+            let a = py::config_bool(vm, "allow_underfull_grids").unwrap_or(false)
+                || py::config_bool(vm, "allow_unfull_vpgrids").unwrap_or(false);
             au = Value::Bool(a);
         }
         if !ops::truthy(vm, &au)? {
@@ -684,23 +979,59 @@ fn vpg_per_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[("edgescroll_proportional", |_, a, _| Ok(a.first().cloned().unwrap_or(Value::None)))]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[("edgescroll_proportional", |_, a, _| {
+            Ok(a.first().cloned().unwrap_or(Value::None))
+        })],
+    );
     let container = py::import_attr(vm, "renpy.display.layout", "Container")?;
-    let vp = py::class(vm, MODULE, "Viewport", &[container], &[
-        ("after_upgrade", vp_after_upgrade), ("__init__", vp_init), ("per_interact", vp_per_interact), ("set_style_prefix", noop),
-        ("update_offsets", vp_update_offsets), ("render", vp_render), ("check_edge_redraw", vp_check_edge_redraw), ("event", vp_event),
-        ("set_xoffset", vp_set_xoffset), ("set_yoffset", vp_set_yoffset),
-    ], &[
-        ("__version__", Value::Int(5)), ("arrowkeys", Value::Bool(false)), ("pagekeys", Value::Bool(false)), ("_draggable", Value::Bool(true)),
-        ("drag_position_time", Value::None),
-    ])?;
+    let vp = py::class(
+        vm,
+        MODULE,
+        "Viewport",
+        &[container],
+        &[
+            ("after_upgrade", vp_after_upgrade),
+            ("__init__", vp_init),
+            ("per_interact", vp_per_interact),
+            ("set_style_prefix", noop),
+            ("update_offsets", vp_update_offsets),
+            ("render", vp_render),
+            ("check_edge_redraw", vp_check_edge_redraw),
+            ("event", vp_event),
+            ("set_xoffset", vp_set_xoffset),
+            ("set_yoffset", vp_set_yoffset),
+        ],
+        &[
+            ("__version__", Value::Int(5)),
+            ("arrowkeys", Value::Bool(false)),
+            ("pagekeys", Value::Bool(false)),
+            ("_draggable", Value::Bool(true)),
+            ("drag_position_time", Value::None),
+        ],
+    )?;
     let vpv = Value::Obj(vp);
     crysirror_python::modules::set(vm, &m, "Viewport", vpv.clone());
     let layout = py::import(vm, "renpy.display.layout")?;
     py::set(vm, &layout, "Viewport", vpv.clone())?;
-    let g = py::class(vm, MODULE, "VPGrid", &[vpv], &[("__init__", vpg_init), ("render", vpg_render), ("add", vpg_add), ("per_interact", vpg_per_interact)], &[
-        ("__version__", Value::Int(5)), ("allow_underfull", Value::None),
-    ])?;
+    let g = py::class(
+        vm,
+        MODULE,
+        "VPGrid",
+        &[vpv],
+        &[
+            ("__init__", vpg_init),
+            ("render", vpg_render),
+            ("add", vpg_add),
+            ("per_interact", vpg_per_interact),
+        ],
+        &[
+            ("__version__", Value::Int(5)),
+            ("allow_underfull", Value::None),
+        ],
+    )?;
     crysirror_python::modules::set(vm, &m, "VPGrid", Value::Obj(g));
     Ok(m)
 }

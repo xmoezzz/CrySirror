@@ -92,3 +92,27 @@ fixture: its host checks the prepared PCM bytes and captured channel gain.
 In the corpus, all 32 `0x30` records now parse. All 30,462 `0x1c` records
 still fail, including the first narration. No title, actual save, or
 commercial dialogue was run.
+
+## Linked area-5 dialogue, 2026-11-27
+
+`0x1c` now dispatches the seven-word plain-say form. The first four words
+select the actor, message ordinal, wait/voice gate and print mode. For the
+opening title path, the same client-scoped `defChara.rld` supplies the
+voice declarations before the first eligible line. Loading those declarations
+does not execute the scene or write the live character registers. Definitions
+already executed by the script take precedence.
+
+Eligible voices are prepared asynchronously through the shared PCM service.
+The printer resolves the authored family or the host's `default` font alias.
+It writes the current text plane and marker through the shared layers API,
+records the ordinal in the seen-bit bank, and keeps 256 history rows. The
+marker uses ten columns of the installed atlas and the nine pictures in the
+native sequence at RVA 0x1072dc. Its update loop at 0xae420 requests a 20 ms
+sleep; CrySirror advances seven sequence ticks per picture on its host clock.
+A fresh confirm edge releases the wait and removes only the marker. Existing
+UI capture and message-toolbar hit testing take precedence over a canvas click.
+
+GDI metrics, native word wrap and rich text, additional area profiles, placed
+character voice and lip animation, history display, and auto/skip remain outside
+this execution path. See the [dispatch verification](exhibit-dispatch-2026-11-27.md)
+for installed-media runs and operand counts.

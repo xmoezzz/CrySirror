@@ -14,13 +14,13 @@ CRYSIRROR_EXHIBIT_MIDORI_ROOT=/path/to/installed/midori cargo test --release \
 All 379 scripts parse structurally, consuming exactly 51,797 records:
 104,604 prefix bytes, 207,188 opcode-header bytes, 1,962,236 numeric-operand
 bytes and 2,191,362 string bytes. Leftovers: zero. The strings are not emitted
-by the audit. The top-level Rust parser admits 8,579 operand records and rejects
-43,218. Across 108 top-level `(opcode, flag, arity)` shapes, 26 are
-fully admitted, fourteen mixed and 68 rejected. At opcode granularity 21
-IDs admit all observed records, fourteen are mixed and 62 admit none.
+by the audit. The top-level Rust parser admits 8,831 operand records and rejects
+42,966. Across 108 top-level `(opcode, flag, arity)` shapes, 29 are
+fully admitted, fourteen mixed and 65 rejected. At opcode granularity 24
+IDs admit all observed records, fourteen are mixed and 59 admit none.
 Acceptance by this parser does not execute the opcode or validate its
 runtime effects. Five admitted 0x4a operand records fail the subsequent
-source geometry guard, leaving 8,574 code-and-resource candidates. The
+source geometry guard, leaving 8,826 code-and-resource candidates. The
 mode-9 and scene-pan subsets require previously published scoped background state;
 resource preflight alone does not establish reachable runtime coverage.
 
@@ -267,23 +267,58 @@ the compatibility wait. Voice, alternate effect extension/expression,
 positive-duration leave and omitted native fast-mode sources are not
 claimed. Shared worker and protocol unit checks are not gameplay.
 
-The integer table pair (`0x3d`, `0x3e`) admits its one definition and
-one lookup. The definition is a literal multiline, session-owned map:
-`createDB` at 0x11e4e0 clears the selected table, splits numeric values
-on comma/space/tab, zero-fills up to eight columns and replaces duplicate
-keys. It is not the separately named save-data database. `getDB` at
-0x108a10 and the lookup handler at 0x10ca20 preserve existing registers
-on a missing row. On a match, the eight source/destination pairs apply
-in order, invalid columns supply zero and negative destinations are
-ignored (LocalHolder at 0x36100). The observed register-key form is
-implemented without enabling other native expressions.
+The stock corpus uses one session-integer-table definition (`0x3d`) and
+one lookup (`0x3e`). `createDB` (0x11e4e0) replaces a table, splits
+columns on comma/space/tab, zero-fills missing columns and replaces
+duplicate keys. Its row reader (0xbf360) consumes at most eight columns
+with the resident integer conversion. `getDB` (0x108a10) leaves output
+registers alone on a missing row or table. On a match, the lookup
+handler (0x10ca20) processes eight output pairs in order. Out-of-range
+columns supply zero and negative destinations are ignored.
 
-`0xbd` admits 21/21 observed records, literal `2,1,id` for IDs 1–21.
-The plain-item branch in `cmdSetDoneFlag` at 0xb4880 both increments
-the bounded scene counter (0x4d560) and falls through to the independent
-message bit mark (0x4d510, bitmap helper 0x16e930). No range, clear or
-other-bank form is admitted. Unit coverage verifies saturation, negative
-and out-of-range IDs, and independent scene/message capacities.
+`0x3f` (0x10cb60) evaluates its 32-bit key and all eight value
+expressions against the same live register state, and hands the pairs
+to `setDB` (0x1088c0). Only an existing row can change. A negative
+column ends the list, a column above seven is skipped, and later writes
+replace earlier ones. Both lookup and mutation use the same expression
+evaluator as the 2011 action dispatcher. Unimplemented formula functions
+report their name. A synthetic RLD test defines a table, mutates a
+row with a key above 255, and reads back through the real dispatcher.
+The 379 scripts contain no `0x3f` records.
+
+The separate eight string databases use `0xd0`, `0xd1` and `0xd2`.
+`createStrDB` (0x11e730) replaces a table, retaining original line bytes
+under their integer keys. `cmdGetDBSub` (0x10cc90) reads up to eight
+column/destination pairs. Text destinations receive the raw CP932 bytes.
+Its numeric destination helper (0xc8400) supports local and system
+registers, bits, flags and the four experience banks. A missing key
+or column preserves its destination. The mutation handler (0x10ceb0)
+can create a row. It applies pairs in order and interprets a lone
+asterisk as an empty cell. When extending, 0x10cff6 computes the emitted
+field count as the maximum of the old count and the column plus one,
+including the key in that count. This can drop the rightmost write.
+The focused tests observe the resulting raw rows, text registers,
+normal and relative registers, flags and message bits. The 379 stock
+scripts have no top-level calls to this family. The dispatch accepts
+the one-string record format, with a numeric table argument for
+`0xd0` and CSV operands for `0xd1` and `0xd2`. Row keys use the
+same checked expression evaluator as the 2011 integer tables.
+
+`0xbd` admits all 21 stock records (`2,1,id` for IDs 1–21).
+The 2011 handler `cmdSetDoneFlag` (0xb4880) accepts dot-separated IDs and
+inclusive ranges for the CG, sound, scene and message-history banks. It can
+mark and clear each bank. Individual scene IDs also mark or clear the
+independently bounded message bit (0x4d510, bitmap helper 0x16e930).
+Parenthesized scene ranges only change counts. Frozen counter values
+(at or above 0x7fffff00) survive both operations. Service 39 (0x13d22f)
+operates on the first three banks and never changes message bits. Service
+33 increments a CG counter. Service 47 (0x13de5e) sets the live block
+title T1 from a raw string or another text register. A register read
+outside the allocated array uses T0 as in FCStrReg::item (0x1707f0).
+Service 48 sets S[S15+5] from its first argument independently of the
+declared count. None of these four service selectors occurs in the
+stock sample. The `midori_done` tests exercise all four services and
+the flag command through RLD dispatch.
 
 The shared DLT decoder does not implement the Midori VM animation family.
 `0x73` (one view-and-exit record) and `0x74` (112 start records) pass
@@ -446,6 +481,19 @@ unseen program formats, or the unexecuted outer definition callback.
 
 ### Authored control resource bindings (0xbf:338 / 0x0b:57)
 
+The two top-level sound registration methods share the same table at
+`RetouchSystem+0x600c`. Command `0xbe` (RVA `0xc9e90`) replaces one
+slot or, for slot -1, assigns a dotted ID list starting at zero.
+Command `0xea` (RVA `0xb4c60`) also sets the slot filename and an
+ordered list of ID/label choices. Each replacement seeds the primary
+ID with the resident's CP932 label 標準音. Additional IDs keep their
+first label (RVA `0x7ee00`). Option bit 0 includes the sixth field's
+list. Bit 1 resets every slot before checking the requested index.
+The reset (`0xa79f0`) clears flags and choices, sets every ID to -1,
+and retains each filename. Both opcodes are registered and absent
+from the 379-scenario static survey. The VM fixture exercises both
+and an intervening `action338` write through the same owner.
+
 The stock `def.rld+0x224` conditional plain system-SE definition
 (`action338`, 0x11b5d0) writes 19 consecutive IDs from slot zero.
 The dotted selector list goes through `UxLocalCtrl::setCtrlSound`
@@ -550,12 +598,13 @@ the rest of the block capture is implemented.
 
 ## Entry names and scoped RNF state
 
-`cmdExHIBIT` selector 30 (0x13b862) decodes two fields and copies a literal
-name into one of eight indexed entry slots. All four ordinary records now
-set that logical state; subsequent replacement is per slot. Native
-`saveEntryName` (0xb17e0) serializes the table in stable order with dotted
-slot/name pairs. The adapter can produce that representation but does not
-pretend to have installed a complete startup checkpoint. The detached T207 image above is not a script register write.
+`cmdExHIBIT` selector 30 (0x13b862) splits its declared number of
+arguments while preserving the remainder of the last argument. It
+copies field two verbatim, including CP932 bytes, into an entry slot
+from zero through seven. Other indices leave the table unchanged. All
+four stock calls have two arguments. `saveEntryName` (0xb17e0) emits
+the table in slot order as dotted slot/name pairs. The adapter preserves
+these bytes in its detached T207 capture.
 
 The action250 follow-up isolates the statically verified literal `F`,
 `R`, `S`, and `L` settings directives. Flags address the S15-relative
@@ -566,12 +615,30 @@ accepts complete literal-only programs, checks every target before any
 write, and rejects structural register changes or foreign directive
 families.
 
-This does not enable action250 in the VM. The two stock call sites need
-`settings.init.rnf` in ordinary mode; it has 32 active directives: seven
-`F`, nineteen `A`, and six `@`. The latter two include startup audio,
-message timing and controls whose semantics cannot safely be skipped for
-the flags. Unknown directives fail before any helper state change. All
-0xbf admitted counts are unchanged. Action345 is also still unsupported:
+Direct action 315 (RVA `0xb9c70`) and 316 (`0xb9cb0`) set the music
+and ambience masters S31/S32. Both halves get the first argument clamped
+to 0–256 (`0x5fef0`). Only a second argument of exactly one updates
+the selected active native voice, using the third argument for both
+channels (`0x60110`, `0x602f0`). The retained scene records the raw
+level. The live mixer applies signed 32-bit multiplication, division by
+256 and the resident table (`0x582c0`, `0x19a030`, `0x199ff0`).
+A negative corrected result leaves the current gain alone, while zero
+silences the channel. The RLD fixture checks both real playback owners,
+the shared PCM16 updates and the T204 capture. Neither direct action
+appears in the stock RLD set. RNF `@315` and `@316` have their own
+parameter conversion and live stereo refresh in action 250.
+
+Action 250 (0xcca70) remains gated. The stock `settings.init.rnf` has
+32 active directives. Its seven `F` writes accompany nineteen `A`
+calls to 167, 187, 252, 305, 324–327, 330 and 335 and six `@` calls
+to 304, 313 and 315–318. Separately `settings.user.rnf` contains
+three `A` calls to 312 and 314. The resident can invoke arbitrary
+nested actions for `A`, request modal confirmation before reading
+the file, adjust currently playing audio for `@`, and dispatch
+action 51 after processing. Stock defaults therefore also depend
+on font override, frame-selection and live mixer behavior.
+The independent literal-only helper validates writes before applying
+them. Action345 is also still unsupported:
 its native temporary table captures layer x/y/opacity and restarts selected
 move/fade channels, not a full scene snapshot.
 
@@ -710,15 +777,28 @@ and portions that have not been observed remain absent. This does not
 claim the original prelude's initial socket, synthetic numbered
 placement, or one-shot restore/printing of a saved socket.
 
-The independent T7 serializer (0xdab80) uses the actual
-`LocalPosCorrector`. Successful `liteExec` activation first empties the
-list and explicitly clears both global offsets (0x145fe0). The VM
-implements that activation and the native 0x6c reset and `-12345` global
-XY-set modes (0x10fa60 / 0xbf9c0). With no per-actor correction rows,
-its detached register bytes are `0,0,x,y`. The stock 2011 scripts do
-not contain 0x6c, so this does not increase sample admission numbers;
-the reset/change/serialization contract is tested with synthetic RLD
-commands. Per-actor correction rows, removal, movement application,
-scenario transfer, and the complete start block are still unsupported.
-No registers are written by these checkpoint producers and no
-original game, device or save is used.
+The independent T7 serializer (0xdab80) uses a script-local
+`LocalPosCorrector`. Scenario entry clears the global offsets and list
+(0x145fe0). `0x6c` mode 1 sets either the global offset or the row keyed by
+the exact actor/pose pair, including the -12345 pose wildcard as a distinct
+key. Updating retains insertion order (0xda330, 0x195220). Mode 2 removes
+the matching pair, and mode 0 clears both list and global offsets. The T7
+header contains list size, zero and the two global offsets. Each mode-1
+row emits seven words using 0xa7d10. Mode 3 returns immediately for an
+empty list, including a global-only list (0x1005c0). A populated list
+requires the entered-character manager and its live `moveRel` operation,
+which the adapter still rejects. Other mode numbers return directly in
+the resident switch. These paths have synthetic RLD tests and no calls
+among the 379 scripts.
+
+## 2026-11-26 selection and view definitions
+
+The two stock 0x2e/0x21 definitions are at def.rld+0x15cf and +0x1a77.
+Their addition accounts for the two new parser admissions. All 82 outer
+definition records consume the installed file (0x2104 bytes), including
+the nested handoff at +0x20f3. The additional 0x29/2a/2b definitions,
+three native service selectors (23/36/44), and eight additional flag
+and ruby-line action selectors have synthetic state tests; none occurs
+in this 379-file sample. In the stock nested counts 0x0b admits seven
+of 20 records and 0xbf admits 373 of 388. The earlier startup capture
+guard and deferred stock action250 remain in place.

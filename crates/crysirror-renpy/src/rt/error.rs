@@ -8,23 +8,40 @@
 //! files. There is no log directory, so `traceback.txt` and `errors.txt`
 //! are kept as in-memory logs (`log::lines(vm, "traceback")`) and the
 //! report is sent to the owner as a diagnostic.
-use super::{log, py, state};
+//!
+//! Ren'Py 8.4 replaced both modules' report API; releases from 8.4 on
+//! add and use the `rt::error84` natives instead.
+use super::{error84, log, py, state};
 use crysirror_python::{ObjRef, PyErr, PyResult, Value, Vm, builtins::Kw, ops};
 use std::rc::Rc;
 
 const ERROR: &str = "renpy.error";
 const DISPLAY_ERROR: &str = "renpy.display.error";
 
+/// The lines of a game or common file by its traceback name, without
+/// line endings (what `linecache` serves).
+pub(super) fn file_lines(vm: &Vm, filename: &str) -> Option<Vec<String>> {
+    let rt = state::try_rt(vm)?;
+    let f = filename.replace('\\', "/");
+    let rel = f.strip_prefix("game/").unwrap_or(&f);
+    let data = rt.files.read(rel).or_else(|| {
+        rt.files.common_read(
+            f.strip_prefix("renpy/common/")
+                .or(f.strip_prefix("common/"))
+                .unwrap_or(rel),
+        )
+    })?;
+    let text = String::from_utf8_lossy(&data);
+    Some(text.lines().map(str::to_owned).collect())
+}
+
 /// Line `n` (1-based) of a game file, stripped as `linecache` lines are
 /// by `traceback.format_list`.
 fn source_line(vm: &Vm, filename: &str, n: i64) -> String {
-    let Some(rt) = state::try_rt(vm) else { return String::new() };
-    let f = filename.replace('\\', "/");
-    let rel = f.strip_prefix("game/").unwrap_or(&f);
-    let data = rt.files.read(rel).or_else(|| rt.files.common_read(f.strip_prefix("renpy/common/").or(f.strip_prefix("common/")).unwrap_or(rel)));
-    let Some(data) = data else { return String::new() };
-    let text = String::from_utf8_lossy(&data);
-    text.lines().nth((n.max(1) - 1) as usize).unwrap_or("").trim().to_owned()
+    file_lines(vm, filename)
+        .and_then(|l| l.into_iter().nth((n.max(1) - 1) as usize))
+        .map(|l| l.trim().to_owned())
+        .unwrap_or_default()
 }
 
 /// `traceback_list(tb)` over the interpreter's entry list.
@@ -47,8 +64,13 @@ fn traceback_list(vm: &mut Vm, tb: &Value) -> PyResult<Vec<(String, i64, String,
     Ok(rv)
 }
 
-fn filter_traceback_list(tl: &[(String, i64, String, String)]) -> Vec<(String, i64, String, String)> {
-    tl.iter().filter(|t| t.0.ends_with(".rpy") && !t.0.replace('\\', "/").starts_with("common/")).cloned().collect()
+fn filter_traceback_list(
+    tl: &[(String, i64, String, String)],
+) -> Vec<(String, i64, String, String)> {
+    tl.iter()
+        .filter(|t| t.0.ends_with(".rpy") && !t.0.replace('\\', "/").starts_with("common/"))
+        .cloned()
+        .collect()
 }
 
 /// `traceback.format_list`.
@@ -98,7 +120,11 @@ fn f_report_exception(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     full.push_str(&format!("{}\n", py::string(vm, &v)?));
     let gname = py::config(vm, "name")?;
     let gver = py::config(vm, "version")?;
-    full.push_str(&format!("{} {}\n", ops::str(vm, &gname)?, ops::str(vm, &gver)?));
+    full.push_str(&format!(
+        "{} {}\n",
+        ops::str(vm, &gname)?,
+        ops::str(vm, &gver)?
+    ));
     full.push_str(&format!("{}\n", ctime(vm)?));
     let file = format!(
         "I'm sorry, but an uncaught exception occurred.\n\n{simple}\n-- Full Traceback ------------------------------------------------------------\n\n{full}"
@@ -155,16 +181,46 @@ fn noop(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn init_error(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, ERROR, &[("report_exception", f_report_exception), ("open_error_file", f_open_error_file)]);
-    let ef = py::class(vm, ERROR, "_ErrorFile", &[], &[("__init__", ef_init), ("write", ef_write), ("__enter__", ef_enter), ("__exit__", ef_close), ("close", ef_close), ("flush", noop)], &[])?;
+    let m = crysirror_python::modules::module_with(
+        vm,
+        ERROR,
+        &[
+            ("report_exception", f_report_exception),
+            ("open_error_file", f_open_error_file),
+        ],
+    );
+    let ef = py::class(
+        vm,
+        ERROR,
+        "_ErrorFile",
+        &[],
+        &[
+            ("__init__", ef_init),
+            ("write", ef_write),
+            ("__enter__", ef_enter),
+            ("__exit__", ef_close),
+            ("close", ef_close),
+            ("flush", noop),
+        ],
+        &[],
+    )?;
     crysirror_python::modules::set(vm, &m, "_ErrorFile", Value::Obj(ef));
     crysirror_python::modules::set(vm, &m, "FSENCODING", py::s(vm, "utf-8"));
+    if error84::active(vm) {
+        error84::install_error(vm, &m)?;
+    }
     Ok(m)
 }
 
 // renpy.display.error ------------------------------------------------------------
 
-fn call_attr(vm: &mut Vm, module: &str, name: &str, args: Vec<Value>, kwargs: Vec<(Rc<str>, Value)>) -> PyResult<Value> {
+fn call_attr(
+    vm: &mut Vm,
+    module: &str,
+    name: &str,
+    args: Vec<Value>,
+    kwargs: Vec<(Rc<str>, Value)>,
+) -> PyResult<Value> {
     let f = py::import_attr(vm, module, name)?;
     vm.call(&f, args, kwargs)
 }
@@ -180,11 +236,23 @@ fn f_call_exception_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Valu
         for layer in py::get_items(vm, &config, "layers")? {
             py::method(vm, &sl, "clear", vec![layer])?;
         }
-        let mut kwargs: Vec<(Rc<str>, Value)> = kw.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut kwargs: Vec<(Rc<str>, Value)> =
+            kw.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         kwargs.push((Rc::from("_transient"), Value::Bool(true)));
-        call_attr(vm, "renpy.exports", "show_screen", vec![args[0].clone()], kwargs)?;
+        call_attr(
+            vm,
+            "renpy.exports",
+            "show_screen",
+            vec![args[0].clone()],
+            kwargs,
+        )?;
         let k = |s: &str, v: Value| (Rc::<str>::from(s), v);
-        let kwargs = vec![k("mouse", py::s(vm, "screen")), k("type", py::s(vm, "screen")), k("suppress_overlay", Value::Bool(true)), k("suppress_underlay", Value::Bool(true))];
+        let kwargs = vec![
+            k("mouse", py::s(vm, "screen")),
+            k("type", py::s(vm, "screen")),
+            k("suppress_overlay", Value::Bool(true)),
+            k("suppress_underlay", Value::Bool(true)),
+        ];
         call_attr(vm, "renpy.ui", "interact", Vec::new(), kwargs)
     })();
     py::set(vm, &config, "quit_action", old_quit)?;
@@ -192,7 +260,13 @@ fn f_call_exception_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Valu
 }
 
 fn f_rollback_action(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
-    call_attr(vm, "renpy.exports", "rollback", Vec::new(), vec![(Rc::from("force"), Value::Bool(true))])
+    call_attr(
+        vm,
+        "renpy.exports",
+        "rollback",
+        Vec::new(),
+        vec![(Rc::from("force"), Value::Bool(true))],
+    )
 }
 
 fn f_init_display(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
@@ -211,7 +285,13 @@ fn f_init_display(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     }
     let interface = py::import_attr(vm, "renpy.game", "interface")?;
     if !py::truthy(vm, &interface)? {
-        call_attr(vm, "renpy.display.core", "Interface", Vec::new(), Vec::new())?;
+        call_attr(
+            vm,
+            "renpy.display.core",
+            "Interface",
+            Vec::new(),
+            Vec::new(),
+        )?;
         call_attr(vm, "renpy.loader", "index_archives", Vec::new(), Vec::new())?;
         let cache = py::import_attr(vm, "renpy.display.im", "cache")?;
         py::method(vm, &cache, "init", Vec::new())?;
@@ -223,7 +303,13 @@ fn f_init_display(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn f_error_dump(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
-    call_attr(vm, "renpy.dump", "dump", vec![Value::Bool(true)], Vec::new())
+    call_attr(
+        vm,
+        "renpy.dump",
+        "dump",
+        vec![Value::Bool(true)],
+        Vec::new(),
+    )
 }
 
 fn set_handled(vm: &mut Vm) -> PyResult<()> {
@@ -287,14 +373,32 @@ fn f_report_exception_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Va
                 rollback = py::import_attr(vm, DISPLAY_ERROR, "rollback_action")?;
             }
             let l = py::s(vm, "_save_reload_game");
-            reload = call_attr(vm, "renpy.exports", "curried_call_in_new_context", vec![l], Vec::new())?;
+            reload = call_attr(
+                vm,
+                "renpy.exports",
+                "curried_call_in_new_context",
+                vec![l],
+                Vec::new(),
+            )?;
         } else {
             reload = py::import_attr(vm, "renpy.exports", "utter_restart")?;
         }
-        let top = call_attr(vm, "renpy.game", "context", vec![Value::Int(-1)], Vec::new())?;
+        let top = call_attr(
+            vm,
+            "renpy.game",
+            "context",
+            vec![Value::Int(-1)],
+            Vec::new(),
+        )?;
         let nn = py::get(vm, &top, "next_node")?;
         if !py::is_none(&nn) {
-            ignore = call_attr(vm, "renpy.ui", "returns", vec![Value::Bool(false)], Vec::new())?;
+            ignore = call_attr(
+                vm,
+                "renpy.ui",
+                "returns",
+                vec![Value::Bool(false)],
+                Vec::new(),
+            )?;
         }
         Ok(())
     })();
@@ -310,7 +414,13 @@ fn f_report_exception_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Va
             k("traceback_fn", traceback_fn),
         ];
         let name = py::s(vm, "_exception");
-        call_attr(vm, "renpy.game", "invoke_in_new_context", vec![screen, name], kwargs)?;
+        call_attr(
+            vm,
+            "renpy.game",
+            "invoke_in_new_context",
+            vec![screen, name],
+            kwargs,
+        )?;
         let im = py::import(vm, "renpy.display.im")?;
         let ignored = py::get(vm, &im, "ignored_images")?;
         let to_ignore = py::get(vm, &im, "images_to_ignore")?;
@@ -322,7 +432,12 @@ fn f_report_exception_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Va
         }
         let config = py::import(vm, "renpy.config")?;
         py::set(vm, &config, "raise_image_exceptions", Value::Bool(false))?;
-        py::set(vm, &config, "raise_image_load_exceptions", Value::Bool(false))?;
+        py::set(
+            vm,
+            &config,
+            "raise_image_load_exceptions",
+            Value::Bool(false),
+        )?;
         Ok(())
     })();
     match r {
@@ -350,8 +465,18 @@ fn f_report_parse_errors(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value>
     let screen = py::import_attr(vm, DISPLAY_ERROR, "call_exception_screen")?;
     let k = |s: &str, v: Value| (Rc::<str>::from(s), v);
     let name = py::s(vm, "_parse_errors");
-    let kwargs = vec![k("reload_action", reload), k("errors", errors), k("error_fn", error_fn)];
-    match call_attr(vm, "renpy.game", "invoke_in_new_context", vec![screen, name], kwargs) {
+    let kwargs = vec![
+        k("reload_action", reload),
+        k("errors", errors),
+        k("error_fn", error_fn),
+    ];
+    match call_attr(
+        vm,
+        "renpy.game",
+        "invoke_in_new_context",
+        vec![screen, name],
+        kwargs,
+    ) {
         Ok(_) => Ok(Value::None),
         Err(e) if is_control(vm, &e) => Err(e),
         Err(e) => {
@@ -362,15 +487,22 @@ fn f_report_parse_errors(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value>
 }
 
 fn init_display_error(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, DISPLAY_ERROR, &[
-        ("call_exception_screen", f_call_exception_screen),
-        ("rollback_action", f_rollback_action),
-        ("init_display", f_init_display),
-        ("error_dump", f_error_dump),
-        ("report_exception", f_report_exception_screen),
-        ("report_parse_errors", f_report_parse_errors),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        DISPLAY_ERROR,
+        &[
+            ("call_exception_screen", f_call_exception_screen),
+            ("rollback_action", f_rollback_action),
+            ("init_display", f_init_display),
+            ("error_dump", f_error_dump),
+            ("report_exception", f_report_exception_screen),
+            ("report_parse_errors", f_report_parse_errors),
+        ],
+    );
     crysirror_python::modules::set(vm, &m, "error_handled", Value::Bool(false));
+    if error84::active(vm) {
+        error84::install_display_error(vm, &m);
+    }
     Ok(m)
 }
 

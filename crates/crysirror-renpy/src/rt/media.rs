@@ -76,7 +76,11 @@ fn t_tick(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let m = py::import(vm, TTS)?;
     py::set(vm, &m, "last_spoken", s.clone())?;
     let f = cfg(vm, "tts_function");
-    let f = if py::is_none(&f) { py::import_attr(vm, TTS, "default_tts_function")? } else { f };
+    let f = if py::is_none(&f) {
+        py::import_attr(vm, TTS, "default_tts_function")?
+    } else {
+        f
+    };
     let _ = vm.call(&f, vec![s], Vec::new());
     Ok(Value::None)
 }
@@ -130,7 +134,11 @@ fn title(s: &str) -> String {
     let mut start = true;
     for c in s.chars() {
         if c.is_alphabetic() {
-            if start { out.extend(c.to_uppercase()) } else { out.extend(c.to_lowercase()) }
+            if start {
+                out.extend(c.to_uppercase())
+            } else {
+                out.extend(c.to_lowercase())
+            }
             start = false;
         } else {
             out.push(c);
@@ -247,7 +255,12 @@ fn tts_module(vm: &mut Vm) -> PyResult<ObjRef> {
 // ---------------------------------------------------------------------------
 // Video.
 
-fn music(vm: &mut Vm, name: &str, args: Vec<Value>, kw: Vec<(std::rc::Rc<str>, Value)>) -> PyResult<Value> {
+fn music(
+    vm: &mut Vm,
+    name: &str,
+    args: Vec<Value>,
+    kw: Vec<(std::rc::Rc<str>, Value)>,
+) -> PyResult<Value> {
     let f = py::import_attr(vm, "renpy.audio.music", name)?;
     vm.call(&f, args, kw)
 }
@@ -262,7 +275,12 @@ fn vset(vm: &mut Vm, n: &str, v: Value) -> PyResult<()> {
 }
 
 fn playing_on(vm: &mut Vm, channel: &Value) -> PyResult<bool> {
-    let r = music(vm, "get_playing", vec![], vec![("channel".into(), channel.clone())])?;
+    let r = music(
+        vm,
+        "get_playing",
+        vec![],
+        vec![("channel".into(), channel.clone())],
+    )?;
     py::truthy(vm, &r)
 }
 
@@ -272,7 +290,12 @@ fn v_movie_stop(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !py::truthy(vm, &fs)? && py::truthy(vm, &only)? {
         return Ok(Value::None);
     }
-    music(vm, "stop", vec![], vec![("channel".into(), py::s(vm, "movie"))])?;
+    music(
+        vm,
+        "stop",
+        vec![],
+        vec![("channel".into(), py::s(vm, "movie"))],
+    )?;
     Ok(Value::None)
 }
 
@@ -293,7 +316,15 @@ fn v_movie_start(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         (vec![args[0].clone(); (loops + 1).max(1) as usize], false)
     };
     let l = vm.types.new_list(files);
-    music(vm, "play", vec![l], vec![("channel".into(), py::s(vm, "movie")), ("loop".into(), Value::Bool(loop_))])?;
+    music(
+        vm,
+        "play",
+        vec![l],
+        vec![
+            ("channel".into(), py::s(vm, "movie")),
+            ("loop".into(), Value::Bool(loop_)),
+        ],
+    )?;
     Ok(Value::None)
 }
 
@@ -340,7 +371,10 @@ fn frame_size(vm: &mut Vm, channel: &Value) -> PyResult<Option<[u32; 2]>> {
         return Ok(None);
     }
     let n = py::int(vm, &n)?.to_string();
-    Ok(super::link::audio_status(vm).into_iter().find(|a| a.channel == n).and_then(|a| a.video_size))
+    Ok(super::link::audio_status(vm)
+        .into_iter()
+        .find(|a| a.channel == n)
+        .and_then(|a| a.video_size))
 }
 
 /// `get_movie_texture(channel, mask_channel=None, side_mask=False,
@@ -356,7 +390,17 @@ fn v_get_movie_texture(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let name = py::string(vm, &channel)?;
     let tex = vget(vm, "texture")?;
     let new = !ops::contains(vm, &tex, &channel)?;
-    let t = render::new_texture(vm, Texture { kind: TexKind::Video(name), width: w as f64, height: h as f64, crop: None, full: None, opaque: true });
+    let t = render::new_texture(
+        vm,
+        Texture {
+            kind: TexKind::Video(name),
+            width: w as f64,
+            height: h as f64,
+            crop: None,
+            full: None,
+            opaque: true,
+        },
+    );
     ops::setitem(vm, &tex, channel, t.clone())?;
     Ok(vm.types.new_tuple(vec![t, Value::Bool(new)]))
 }
@@ -373,17 +417,40 @@ fn v_resize_movie(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let ratio = (width / tw).min(height / th);
     let rc = py::import_attr(vm, "renpy.display.render", "Render")?;
-    let rv = vm.call(&rc, vec![Value::Float(width), Value::Float(height)], Vec::new())?;
+    let rv = vm.call(
+        &rc,
+        vec![Value::Float(width), Value::Float(height)],
+        Vec::new(),
+    )?;
     let mc = py::import_attr(vm, "renpy.display.matrix", "Matrix")?;
     let scale = py::get(vm, &mc, "scale")?;
-    let m = vm.call(&scale, vec![Value::Float(ratio), Value::Float(ratio), Value::Float(1.0)], Vec::new())?;
-    let inv = vm.call(&scale, vec![Value::Float(1.0 / ratio), Value::Float(1.0 / ratio), Value::Float(1.0)], Vec::new())?;
-    let sub = vm.call(&rc, vec![Value::Float(tw * ratio), Value::Float(th * ratio)], Vec::new())?;
+    let m = vm.call(
+        &scale,
+        vec![Value::Float(ratio), Value::Float(ratio), Value::Float(1.0)],
+        Vec::new(),
+    )?;
+    let inv = vm.call(
+        &scale,
+        vec![
+            Value::Float(1.0 / ratio),
+            Value::Float(1.0 / ratio),
+            Value::Float(1.0),
+        ],
+        Vec::new(),
+    )?;
+    let sub = vm.call(
+        &rc,
+        vec![Value::Float(tw * ratio), Value::Float(th * ratio)],
+        Vec::new(),
+    )?;
     py::set(vm, &sub, "forward", inv)?;
     py::set(vm, &sub, "reverse", m)?;
     let pos = vm.types.new_tuple(vec![Value::Int(0), Value::Int(0)]);
     vm.call_method(&sub, "blit", vec![r.clone(), pos])?;
-    let pos = vm.types.new_tuple(vec![Value::Float((width - tw * ratio) / 2.0), Value::Float((height - th * ratio) / 2.0)]);
+    let pos = vm.types.new_tuple(vec![
+        Value::Float((width - tw * ratio) / 2.0),
+        Value::Float((height - th * ratio) / 2.0),
+    ]);
     vm.call_method(&rv, "blit", vec![sub, pos])?;
     Ok(rv)
 }
@@ -405,18 +472,36 @@ fn v_render_movie(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn v_default_play_callback(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let new = &args[1];
-    let (play, channel, loop_) = (py::get(vm, new, "_play")?, py::get(vm, new, "channel")?, py::get(vm, new, "loop")?);
-    music(vm, "play", vec![play], vec![("channel".into(), channel), ("loop".into(), loop_.clone())])?;
+    let (play, channel, loop_) = (
+        py::get(vm, new, "_play")?,
+        py::get(vm, new, "channel")?,
+        py::get(vm, new, "loop")?,
+    );
+    music(
+        vm,
+        "play",
+        vec![play],
+        vec![("channel".into(), channel), ("loop".into(), loop_.clone())],
+    )?;
     let mask = py::get(vm, new, "mask")?;
     if py::truthy(vm, &mask)? {
         let mc = py::get(vm, new, "mask_channel")?;
-        music(vm, "play", vec![mask], vec![("channel".into(), mc), ("loop".into(), loop_)])?;
+        music(
+            vm,
+            "play",
+            vec![mask],
+            vec![("channel".into(), mc), ("loop".into(), loop_)],
+        )?;
     }
     Ok(Value::None)
 }
 
 fn any_loadable(vm: &mut Vm, name: &Value) -> PyResult<bool> {
-    let names = if name.as_str().is_some() { vec![name.clone()] } else { py::items(vm, name)? };
+    let names = if name.as_str().is_some() {
+        vec![name.clone()]
+    } else {
+        py::items(vm, name)?
+    };
     for n in names {
         let s = py::string(vm, &n)?;
         let s = match s.strip_prefix('<').and_then(|r| r.split_once('>')) {
@@ -445,13 +530,18 @@ fn ensure_channel(vm: &mut Vm, this: &Value, name: &Value) -> PyResult<()> {
     let mask = py::get(vm, this, "mask")?;
     let framedrop = py::truthy(vm, &mask)?;
     let mixer = cfg(vm, "movie_mixer");
-    music(vm, "register_channel", vec![name.clone(), mixer], vec![
-        ("loop".into(), Value::Bool(true)),
-        ("stop_on_mute".into(), Value::Bool(false)),
-        ("movie".into(), Value::Bool(true)),
-        ("framedrop".into(), Value::Bool(framedrop)),
-        ("force".into(), Value::Bool(true)),
-    ])?;
+    music(
+        vm,
+        "register_channel",
+        vec![name.clone(), mixer],
+        vec![
+            ("loop".into(), Value::Bool(true)),
+            ("stop_on_mute".into(), Value::Bool(false)),
+            ("movie".into(), Value::Bool(true)),
+            ("framedrop".into(), Value::Bool(framedrop)),
+            ("force".into(), Value::Bool(true)),
+        ],
+    )?;
     Ok(())
 }
 
@@ -479,16 +569,42 @@ fn next_serial(vm: &mut Vm) -> PyResult<i64> {
     Ok(n)
 }
 
-const MOVIE_ARGS: &[&str] = &["fps", "size", "channel", "play", "mask", "mask_channel", "image", "play_callback", "side_mask", "loop", "start_image", "group", "keep_last_frame"];
+const MOVIE_ARGS: &[&str] = &[
+    "fps",
+    "size",
+    "channel",
+    "play",
+    "mask",
+    "mask_channel",
+    "image",
+    "play_callback",
+    "side_mask",
+    "loop",
+    "start_image",
+    "group",
+    "keep_last_frame",
+];
 
 fn m_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let v: Vec<Value> = MOVIE_ARGS.iter().enumerate().map(|(i, n)| arg_or(&args[1..], kw, i, n, Value::None)).collect();
-    let props: Vec<_> = kw.iter().filter(|(k, _)| !MOVIE_ARGS.contains(&&**k)).cloned().collect();
+    let v: Vec<Value> = MOVIE_ARGS
+        .iter()
+        .enumerate()
+        .map(|(i, n)| arg_or(&args[1..], kw, i, n, Value::None))
+        .collect();
+    let props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !MOVIE_ARGS.contains(&&**k))
+        .cloned()
+        .collect();
     let base = py::import_attr(vm, "renpy.display.displayable", "Displayable")?;
     let init = py::get(vm, &base, "__init__")?;
     vm.call(&init, vec![this.clone()], props)?;
-    let mut channel = if py::is_none(&v[2]) { py::s(vm, "movie") } else { v[2].clone() };
+    let mut channel = if py::is_none(&v[2]) {
+        py::s(vm, "movie")
+    } else {
+        v[2].clone()
+    };
     let play = v[3].clone();
     let has_play = py::truthy(vm, &play)?;
     if channel.as_str() == Some("movie") && has_play {
@@ -505,7 +621,16 @@ fn m_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     py::set(vm, this, "size", v[1].clone())?;
     py::set(vm, this, "channel", channel.clone())?;
-    py::set(vm, this, "loop", if py::is_none(&v[9]) { Value::Bool(true) } else { v[9].clone() })?;
+    py::set(
+        vm,
+        this,
+        "loop",
+        if py::is_none(&v[9]) {
+            Value::Bool(true)
+        } else {
+            v[9].clone()
+        },
+    )?;
     py::set(vm, this, "_original_play", play.clone())?;
     if !py::is_none(&play) && any_loadable(vm, &play)? {
         py::set(vm, this, "_play", play)?;
@@ -553,7 +678,11 @@ fn m_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn m_after_setstate(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let op = py::get(vm, this, "_original_play")?;
-    let play = if py::is_none(&op) { py::get(vm, this, "_play")? } else { op };
+    let play = if py::is_none(&op) {
+        py::get(vm, this, "_play")?
+    } else {
+        op
+    };
     if !py::is_none(&play) && any_loadable(vm, &play)? {
         py::set(vm, this, "_original_play", play.clone())?;
         py::set(vm, this, "_play", play)?;
@@ -610,9 +739,20 @@ fn m_set_transform_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> 
     Ok(Value::None)
 }
 
-fn sub_render(vm: &mut Vm, d: &Value, w: &Value, h: &Value, st: &Value, at: &Value) -> PyResult<Value> {
+fn sub_render(
+    vm: &mut Vm,
+    d: &Value,
+    w: &Value,
+    h: &Value,
+    st: &Value,
+    at: &Value,
+) -> PyResult<Value> {
     let render = py::import_attr(vm, "renpy.display.render", "render")?;
-    let surf = vm.call(&render, vec![d.clone(), w.clone(), h.clone(), st.clone(), at.clone()], Vec::new())?;
+    let surf = vm.call(
+        &render,
+        vec![d.clone(), w.clone(), h.clone(), st.clone(), at.clone()],
+        Vec::new(),
+    )?;
     let sz = vm.call_method(&surf, "get_size", Vec::new())?;
     let s = py::items(vm, &sz)?;
     let rc = py::import_attr(vm, "renpy.display.render", "Render")?;
@@ -624,7 +764,12 @@ fn sub_render(vm: &mut Vm, d: &Value, w: &Value, h: &Value, st: &Value, at: &Val
 
 fn m_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let (w, h, st, at) = (args[1].clone(), args[2].clone(), args[3].clone(), args[4].clone());
+    let (w, h, st, at) = (
+        args[1].clone(),
+        args[2].clone(),
+        args[3].clone(),
+        args[4].clone(),
+    );
     ensure_channels(vm, this)?;
     let channel = py::get(vm, this, "channel")?;
     let play = py::get(vm, this, "_play")?;
@@ -688,7 +833,11 @@ fn m_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn m_play(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (this, old) = (&args[0], &args[1]);
     ensure_channels(vm, this)?;
-    let old_play = if py::is_none(old) { Value::None } else { py::get(vm, old, "_play")? };
+    let old_play = if py::is_none(old) {
+        Value::None
+    } else {
+        py::get(vm, old, "_play")?
+    };
     let play = py::get(vm, this, "_play")?;
     if py::is_none(&play) && py::is_none(&old_play) {
         return Ok(Value::None);
@@ -704,11 +853,21 @@ fn m_play(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             }
         } else {
             let ch = py::get(vm, this, "channel")?;
-            music(vm, "stop", vec![], vec![("channel".into(), ch), ("fadeout".into(), Value::Int(0))])?;
+            music(
+                vm,
+                "stop",
+                vec![],
+                vec![("channel".into(), ch), ("fadeout".into(), Value::Int(0))],
+            )?;
             let mask = py::get(vm, this, "mask")?;
             if py::truthy(vm, &mask)? {
                 let mc = py::get(vm, this, "mask_channel")?;
-                music(vm, "stop", vec![], vec![("channel".into(), mc), ("fadeout".into(), Value::Int(0))])?;
+                music(
+                    vm,
+                    "stop",
+                    vec![],
+                    vec![("channel".into(), mc), ("fadeout".into(), Value::Int(0))],
+                )?;
             }
         }
     }
@@ -732,7 +891,12 @@ fn m_stop(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let ch = py::get(vm, this, n)?;
         let d = music(vm, "channel_defined", vec![ch.clone()], Vec::new())?;
         if py::truthy(vm, &d)? {
-            music(vm, "stop", vec![], vec![("channel".into(), ch), ("fadeout".into(), Value::Int(0))])?;
+            music(
+                vm,
+                "stop",
+                vec![],
+                vec![("channel".into(), ch), ("fadeout".into(), Value::Int(0))],
+            )?;
         }
     }
     Ok(Value::None)
@@ -742,7 +906,10 @@ fn m_per_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     ensure_channels(vm, this)?;
     let dc = vget(vm, "displayable_channels")?;
-    let (c, mc) = (py::get(vm, this, "channel")?, py::get(vm, this, "mask_channel")?);
+    let (c, mc) = (
+        py::get(vm, this, "channel")?,
+        py::get(vm, this, "mask_channel")?,
+    );
     let k = vm.types.new_tuple(vec![c, mc]);
     let l = ops::getitem(vm, &dc, k)?;
     vm.call_method(&l, "append", vec![this.clone()])?;
@@ -864,7 +1031,12 @@ fn video_module(vm: &mut Vm) -> PyResult<ObjRef> {
         ],
     );
     let set = |vm: &Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
-    for n in ["texture", "channel_movie", "group_texture", "last_channel_movie"] {
+    for n in [
+        "texture",
+        "channel_movie",
+        "group_texture",
+        "last_channel_movie",
+    ] {
         set(vm, n, py::dict(vm));
     }
     let dd = py::import_attr(vm, "collections", "defaultdict")?;
@@ -874,7 +1046,11 @@ fn video_module(vm: &mut Vm) -> PyResult<ObjRef> {
     set(vm, "reset_channels", vm.types.new_set(Default::default()));
     set(vm, "fullscreen", Value::Bool(false));
     set(vm, "current_movie", Value::None);
-    set(vm, "default_size", vm.types.new_tuple(vec![Value::Int(400), Value::Int(300)]));
+    set(
+        vm,
+        "default_size",
+        vm.types.new_tuple(vec![Value::Int(400), Value::Int(300)]),
+    );
     set(vm, "movie_channel_serial", Value::Int(0));
     let base = py::import_attr(vm, "renpy.display.displayable", "Displayable")?;
     let mc = py::class(

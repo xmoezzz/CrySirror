@@ -13,7 +13,7 @@ use crate::ast::*;
 use crate::files::GameFiles;
 use crate::lexer::PyExpr;
 use crate::script::Script;
-use crysirror_python::{ops, ObjRef, Payload, PyErr, PyResult, Task, TaskOutcome, Value, Vm};
+use crysirror_python::{ObjRef, Payload, PyErr, PyResult, Task, TaskOutcome, Value, Vm, ops};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -37,9 +37,13 @@ impl Profile {
     }
 
     pub fn from_version(version: [u32; 4]) -> Option<Self> {
-        if version != [6, 99, 12, 4] { return None; }
-        Some(Self { version: (version[0], version[1], version[2]),
-                    dialect: crysirror_python::Dialect::Py2 })
+        if version != [6, 99, 12, 4] {
+            return None;
+        }
+        Some(Self {
+            version: (version[0], version[1], version[2]),
+            dialect: crysirror_python::Dialect::Py2,
+        })
     }
 }
 
@@ -49,9 +53,17 @@ pub enum Request {
     /// `ui.interact()`: run an interaction with the current screens.
     Interact(InteractRequest),
     /// `renpy.call_in_new_context(label, ...)`.
-    CallInNewContext { label: String, args: Vec<Value>, kwargs: Vec<(Rc<str>, Value)> },
+    CallInNewContext {
+        label: String,
+        args: Vec<Value>,
+        kwargs: Vec<(Rc<str>, Value)>,
+    },
     /// `renpy.invoke_in_new_context(callable, ...)`.
-    InvokeInNewContext { callable: Value, args: Vec<Value>, kwargs: Vec<(Rc<str>, Value)> },
+    InvokeInNewContext {
+        callable: Value,
+        args: Vec<Value>,
+        kwargs: Vec<(Rc<str>, Value)>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -66,23 +78,48 @@ pub struct InteractRequest {
 
 impl Default for InteractRequest {
     fn default() -> Self {
-        Self { suppress_overlay: false, suppress_underlay: false, mouse: None, type_: None,
-               roll_forward: Value::None, pause: None }
+        Self {
+            suppress_overlay: false,
+            suppress_underlay: false,
+            mouse: None,
+            type_: None,
+            roll_forward: Value::None,
+            pause: None,
+        }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Interaction {
-    Say { speaker: Option<String>, text: String, screen: Option<String> },
-    Menu { caption: Option<String>, options: Vec<(String, i64)> },
-    Pause { seconds: Option<f64>, hard: bool },
-    Transition { duration_ms: u64 },
-    Screen { name: String, timeout_ms: Option<u64>, suppress_overlay: bool },
+    Say {
+        speaker: Option<String>,
+        text: String,
+        screen: Option<String>,
+    },
+    Menu {
+        caption: Option<String>,
+        options: Vec<(String, i64)>,
+    },
+    Pause {
+        seconds: Option<f64>,
+        hard: bool,
+    },
+    Transition {
+        duration_ms: u64,
+    },
+    Screen {
+        name: String,
+        timeout_ms: Option<u64>,
+        suppress_overlay: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Progress { Running, Waiting, Finished }
-
+pub enum Progress {
+    Running,
+    Waiting,
+    Finished,
+}
 
 /// One script execution context (`renpy.execution.Context`).
 #[derive(Clone)]
@@ -112,9 +149,19 @@ pub struct Context {
 pub enum Wait {
     /// A suspended Python task and what to do with its result.
     Task { task: Task, then: Then },
-    NestedCall { task: Task, then: Then, label: String, args: Vec<Value>, kwargs: Vec<(Rc<str>, Value)> },
+    NestedCall {
+        task: Task,
+        then: Then,
+        label: String,
+        args: Vec<Value>,
+        kwargs: Vec<(Rc<str>, Value)>,
+    },
     /// An interaction requested by `task`.
-    Interaction { task: Task, then: Then, request: InteractRequest },
+    Interaction {
+        task: Task,
+        then: Then,
+        request: InteractRequest,
+    },
 }
 
 /// Continuation after a Python task completes.
@@ -161,7 +208,9 @@ pub struct State {
 }
 
 pub fn state(vm: &Vm) -> Rc<State> {
-    vm.ext_get::<Rc<State>>().expect("Ren'Py state missing from Python VM").clone()
+    vm.ext_get::<Rc<State>>()
+        .expect("Ren'Py state missing from Python VM")
+        .clone()
 }
 
 pub fn try_state(vm: &Vm) -> Option<Rc<State>> {
@@ -203,11 +252,20 @@ struct GlueHost {
 
 impl GlueHost {
     fn module_path(&self, name: &str) -> Option<String> {
-        if name == "renpy" || name.starts_with("renpy.") || name == "store" || name.starts_with("store.") {
+        if name == "renpy"
+            || name.starts_with("renpy.")
+            || name == "store"
+            || name.starts_with("store.")
+        {
             return None;
         }
-        if name.len() > 512 || name.split('.').any(|part| part.is_empty()
-            || !part.bytes().all(|ch| ch.is_ascii_alphanumeric() || ch == b'_'))
+        if name.len() > 512
+            || name.split('.').any(|part| {
+                part.is_empty()
+                    || !part
+                        .bytes()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == b'_')
+            })
         {
             return None;
         }
@@ -215,7 +273,9 @@ impl GlueHost {
         for prefix in ["", "python-packages/"] {
             for suffix in [".py", "/__init__.py"] {
                 let path = format!("{prefix}{slash_name}{suffix}");
-                if self.files.exists(&path) { return Some(path); }
+                if self.files.exists(&path) {
+                    return Some(path);
+                }
             }
         }
         None
@@ -235,16 +295,31 @@ impl crysirror_python::Host for GlueHost {
             return Some((source.to_owned(), format!("<renpy glue {name}>")));
         }
         let path = self.module_path(name)?;
-        let bytes = self.files.read(&path).or_else(|| self.files.common_read(&path))?;
-        if bytes.len() > 4 * 1024 * 1024 { return None; }
-        let source = std::str::from_utf8(&bytes).ok()?.trim_start_matches('\u{feff}').replace("\r\n", "\n");
+        let bytes = self
+            .files
+            .read(&path)
+            .or_else(|| self.files.common_read(&path))?;
+        if bytes.len() > 4 * 1024 * 1024 {
+            return None;
+        }
+        let source = std::str::from_utf8(&bytes)
+            .ok()?
+            .trim_start_matches('\u{feff}')
+            .replace("\r\n", "\n");
         Some((source, format!("game/{path}")))
     }
     fn module_is_package(&mut self, name: &str) -> bool {
-        name == "renpy" || self.module_path(name).is_some_and(|path| path.ends_with("/__init__.py"))
+        name == "renpy"
+            || self
+                .module_path(name)
+                .is_some_and(|path| path.ends_with("/__init__.py"))
     }
     fn module_dialect(&mut self, name: &str) -> Option<crysirror_python::Dialect> {
-        Some(if crate::glue::source(name).is_some() { crysirror_python::Dialect::Py3 } else { self.dialect })
+        Some(if crate::glue::source(name).is_some() {
+            crysirror_python::Dialect::Py3
+        } else {
+            self.dialect
+        })
     }
     fn temporary_directory(&self) -> Option<&str> {
         self.files.temporary_storage().map(|_| "/tmp")
@@ -254,29 +329,45 @@ impl crysirror_python::Host for GlueHost {
             let storage = self.files.temporary_storage()?;
             return storage.read(&path).ok();
         }
-        let path = path.strip_prefix("/game/").or_else(|| path.strip_prefix("game/")).unwrap_or(path);
+        let path = path
+            .strip_prefix("/game/")
+            .or_else(|| path.strip_prefix("game/"))
+            .unwrap_or(path);
         self.files.read(path)
     }
     fn write_file(&mut self, path: &str, bytes: &[u8]) -> bool {
-        virtual_temp_path(path).zip(self.files.temporary_storage())
+        virtual_temp_path(path)
+            .zip(self.files.temporary_storage())
             .is_some_and(|(path, storage)| storage.write_atomic(&path, bytes).is_ok())
     }
     fn remove_file(&mut self, path: &str) -> bool {
-        virtual_temp_path(path).zip(self.files.temporary_storage())
+        virtual_temp_path(path)
+            .zip(self.files.temporary_storage())
             .is_some_and(|(path, storage)| storage.remove(&path).is_ok())
     }
     fn stat(&mut self, path: &str) -> Option<bool> {
-        if matches!(path, "/tmp" | "/game" | "game" | "/") { return Some(true); }
+        if matches!(path, "/tmp" | "/game" | "game" | "/") {
+            return Some(true);
+        }
         if let Some(path) = virtual_temp_path(path) {
             let storage = self.files.temporary_storage()?;
-            return storage.metadata(path.mount(), path.relative()).ok()?.map(|m| m.is_directory);
+            return storage
+                .metadata(path.mount(), path.relative())
+                .ok()?
+                .map(|m| m.is_directory);
         }
-        let path = path.strip_prefix("/game/").or_else(|| path.strip_prefix("game/")).unwrap_or(path);
+        let path = path
+            .strip_prefix("/game/")
+            .or_else(|| path.strip_prefix("game/"))
+            .unwrap_or(path);
         self.files.exists(path).then_some(false)
     }
     fn try_lock_file(&mut self, path: &str) -> Result<Box<dyn std::any::Any>, String> {
         let path = virtual_temp_path(path).ok_or("locks require a virtual temporary file")?;
-        let storage = self.files.temporary_storage().ok_or("temporary storage unavailable")?;
+        let storage = self
+            .files
+            .temporary_storage()
+            .ok_or("temporary storage unavailable")?;
         // Hex encoding preserves distinct logical names and the lease API's
         // restricted alphabet without passing any ambient OS path.
         use std::fmt::Write;
@@ -284,7 +375,9 @@ impl crysirror_python::Host for GlueHost {
         for byte in path.relative().bytes() {
             write!(key, "{byte:02x}").expect("write to String");
         }
-        let lease = storage.acquire_lease(&key).map_err(|error| error.to_string())?;
+        let lease = storage
+            .acquire_lease(&key)
+            .map_err(|error| error.to_string())?;
         Ok(Box::new(lease))
     }
     fn as_any(&mut self) -> &mut dyn std::any::Any {
@@ -295,7 +388,11 @@ impl crysirror_python::Host for GlueHost {
 fn virtual_temp_path(path: &str) -> Option<crysirror_core::path::VfsPath> {
     use crysirror_core::path::{Mount, VfsPath};
     let leaf = path.strip_prefix("/tmp/")?;
-    if leaf.is_empty() || leaf.len() > 48 || leaf.contains(['/', '\\', ':']) || matches!(leaf, "." | "..") {
+    if leaf.is_empty()
+        || leaf.len() > 48
+        || leaf.contains(['/', '\\', ':'])
+        || matches!(leaf, "." | "..")
+    {
         return None;
     }
     VfsPath::new(Mount::Cache, &format!("python-tmp-{leaf}")).ok()
@@ -306,7 +403,11 @@ pub type EResult<T> = Result<T, String>;
 impl Engine {
     pub fn new(files: Rc<dyn GameFiles>, profile: Profile) -> EResult<Engine> {
         let out = Rc::new(RefCell::new(Vec::new()));
-        let mut vm = Vm::with_host(Box::new(GlueHost { out: out.clone(), files: files.clone(), dialect: profile.dialect }));
+        let mut vm = Vm::with_host(Box::new(GlueHost {
+            out: out.clone(),
+            files: files.clone(),
+            dialect: profile.dialect,
+        }));
         crysirror_python::modules::sys::set_dialect(&mut vm, profile.dialect);
         let st = Rc::new(State {
             profile,
@@ -316,7 +417,12 @@ impl Engine {
             store_defaults: RefCell::new(Vec::new()),
             code_cache: RefCell::new(HashMap::new()),
             user_statements: RefCell::new(HashMap::new()),
-            warpers: RefCell::new(crate::atl::BUILTIN_WARPERS.iter().map(|s| s.to_string()).collect()),
+            warpers: RefCell::new(
+                crate::atl::BUILTIN_WARPERS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            ),
             warper_functions: RefCell::new(HashMap::new()),
             sl2: RefCell::new(Default::default()),
             contexts: RefCell::new(Vec::new()),
@@ -340,7 +446,15 @@ impl Engine {
         });
         vm.ext_set(st.clone());
         crate::natives::install(&mut vm);
-        let mut e = Engine { vm, st, waits: Vec::new(), halted: false, cursor: None, history: Default::default(), nested: Vec::new() };
+        let mut e = Engine {
+            vm,
+            st,
+            waits: Vec::new(),
+            halted: false,
+            cursor: None,
+            history: Default::default(),
+            nested: Vec::new(),
+        };
         e.boot_python()?;
         Ok(e)
     }
@@ -355,7 +469,10 @@ impl Engine {
         let v = &self.st.profile.version;
         let src = format!(
             "import renpy\nrenpy._bootstrap(({}, {}, {}), {:?})\n",
-            v.0, v.1, v.2, std::env::consts::OS
+            v.0,
+            v.1,
+            v.2,
+            std::env::consts::OS
         );
         crysirror_python::run_source(&mut self.vm, &src, crysirror_python::Dialect::Py3)?;
         crate::persistent::restore(self)?;
@@ -375,8 +492,14 @@ impl Engine {
     pub fn ensure_definition_store(&mut self, name: &str) {
         let special = crysirror_python::import::get_module(&self.vm, "renpy.config")
             .and_then(|module| ops::get_raw_attr(module.obj()?, "special_namespaces"))
-            .and_then(|value| value.obj()?.dict_get_str_raw(name)).is_some();
-        if !special && !matches!(name, "store.config" | "store.persistent" | "store.preferences") {
+            .and_then(|value| value.obj()?.dict_get_str_raw(name))
+            .is_some();
+        if !special
+            && !matches!(
+                name,
+                "store.config" | "store.persistent" | "store.preferences"
+            )
+        {
             self.ensure_store(name);
         }
     }
@@ -390,30 +513,56 @@ impl Engine {
         };
         let parent = self.ensure_store(parent);
         let module = self.vm.new_module(name);
-        let Payload::Module(_, namespace) = &module.payload else { unreachable!() };
+        let Payload::Module(_, namespace) = &module.payload else {
+            unreachable!()
+        };
         let namespace = namespace.clone();
         for (key, value) in &*self.st.store_defaults.borrow() {
             namespace.dict_set_raw(&self.vm.types, key.clone(), value.clone());
         }
-        namespace.dict_set_raw(&self.vm.types, self.vm.types.new_str("__name__"), self.vm.types.new_str(name));
-        parent.dict_set_raw(&self.vm.types, self.vm.types.new_str(leaf), Value::Obj(module));
-        self.st.store.borrow_mut().insert(name.to_owned(), namespace.clone());
+        namespace.dict_set_raw(
+            &self.vm.types,
+            self.vm.types.new_str("__name__"),
+            self.vm.types.new_str(name),
+        );
+        parent.dict_set_raw(
+            &self.vm.types,
+            self.vm.types.new_str(leaf),
+            Value::Obj(module),
+        );
+        self.st
+            .store
+            .borrow_mut()
+            .insert(name.to_owned(), namespace.clone());
         namespace
     }
 
     // ---- Python code ----
 
-    fn compile(&mut self, id: NodeId, slot: u8, code: &PyCode) -> EResult<Rc<crysirror_python::code::Code>> {
+    fn compile(
+        &mut self,
+        id: NodeId,
+        slot: u8,
+        code: &PyCode,
+    ) -> EResult<Rc<crysirror_python::code::Code>> {
         if let Some(c) = self.st.code_cache.borrow().get(&(id, slot)) {
             return Ok(c.clone());
         }
-        let c = crate::pycompile::compile(&self.vm, &code.source, code.mode, self.dialect_for(code))?;
-        self.st.code_cache.borrow_mut().insert((id, slot), c.clone());
+        let c =
+            crate::pycompile::compile(&self.vm, &code.source, code.mode, self.dialect_for(code))?;
+        self.st
+            .code_cache
+            .borrow_mut()
+            .insert((id, slot), c.clone());
         Ok(c)
     }
 
     fn dialect_for(&self, code: &PyCode) -> crysirror_python::Dialect {
-        if code.py3 { crysirror_python::Dialect::Py3 } else { self.st.profile.dialect }
+        if code.py3 {
+            crysirror_python::Dialect::Py3
+        } else {
+            self.st.profile.dialect
+        }
     }
 
     /// Evaluates an expression in the store (synchronously; no suspension).
@@ -424,8 +573,14 @@ impl Engine {
     }
 
     pub fn eval_cached(&mut self, id: NodeId, slot: u8, e: &PyExpr) -> PyResult<Value> {
-        let pc = PyCode { source: e.clone(), mode: "eval", py3: false };
-        let code = self.compile(id, slot, &pc).map_err(|m| self.vm.syntax_error(crysirror_python::Error::Runtime(m)))?;
+        let pc = PyCode {
+            source: e.clone(),
+            mode: "eval",
+            py3: false,
+        };
+        let code = self
+            .compile(id, slot, &pc)
+            .map_err(|m| self.vm.syntax_error(crysirror_python::Error::Runtime(m)))?;
         let g = self.store_dict("store");
         self.vm.run_code(code, g, None)
     }
@@ -440,7 +595,9 @@ impl Engine {
     }
 
     pub(crate) fn load_files(
-        &mut self, modules: Vec<crate::script::ScriptFile>, files: Vec<crate::script::ScriptFile>,
+        &mut self,
+        modules: Vec<crate::script::ScriptFile>,
+        files: Vec<crate::script::ScriptFile>,
     ) -> EResult<()> {
         let mut shells = crate::rpyc::Shells::new(&mut self.vm).map_err(|e| e.to_string())?;
         if !modules.is_empty() {
@@ -459,13 +616,26 @@ impl Engine {
         Ok(())
     }
 
-    fn load_file(&mut self, shells: &mut crate::rpyc::Shells, file: &crate::script::ScriptFile) -> EResult<()> {
+    fn load_file(
+        &mut self,
+        shells: &mut crate::rpyc::Shells,
+        file: &crate::script::ScriptFile,
+    ) -> EResult<()> {
         let registry = std::mem::take(&mut *self.st.sl2.borrow_mut());
-        let cx = crate::natives::ParseCx { st: self.st.clone(), registry };
-        let stmts = self.st.script.borrow_mut().load_file(&mut self.vm, shells, &cx, &cx.registry, file);
+        let cx = crate::natives::ParseCx {
+            st: self.st.clone(),
+            registry,
+        };
+        let stmts =
+            self.st
+                .script
+                .borrow_mut()
+                .load_file(&mut self.vm, shells, &cx, &cx.registry, file);
         *self.st.sl2.borrow_mut() = cx.registry;
         let errors = self.st.script.borrow().errors.join("\n");
-        if !errors.is_empty() { return Err(errors); }
+        if !errors.is_empty() {
+            return Err(errors);
+        }
         let early = self.st.script.borrow_mut().register(&stmts);
         for id in early {
             self.run_early(id)?;
@@ -476,7 +646,9 @@ impl Engine {
     fn run_early(&mut self, id: NodeId) -> EResult<()> {
         let kind = self.st.script.borrow().arena.get(id).kind.clone();
         match kind {
-            NodeKind::EarlyPython { code, hide, store } => self.exec_python_sync(id, &code, hide, &store),
+            NodeKind::EarlyPython { code, hide, store } => {
+                self.exec_python_sync(id, &code, hide, &store)
+            }
             NodeKind::TranslateEarlyBlock { block, .. } => {
                 for b in block {
                     self.run_early(b)?;
@@ -487,15 +659,30 @@ impl Engine {
         }
     }
 
-    fn exec_python_sync(&mut self, id: NodeId, code: &PyCode, hide: bool, store: &str) -> EResult<()> {
+    fn exec_python_sync(
+        &mut self,
+        id: NodeId,
+        code: &PyCode,
+        hide: bool,
+        store: &str,
+    ) -> EResult<()> {
         let c = self.compile(id, 0, code)?;
         let g = self.ensure_store(store);
-        let locals = if hide { Some(self.vm.types.new_dict()) } else { None };
+        let locals = if hide {
+            Some(self.vm.types.new_dict())
+        } else {
+            None
+        };
         match self.vm.start_code_task(c, g, locals) {
             TaskOutcome::Done(_) => Ok(()),
             TaskOutcome::Error(e) => {
                 let n = self.st.script.borrow().arena.get(id).clone();
-                Err(format!("{}:{}: {}", n.filename, n.linenumber, crysirror_python::format_exception(&mut self.vm, &e)))
+                Err(format!(
+                    "{}:{}: {}",
+                    n.filename,
+                    n.linenumber,
+                    crysirror_python::format_exception(&mut self.vm, &e)
+                ))
             }
             TaskOutcome::Suspended(..) => Err("interaction requested during script load".into()),
         }
@@ -549,7 +736,10 @@ impl Engine {
                 }
                 Ok(Flow::Wait(_)) => {
                     let nd = self.st.script.borrow().arena.get(n).clone();
-                    return Err(format!("{}:{}: interaction during init", nd.filename, nd.linenumber));
+                    return Err(format!(
+                        "{}:{}: interaction during init",
+                        nd.filename, nd.linenumber
+                    ));
                 }
                 Ok(Flow::Halt) => return Ok(()),
                 Ok(Flow::Rewind(_)) => return Err("rollback during Ren'Py initialization".into()),
@@ -560,13 +750,19 @@ impl Engine {
     }
 
     pub fn call_glue(&mut self, name: &str, args: Vec<Value>) -> EResult<Value> {
-        let m = crysirror_python::import::import_module(&mut self.vm, "renpy").map_err(|e| self.py_err(e))?;
+        let m = crysirror_python::import::import_module(&mut self.vm, "renpy")
+            .map_err(|e| self.py_err(e))?;
         let f = ops::getattr(&mut self.vm, &m, name).map_err(|e| self.py_err(e))?;
-        self.vm.call(&f, args, Vec::new()).map_err(|e| self.py_err(e))
+        self.vm
+            .call(&f, args, Vec::new())
+            .map_err(|e| self.py_err(e))
     }
 
     pub fn push_context(&mut self, rollback: bool, init: bool) -> EResult<()> {
-        let py = self.call_glue("_new_context_object", vec![Value::Bool(rollback), Value::Bool(init)])?;
+        let py = self.call_glue(
+            "_new_context_object",
+            vec![Value::Bool(rollback), Value::Bool(init)],
+        )?;
         let scene = match self.st.contexts.borrow().last() {
             Some(c) => c.scene.clone_for_new_context(),
             None => crate::scene::SceneLists::default(),
@@ -597,7 +793,9 @@ impl Engine {
     pub fn start(&mut self, label: &str) -> EResult<()> {
         let id = self.lookup_label(label)?;
         self.push_context(true, false)?;
-        if label != "_start" { self.call_glue("execute_default_statement", vec![Value::Bool(true)])?; }
+        if label != "_start" {
+            self.call_glue("execute_default_statement", vec![Value::Bool(true)])?;
+        }
         self.cursor = Some(id);
         self.halted = false;
         Ok(())
@@ -615,7 +813,12 @@ impl Engine {
         self.finish_interaction(None, true, false)
     }
 
-    pub(crate) fn finish_interaction(&mut self, choice: Option<usize>, timeout: bool, replay: bool) -> EResult<()> {
+    pub(crate) fn finish_interaction(
+        &mut self,
+        choice: Option<usize>,
+        timeout: bool,
+        replay: bool,
+    ) -> EResult<()> {
         let value = match self.interaction() {
             Some(Interaction::Menu { options, .. }) if !timeout => {
                 let index = choice.ok_or("a menu requires a choice")?;
@@ -628,7 +831,10 @@ impl Engine {
                 Value::Bool(!timeout)
             }
             Some(Interaction::Transition { .. }) if choice.is_none() => Value::Bool(!timeout),
-            Some(Interaction::Screen { timeout_ms: Some(_), .. }) if choice.is_none() && timeout => Value::None,
+            Some(Interaction::Screen {
+                timeout_ms: Some(_),
+                ..
+            }) if choice.is_none() && timeout => Value::None,
             Some(Interaction::Say { .. }) if choice.is_none() && !timeout => Value::None,
             _ => return Err("no matching Ren'Py interaction".into()),
         };
@@ -637,10 +843,24 @@ impl Engine {
     }
 
     fn resume_value(&mut self, value: Value) -> EResult<()> {
-        let Some(Wait::Interaction { task, then: Then::Node(id), .. }) = self.waits.pop() else {
+        let Some(Wait::Interaction {
+            task,
+            then: Then::Node(id),
+            ..
+        }) = self.waits.pop()
+        else {
             return Err("interaction without a task continuation".into());
         };
-        if matches!(self.interaction(), Some(Interaction::Screen { .. } | Interaction::Say { screen: Some(_), .. })) {
+        if matches!(
+            self.interaction(),
+            Some(
+                Interaction::Screen { .. }
+                    | Interaction::Say {
+                        screen: Some(_),
+                        ..
+                    }
+            )
+        ) {
             if let Some(context) = self.st.contexts.borrow_mut().last_mut() {
                 context.screens.retain(|screen| !screen.transient);
             }
@@ -650,13 +870,21 @@ impl Engine {
         self.advance(flow)
     }
 
-    fn resume_task(&mut self, task: Task, id: NodeId, result: Result<Value, ObjRef>) -> EResult<Flow> {
+    fn resume_task(
+        &mut self,
+        task: Task,
+        id: NodeId,
+        result: Result<Value, ObjRef>,
+    ) -> EResult<Flow> {
         Ok(match self.vm.resume_task(task, result) {
             TaskOutcome::Done(value) => self.complete_task(id, value),
             TaskOutcome::Error(error) => self.control_flow(id, PyErr::Exc(error))?,
-            TaskOutcome::Suspended(task, request) => {
-                Flow::Wait(Box::new(crate::exec::suspended(self, task, request, Then::Node(id))))
-            }
+            TaskOutcome::Suspended(task, request) => Flow::Wait(Box::new(crate::exec::suspended(
+                self,
+                task,
+                request,
+                Then::Node(id),
+            ))),
         })
     }
 
@@ -668,14 +896,24 @@ impl Engine {
     }
 
     pub(crate) fn invoke_screen_action(&mut self, action: Value) -> EResult<()> {
-        let module = crysirror_python::import::import_module(&mut self.vm, "renpy").map_err(|e| self.py_err(e))?;
-        let invoke = ops::getattr(&mut self.vm, &module, "_invoke_screen_action").map_err(|e| self.py_err(e))?;
+        let module = crysirror_python::import::import_module(&mut self.vm, "renpy")
+            .map_err(|e| self.py_err(e))?;
+        let invoke = ops::getattr(&mut self.vm, &module, "_invoke_screen_action")
+            .map_err(|e| self.py_err(e))?;
         match self.vm.call1(&invoke, action) {
-            Ok(value) if !value.is_none() && matches!(self.interaction(), Some(Interaction::Screen { .. })) => {
+            Ok(value)
+                if !value.is_none()
+                    && matches!(self.interaction(), Some(Interaction::Screen { .. })) =>
+            {
                 self.resume_value(value)
             }
             Ok(_) => Ok(()),
-            Err(PyErr::Exc(error)) if matches!(error.class_name().as_str(), "JumpException" | "JumpOutException" | "CallException" | "RollbackException") => {
+            Err(PyErr::Exc(error))
+                if matches!(
+                    error.class_name().as_str(),
+                    "JumpException" | "JumpOutException" | "CallException" | "RollbackException"
+                ) =>
+            {
                 let id = self.cursor.ok_or("screen action outside execution")?;
                 self.st.interaction.replace(None);
                 self.waits.clear();
@@ -691,8 +929,12 @@ impl Engine {
 
     pub fn tick(&mut self, budget: usize) -> EResult<Progress> {
         for _ in 0..budget {
-            if !self.waits.is_empty() { return Ok(Progress::Waiting); }
-            let Some(id) = self.cursor else { return Ok(Progress::Finished); };
+            if !self.waits.is_empty() {
+                return Ok(Progress::Waiting);
+            }
+            let Some(id) = self.cursor else {
+                return Ok(Progress::Finished);
+            };
             let flow = self.execute(id)?;
             self.advance(flow)?;
         }
@@ -703,20 +945,27 @@ impl Engine {
         let script = self.st.script.borrow();
         let node = script.arena.get(id);
         if let (NodeKind::Menu { items, .. }, Value::Int(choice)) = (&node.kind, result) {
-            let selected = items.get(choice as usize)
+            let selected = items
+                .get(choice as usize)
                 .and_then(|item| item.block.as_ref())
-                .and_then(|block| block.first()).copied();
+                .and_then(|block| block.first())
+                .copied();
             return Flow::Next(selected.or(node.next));
         }
         Flow::Next(self.next_node(node.next))
     }
 
     fn advance(&mut self, flow: Flow) -> EResult<()> {
-        if self.st.rollback_blocked.replace(false) { self.reset_history(); }
+        if self.st.rollback_blocked.replace(false) {
+            self.reset_history();
+        }
         match flow {
             Flow::Next(Some(next)) => self.cursor = Some(next),
             Flow::Next(None) | Flow::Halt if !self.nested.is_empty() => {
-                let value = self.store_dict("store").dict_get_str_raw("_return").unwrap_or(Value::None);
+                let value = self
+                    .store_dict("store")
+                    .dict_get_str_raw("_return")
+                    .unwrap_or(Value::None);
                 let (parent, id) = self.pop_nested_context().expect("nested context");
                 let flow = self.resume_task(parent, id, Ok(value))?;
                 return self.advance(flow);
@@ -730,20 +979,38 @@ impl Engine {
                 Wait::Interaction { .. } => {
                     self.waits.push(*wait);
                     self.push_checkpoint();
-                },
+                }
                 Wait::Task { .. } => return Err("unsupported Ren'Py task request".into()),
-                Wait::NestedCall { task, then: Then::Node(id), label, args, kwargs } => {
-                    if self.nested.len() >= 32 { return Err("Ren'Py context depth limit".into()); }
+                Wait::NestedCall {
+                    task,
+                    then: Then::Node(id),
+                    label,
+                    args,
+                    kwargs,
+                } => {
+                    if self.nested.len() >= 32 {
+                        return Err("Ren'Py context depth limit".into());
+                    }
                     let label_id = self.lookup_label(&label)?;
                     self.push_context(false, false)?;
                     let store = self.store_dict("store");
-                    let scope = ["_args", "_kwargs", "_return"].into_iter()
+                    let scope = ["_args", "_kwargs", "_return"]
+                        .into_iter()
                         .map(|name| (name.to_owned(), store.dict_get_str_raw(name)))
                         .collect();
-                    self.st.contexts.borrow_mut().last_mut().unwrap().dynamic_stack[0] = scope;
+                    self.st
+                        .contexts
+                        .borrow_mut()
+                        .last_mut()
+                        .unwrap()
+                        .dynamic_stack[0] = scope;
                     let named = self.vm.types.new_dict();
                     for (name, value) in kwargs {
-                        named.obj().unwrap().dict_set_raw(&self.vm.types, self.vm.types.new_str(&name), value);
+                        named.obj().unwrap().dict_set_raw(
+                            &self.vm.types,
+                            self.vm.types.new_str(&name),
+                            value,
+                        );
                     }
                     self.set_store("_args", self.vm.types.new_tuple(args));
                     self.set_store("_kwargs", named);
@@ -751,10 +1018,14 @@ impl Engine {
                     self.nested.push((task, id));
                     self.cursor = Some(label_id);
                 }
-                Wait::NestedCall { .. } => return Err("nested Ren'Py context without a script continuation".into()),
+                Wait::NestedCall { .. } => {
+                    return Err("nested Ren'Py context without a script continuation".into());
+                }
             },
             Flow::Rewind(count) => {
-                if !self.rewind(count) { return Err("Ren'Py rollback target is unavailable".into()); }
+                if !self.rewind(count) {
+                    return Err("Ren'Py rollback target is unavailable".into());
+                }
             }
             Flow::Halt => {
                 self.cursor = None;
@@ -788,19 +1059,26 @@ impl Engine {
 
     /// Maps a Python exception raised while executing `id` to control flow.
     pub fn control_flow(&mut self, id: NodeId, e: PyErr) -> EResult<Flow> {
-        let PyErr::Exc(exc) = e else { return Err("suspension outside a task".into()) };
+        let PyErr::Exc(exc) = e else {
+            return Err("suspension outside a task".into());
+        };
         let cls = exc.class_name();
         let args = crysirror_python::format::exc_args(&exc);
         match cls.as_str() {
             "RollbackException" => {
                 let count = match args.first() {
-                    Some(Value::Int(count)) => usize::try_from(*count).map_err(|_| "invalid rollback count")?,
+                    Some(Value::Int(count)) => {
+                        usize::try_from(*count).map_err(|_| "invalid rollback count")?
+                    }
                     _ => return Err("invalid rollback count".into()),
                 };
                 Ok(Flow::Rewind(count))
             }
             "JumpException" => {
-                let label = args.first().map(|a| ops::str(&mut self.vm, a).unwrap_or_default()).unwrap_or_default();
+                let label = args
+                    .first()
+                    .map(|a| ops::str(&mut self.vm, a).unwrap_or_default())
+                    .unwrap_or_default();
                 let t = self.lookup_label(&label)?;
                 Ok(Flow::Jump(t))
             }
@@ -815,9 +1093,13 @@ impl Engine {
                 self.resume_task(task, origin, Err(exception))
             }
             "CallException" => {
-                let label = ops::get_raw_attr(&exc, "label").map(|a| ops::str(&mut self.vm, &a).unwrap_or_default()).unwrap_or_default();
+                let label = ops::get_raw_attr(&exc, "label")
+                    .map(|a| ops::str(&mut self.vm, &a).unwrap_or_default())
+                    .unwrap_or_default();
                 let next = self.st.script.borrow().arena.get(id).next;
-                let Some(ret) = next else { return Err("renpy.call can't be used when the next node is undefined.".into()) };
+                let Some(ret) = next else {
+                    return Err("renpy.call can't be used when the next node is undefined.".into());
+                };
                 let a = ops::get_raw_attr(&exc, "args").unwrap_or(Value::None);
                 let k = ops::get_raw_attr(&exc, "kwargs").unwrap_or(Value::None);
                 let target = self.call_label(&label, Some(ret))?;
@@ -827,13 +1109,22 @@ impl Engine {
             }
             _ => {
                 let node = self.st.script.borrow().arena.get(id).clone();
-                Err(format!("{}:{}: {}", node.filename, node.linenumber, crysirror_python::format_exception(&mut self.vm, &exc)))
+                Err(format!(
+                    "{}:{}: {}",
+                    node.filename,
+                    node.linenumber,
+                    crysirror_python::format_exception(&mut self.vm, &exc)
+                ))
             }
         }
     }
 
     pub fn lookup_label(&self, label: &str) -> EResult<NodeId> {
-        self.st.script.borrow().lookup_label(label).ok_or_else(|| format!("could not find label '{label}'"))
+        self.st
+            .script
+            .borrow()
+            .lookup_label(label)
+            .ok_or_else(|| format!("could not find label '{label}'"))
     }
 
     pub fn set_store(&mut self, name: &str, v: Value) {

@@ -39,7 +39,14 @@ pub fn compute_raw(vm: &mut Vm, value: &Value, room: f64) -> PyResult<f64> {
 }
 
 /// `place(width, height, sw, sh, placement)`.
-pub fn place(vm: &mut Vm, placement: &Value, width: f64, height: f64, sw: f64, sh: f64) -> PyResult<(f64, f64)> {
+pub fn place(
+    vm: &mut Vm,
+    placement: &Value,
+    width: f64,
+    height: f64,
+    sw: f64,
+    sh: f64,
+) -> PyResult<(f64, f64)> {
     let p = py::items(vm, placement)?;
     if p.len() < 6 {
         return Err(vm.type_error("placement must have 7 components"));
@@ -48,8 +55,16 @@ pub fn place(vm: &mut Vm, placement: &Value, width: f64, height: f64, sw: f64, s
     let ypos = compute_raw(vm, &p[1], height)?;
     let xanchor = compute_raw(vm, &p[2], sw)?;
     let yanchor = compute_raw(vm, &p[3], sh)?;
-    let xoffset = if py::is_none(&p[4]) { 0. } else { py::f64_of(vm, &p[4])? };
-    let yoffset = if py::is_none(&p[5]) { 0. } else { py::f64_of(vm, &p[5])? };
+    let xoffset = if py::is_none(&p[4]) {
+        0.
+    } else {
+        py::f64_of(vm, &p[4])?
+    };
+    let yoffset = if py::is_none(&p[5]) {
+        0.
+    } else {
+        py::f64_of(vm, &p[5])?
+    };
     Ok((xpos + xoffset - xanchor, ypos + yoffset - yanchor))
 }
 
@@ -82,7 +97,10 @@ pub fn new_style(vm: &mut Vm, parent: Value, properties: Kw) -> PyResult<Value> 
 /// `Displayable.__init__(self, focus=None, default=False, style='default',
 /// _args=None, tooltip=None, default_focus=False, **properties)`.
 pub fn d_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let this = args.first().cloned().ok_or_else(|| vm.type_error("Displayable.__init__"))?;
+    let this = args
+        .first()
+        .cloned()
+        .ok_or_else(|| vm.type_error("Displayable.__init__"))?;
     let mut focus = args.get(1).cloned().unwrap_or(Value::None);
     let mut default = args.get(2).cloned().unwrap_or(Value::Bool(false));
     let mut style = args.get(3).cloned();
@@ -163,7 +181,11 @@ fn d_parameterize(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let parameters = arg_or(args, kw, 2, "parameters", Value::None);
     let da = ops::getattr(vm, &args[0], "_args")?;
     let copy = ops::getattr(vm, &da, "copy")?;
-    let a = vm.call(&copy, Vec::new(), vec![("name".into(), name), ("args".into(), parameters)])?;
+    let a = vm.call(
+        &copy,
+        Vec::new(),
+        vec![("name".into(), name), ("args".into(), parameters)],
+    )?;
     vm.call_method(&args[0], "_duplicate", vec![a])
 }
 
@@ -194,10 +216,18 @@ fn d_find_focusable(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let callback = arg_or(args, kw, 1, "callback", Value::None);
     let inherited = arg_or(args, kw, 2, "focus_name", Value::None);
     let own = py::get_or_none(vm, this, "focus_name")?;
-    let focus_name = if ops::truthy(vm, &own)? { own } else { inherited };
+    let focus_name = if ops::truthy(vm, &own)? {
+        own
+    } else {
+        inherited
+    };
     let focusable = py::get_or_none(vm, this, "focusable")?;
     if ops::truthy(vm, &focusable)? {
-        vm.call(&callback, vec![this.clone(), focus_name.clone()], Vec::new())?;
+        vm.call(
+            &callback,
+            vec![this.clone(), focus_name.clone()],
+            Vec::new(),
+        )?;
     } else if !py::is_none(&focusable) {
         vm.call(&callback, vec![Value::None, focus_name.clone()], Vec::new())?;
     }
@@ -214,12 +244,19 @@ fn d_find_focusable(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn role(vm: &mut Vm, this: &Value) -> PyResult<String> {
     let r = py::get_or_none(vm, this, "role")?;
-    Ok(if py::is_none(&r) { String::new() } else { py::string(vm, &r)? })
+    Ok(if py::is_none(&r) {
+        String::new()
+    } else {
+        py::string(vm, &r)?
+    })
 }
 
 fn d_focus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let default = match arg(args, kw, 1, "default") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let default = match arg(args, kw, 1, "default") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     let prefix = format!("{}hover_", role(vm, this)?);
     let p = vm.types.new_string(prefix);
     vm.call_method(this, "set_style_prefix", vec![p, Value::Bool(true)])?;
@@ -310,16 +347,34 @@ fn d_place(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let width = py::f64_of(vm, &a(4, "width"))?;
     let height = py::f64_of(vm, &a(5, "height"))?;
     let surf = a(6, "surf");
-    let main = match arg(args, kw, 7, "main") { Some(v) => ops::truthy(vm, v)?, None => true };
+    let main = match arg(args, kw, 7, "main") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => true,
+    };
     let placement = vm.call_method(this, "get_placement", Vec::new())?;
     let pl = py::items(vm, &placement)?;
-    let subpixel = match pl.get(6) { Some(v) => ops::truthy(vm, v)?, None => false };
+    let subpixel = match pl.get(6) {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     let (sw, sh) = super::render::source_of(vm, &surf)?.size();
     let (px, py_) = place(vm, &placement, width, height, sw, sh)?;
-    let pos = vm.types.new_tuple(vec![Value::Float(px + x), Value::Float(py_ + y)]);
+    let pos = vm
+        .types
+        .new_tuple(vec![Value::Float(px + x), Value::Float(py_ + y)]);
     if !py::is_none(&dest) {
         let m = if subpixel { "subpixel_blit" } else { "blit" };
-        vm.call_method(&dest, m, vec![surf, pos.clone(), Value::Bool(main), Value::Bool(main), Value::None])?;
+        vm.call_method(
+            &dest,
+            m,
+            vec![
+                surf,
+                pos.clone(),
+                Value::Bool(main),
+                Value::Bool(main),
+                Value::None,
+            ],
+        )?;
     }
     Ok(pos)
 }
@@ -359,7 +414,9 @@ fn d_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if !info.is_empty() && !(info.starts_with('(') && info.ends_with(')')) {
         info = format!("({info})");
     }
-    Ok(vm.types.new_string(format!("<{} {} at {:#x}>", cls, info, this.id())))
+    Ok(vm
+        .types
+        .new_string(format!("<{} {} at {:#x}>", cls, info, this.id())))
 }
 
 /// `_tts_common(default_alt=None, reverse=False)`: concatenated speech of
@@ -367,7 +424,10 @@ fn d_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn d_tts_common(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let default_alt = arg_or(args, kw, 1, "default_alt", Value::None);
-    let reverse = match arg(args, kw, 2, "reverse") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let reverse = match arg(args, kw, 2, "reverse") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     let children = vm.call_method(this, "visit", Vec::new())?;
     let mut children = py::items(vm, &children)?;
     if reverse {
@@ -382,7 +442,11 @@ fn d_tts_common(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let done = speech.obj().is_some_and(|o| o.class_name() == "TTSDone");
         let text = py::string(vm, &speech)?;
         if done {
-            parts = if text.trim().is_empty() { Vec::new() } else { vec![text] };
+            parts = if text.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![text]
+            };
             break;
         }
         if !text.trim().is_empty() {
@@ -431,16 +495,27 @@ fn da_copy(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn da_extraneous(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let developer = py::config_bool(vm, "developer")?;
-    let report = py::config(vm, "report_extraneous_attributes").ok().map(|v| ops::truthy(vm, &v)).transpose()?.unwrap_or(true);
+    let report = py::config(vm, "report_extraneous_attributes")
+        .ok()
+        .map(|v| ops::truthy(vm, &v))
+        .transpose()?
+        .unwrap_or(true);
     if developer && report {
         let name = ops::getattr(vm, &args[0], "name")?;
         let a = ops::getattr(vm, &args[0], "args")?;
         let join = |vm: &mut Vm, v: &Value| -> PyResult<String> {
-            Ok(py::items(vm, v)?.iter().map(|x| x.as_str().unwrap_or("?").to_owned()).collect::<Vec<_>>().join(" "))
+            Ok(py::items(vm, v)?
+                .iter()
+                .map(|x| x.as_str().unwrap_or("?").to_owned())
+                .collect::<Vec<_>>()
+                .join(" "))
         };
         let n = join(vm, &name)?;
         let a = join(vm, &a)?;
-        return Err(py::error(vm, format!("Image '{n}' does not accept attributes '{a}'.")));
+        return Err(py::error(
+            vm,
+            format!("Image '{n}' does not accept attributes '{a}'."),
+        ));
     }
     Ok(Value::None)
 }
@@ -464,78 +539,97 @@ pub fn install(vm: &mut Vm) {
 fn create(vm: &mut Vm, m: &ObjRef) -> PyResult<()> {
     let object = py::import_attr(vm, "renpy.object", "Object")?;
     let empty = vm.types.empty_tuple.clone();
-    let da = py::class(vm, "renpy.display.displayable", "DisplayableArguments", &[object.clone()], &[
-        ("copy", da_copy),
-        ("extraneous", da_extraneous),
-    ], &[("name", empty.clone()), ("args", empty.clone()), ("prefix", Value::None), ("lint", Value::Bool(false))])?;
+    let da = py::class(
+        vm,
+        "renpy.display.displayable",
+        "DisplayableArguments",
+        &[object.clone()],
+        &[("copy", da_copy), ("extraneous", da_extraneous)],
+        &[
+            ("name", empty.clone()),
+            ("args", empty.clone()),
+            ("prefix", Value::None),
+            ("lint", Value::Bool(false)),
+        ],
+    )?;
     let da_default = vm.call(&Value::Obj(da.clone()), Vec::new(), Vec::new())?;
     let composite: Value = vm.types.new_list(Vec::new());
-    let d = py::class(vm, "renpy.display.displayable", "Displayable", &[object], &[
-        ("__init__", d_init),
-        ("__ne__", d_ne),
-        ("__repr__", d_repr),
-        ("_copy", d_copy),
-        ("_duplicate", d_duplicate),
-        ("_get_tooltip", d_get_tooltip),
-        ("_in_current_store", d_in_current_store),
-        ("_unique", d_unique),
-        ("parameterize", d_parameterize),
-        ("_equals", d_equals),
-        ("_repr_info", d_none),
-        ("find_focusable", d_find_focusable),
-        ("focus", d_focus),
-        ("unfocus", d_unfocus),
-        ("is_focused", d_is_focused),
-        ("set_style_prefix", d_set_style_prefix),
-        ("render", d_render),
-        ("event", d_none),
-        ("get_placement", d_get_placement),
-        ("visit_all", d_visit_all),
-        ("visit", d_visit),
-        ("per_interact", d_none),
-        ("predict_one", d_none),
-        ("predict_one_action", d_none),
-        ("place", d_place),
-        ("set_transform_event", d_set_transform_event),
-        ("_handles_event", d_false),
-        ("_hide", d_none),
-        ("_show", d_none),
-        ("_target", d_self),
-        ("_change_transform_child", d_change_transform_child),
-        ("_clear", d_none),
-        ("_tts_common", d_tts_common),
-        ("_tts", d_tts),
-        ("_tts_all", d_tts),
-    ], &[
-        ("focusable", Value::None),
-        ("full_focus_name", Value::None),
-        ("role", vm.types.new_str("")),
-        ("transform_event", Value::None),
-        ("transform_event_responder", Value::Bool(false)),
-        ("_main", Value::None),
-        ("_composite_parts", composite),
-        ("_location", Value::None),
-        ("_uses_scope", Value::Bool(false)),
-        ("_args", da_default),
-        ("_duplicatable", Value::Bool(false)),
-        ("_clipping", Value::Bool(false)),
-        ("_tooltip", Value::None),
-        ("_box_skip", Value::Bool(false)),
-        ("_offer_size", Value::None),
-        ("_draggable", Value::Bool(false)),
-        ("_store_transform_event", Value::Bool(false)),
-        ("delay", Value::None),
-        ("id", Value::None),
-        ("default", Value::Bool(false)),
-        ("focus_name", Value::None),
-    ])?;
+    let d = py::class(
+        vm,
+        "renpy.display.displayable",
+        "Displayable",
+        &[object],
+        &[
+            ("__init__", d_init),
+            ("__ne__", d_ne),
+            ("__repr__", d_repr),
+            ("_copy", d_copy),
+            ("_duplicate", d_duplicate),
+            ("_get_tooltip", d_get_tooltip),
+            ("_in_current_store", d_in_current_store),
+            ("_unique", d_unique),
+            ("parameterize", d_parameterize),
+            ("_equals", d_equals),
+            ("_repr_info", d_none),
+            ("find_focusable", d_find_focusable),
+            ("focus", d_focus),
+            ("unfocus", d_unfocus),
+            ("is_focused", d_is_focused),
+            ("set_style_prefix", d_set_style_prefix),
+            ("render", d_render),
+            ("event", d_none),
+            ("get_placement", d_get_placement),
+            ("visit_all", d_visit_all),
+            ("visit", d_visit),
+            ("per_interact", d_none),
+            ("predict_one", d_none),
+            ("predict_one_action", d_none),
+            ("place", d_place),
+            ("set_transform_event", d_set_transform_event),
+            ("_handles_event", d_false),
+            ("_hide", d_none),
+            ("_show", d_none),
+            ("_target", d_self),
+            ("_change_transform_child", d_change_transform_child),
+            ("_clear", d_none),
+            ("_tts_common", d_tts_common),
+            ("_tts", d_tts),
+            ("_tts_all", d_tts),
+        ],
+        &[
+            ("focusable", Value::None),
+            ("full_focus_name", Value::None),
+            ("role", vm.types.new_str("")),
+            ("transform_event", Value::None),
+            ("transform_event_responder", Value::Bool(false)),
+            ("_main", Value::None),
+            ("_composite_parts", composite),
+            ("_location", Value::None),
+            ("_uses_scope", Value::Bool(false)),
+            ("_args", da_default),
+            ("_duplicatable", Value::Bool(false)),
+            ("_clipping", Value::Bool(false)),
+            ("_tooltip", Value::None),
+            ("_box_skip", Value::Bool(false)),
+            ("_offer_size", Value::None),
+            ("_draggable", Value::Bool(false)),
+            ("_store_transform_event", Value::Bool(false)),
+            ("delay", Value::None),
+            ("id", Value::None),
+            ("default", Value::Bool(false)),
+            ("focus_name", Value::None),
+        ],
+    )?;
     crysirror_python::modules::set(vm, m, "Displayable", Value::Obj(d.clone()));
     crysirror_python::modules::set(vm, m, "DisplayableArguments", Value::Obj(da.clone()));
     let place_f = vm.types.new_builtin("place", f_place);
     crysirror_python::modules::set(vm, m, "place", place_f);
     let cr = vm.types.new_builtin("compute_raw", f_compute_raw);
     crysirror_python::modules::set(vm, m, "compute_raw", cr);
-    vm.ext_set(Classes { displayable: d, displayable_arguments: da });
+    vm.ext_set(Classes {
+        displayable: d,
+        displayable_arguments: da,
+    });
     Ok(())
 }
 
@@ -543,7 +637,10 @@ pub fn displayable_class(vm: &mut Vm) -> ObjRef {
     if vm.ext_get::<Classes>().is_none() {
         let _ = py::import(vm, "renpy.display.displayable");
     }
-    vm.ext_get::<Classes>().expect("display classes").displayable.clone()
+    vm.ext_get::<Classes>()
+        .expect("display classes")
+        .displayable
+        .clone()
 }
 
 pub fn is_displayable(vm: &mut Vm, v: &Value) -> bool {

@@ -86,6 +86,7 @@ pub fn lower_legacy(s: &EmitterSpec) -> Result<SystemSpec> {
         frames: 1,
         fps: 0.,
         soft_distance: 0.,
+        triplanar_coverage: None,
         facing: FacingMode::Camera,
         blend: if s.additive {
             BlendMode::Additive
@@ -174,6 +175,9 @@ impl VfxRuntime {
     /// frame generations, including work which has not published a Layer yet.
     pub(crate) fn visit_image_dependencies(&self,visitor:&mut dyn FnMut(crysirror_core::state::ClientId,&str)) {
         fn render(client:u32,spec:&crysirror_vfx::RenderSpec,visitor:&mut dyn FnMut(crysirror_core::state::ClientId,&str)) {
+            if let crysirror_vfx::RenderSpec::Sprite { triplanar_coverage: Some(coverage), .. } = spec {
+                visitor(crysirror_core::state::ClientId(client), &coverage.texture);
+            }
             match spec {crysirror_vfx::RenderSpec::Sprite{texture,..}|crysirror_vfx::RenderSpec::Mesh{texture,..}|crysirror_vfx::RenderSpec::Ribbon{texture,..}=>if let Some(asset)=texture {visitor(crysirror_core::state::ClientId(client),asset);}}
         }
         let mut inputs=|inputs:&[SystemInstance]| {for instance in inputs {for emitter in &instance.spec.emitters {render(instance.client,&emitter.render,visitor);}}};

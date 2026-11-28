@@ -114,6 +114,12 @@ its bind joint. They need the evaluated joint pose for bone animation.
 
 `LIGHT_TABLE_1` holds a light record at +0x28, the probe count at +0x18 and the probe array at +0x30. A probe is 240 bytes: a position in metres and two sets of nine RGB spherical-harmonic coefficients (coefficient-major, RGB interleaved), then padding. The `ice-cave-temple` probes (635) lie on a 2 m grid. The player sums both sets, evaluates them as radiance with cosine convolution per vertex and draws the result through `baked_vertex_irradiance`. Which lighting each set holds and the brightness scale are not established. The `default-lightmap0/1` textures in level packages are 32 × 32 defaults, not baked maps.
 
+The BCAS20097 title's placed instance supplies the main pass's actual vertex lighting. Instance +0x18 points to pairs of pointers, one pair per fragment. The first points to the replacement stream list, the second to the replacement quantization descriptor. The first stream holds attribute 0x4c, with variable bit depths even though the corresponding prototype field has zero bits. The regular kind 4/6 rules produce RGB light and a fourth shadow channel. On `menu-temple` the table covers all 37 fragments and 12,383 vertices. The gold main pass (shader 34) sends v8.rgb × c[467].x and v8.w to TEX5. The binding names c[467] `g_basis3InGameScalar`. The settings writer at 0x123C1C prints this from record +0x7e0, and the title area's value is 6.99962. The same vertex program raises v4.x to `g_fBlendSoftness_fBlendOffset.y` before passing the layer mask to the fragment program.
+
+Uniquely placed geometry exports those RGB values through the shared baked-irradiance effect. Conversion to irradiance includes π because the shared diffuse BRDF divides by π. The environment scale follows changes of the active area's render settings. Repeated instances still share their prototype mesh. The original fourth channel's distance-dependent mix with the screen shadow and its light pre-pass normal terms are not reproduced. The temple gold material's alternate shader 40 samples `indirect.rgbmax` and `indirect.rgbmaxdelta` through TEX4 (v5.xy), reconstructing RGB × alpha × 10 + delta × 0.01. The default title geometry uses the vertex path above.
+
+Indoor levels without a rendered sky now provide their probe radiance to the shared reflection prefilter. A fixed menu samples its camera neighbourhood. Mobile cameras use the field mean. The resulting low-frequency reflection is a reconstruction from the SH9 field, not an original specular cubemap.
+
 Texture descriptors carry the source file name (`…/name-color.tga/….ndb`); materials are matched to their colour map by that name.
 
 ## Trigger regions
@@ -174,7 +180,8 @@ Task continuation records (subnode +0x28) are `{string, StringId}` slots: the pl
 
 ## Script animation
 
-- **`animate` / `wait-animate`:** `(animate object clip key value …)` plays a clip once on an object: a process (it plays on the process's spawner entities), a spawner name, or `player`. The level scripts use three keys: 2 (blend-in seconds), 4 (blend-out seconds) and 7 (a locator record from `get-ap-ref-locator`/`get-spawner-locator`). Other keys are ignored. `wait-animate` suspends the track until the clip ends.
+- **`animate` and `wait-animate`** accept a spawner, a process bound to a spawner, or `player`. For `self` (0xffb75566), PPU 0x710C58 uses the calling process's entity handle. PPU 0x2DCB18 copies ANIM payload +4 bit 0 into the playing state's loop bit. PPU 0x2EAD8C computes the period from clip-data +0x28 × +0x2c, the final sample index times seconds per frame. The adapter reads options 2 (blend in), 4 (blend out), 7 (locator) and 11 (force looping). `wait-animate` can resume at the end of the first pass while the loop continues (0x162640).
+- **SimpleActor** requests the art group's `idle` clip on its base layer (0x160428). In `menu-temple` this drives eight cloth banners and one vine. Fourteen pigeon spawners at the origin instead run `ss-play-anim-on-spawn`, whose begin block calls `animate(self, tag-symbol(anim-name))`. Their individual clips from `anim-menu` carry absolute joint trajectories on the common 19-joint pigeon rig.
 - **`get-animation-phase`:** `(get-animation-phase object)` returns the phase (0–1).
 - **`get-object-locator` / `get-ap-ref-locator`:** `(get-object-locator object)` and `(get-ap-ref-locator ? object)` return that object's locator record `{x, y, z, 1, qx, qy, qz, qw}`.
 - **Where clips come from:** the entity rig's packages, then the `pak22.txt` `actor` packages of the task's levels (`anim-train-wreck-climb` for the prologue cars). The clip is decoded for that rig's skeleton and played from a single-clip library.
@@ -203,12 +210,14 @@ Spawner (+0x40) points to a parent spawner; locators of children are in the pare
 
 ## Material layering
 
-`src/rsx.rs` decodes RSX fragment programs. The shader table is `MATERIAL_TABLE_1` +0x1c; each program stores its size at +0 and its microcode at +0x10, with instruction words half-swapped. Passes bind texture units through their parameter table at pass data +0x14: 16-byte records `{u16 register, u16, u32 class, u32 value, u32 name}`, with the count in the low half of word 2 and names in a package string pool. A record of class 0x0202 binds the k-th material sampler (sampler k + 1) to the unit in its high half. Class 0x0201 binds global buffers: the light pre-pass on 12/13 and the screen shadow. In `rock-to-snow`, rock is unit 2, mask unit 0 and snow unit 3. The recogniser follows weights as affine sums of the world normal's y (`TEX2`, from `v2 · c[8…10]`), the vertex mask (`COL0.x`, attribute 0x15) and texture channels, and finds two-layer blends:
+`src/rsx.rs` decodes RSX fragment programs. The shader table is `MATERIAL_TABLE_1` +0x1c; each program stores its size at +0 and its microcode at +0x10, with instruction words half-swapped. Passes bind texture units through their parameter table at pass data +0x14: 16-byte records `{u16 register, u16, u32 class, u32 value, u32 name}`, with the count in the low half of word 2 and names in a package string pool. For a sampler record (class low half 0x0202), +0 selects the texture unit and +12 selects the material sampler index. Several units can reference the same sampler. Class 0x0201 binds global buffers: the light pre-pass on 12/13 and the screen shadow. In `rock-to-snow`, rock is unit 2, mask unit 0 and snow unit 3. The recogniser follows weights as affine sums of the world normal's y (`TEX2`, from `v2 · c[8…10]`), the vertex mask (`COL0.x`, attribute 0x15) and texture channels, and finds two-layer blends:
 
 - **Slope:** `mix(top, side, saturate(1 − n.y))`. `trnwrk-snow-mod-cliff-cheap` puts rock under snow on the same UV (`TEX0 = v1.xyxy`). The `cliffwall-snow` and `snow-boulder` programs use a computed light grey on top (0.5 plus three saturated terms in gamma space). `trnwrk-tree-bark-cheap` carries snow on its bark.
 - **Height mask:** the side layer is weighted `saturate((mask.g − (1 + s)·m + 2s) / 2s)`, with `m` the vertex mask and `s` = `g_fBlendSoftness` (0.1). It appears in `trn-wide-mountains-snow/rock-to-snow`, 13 `ice-cave-temple` materials and the `menu-temple` gold and plaster blends.
 
 Shading follows the native passes: diffuse light from the pre-pass and probes, with specular only through a `…-spec-mask` sampler, so materials without one reflect nothing (the shared PBR environment reflection is off for them). The first non-placeholder `…-normal` sampler perturbs the normal; DXT5 normal maps hold X in alpha and Y in green (mean channels `(0, 136, 0, 139)`), DXT1 ones XYZ in RGB. Water binds an environment reflection map (`…-env-reflection`, 128² lat-long) that its program adds at 0.6 along the reflection vector over the scrolling colour; here a smooth specular reflects the environment instead.
+
+The title gold's main pass (shader 34 in `menu-temple`) interpolates two half vectors formed per vertex from the normalized view vector, geometric normal and sun direction. FP 0x0310 and 0x0380 take their saturated dot products with the shading normal. The log–multiply–exp pairs at 0x03e0 and 0x0460 raise both to the material exponent (194.5). The directional lobe multiplies the sun contribution and the other multiplies the placed light with an additional ambient-occlusion factor. Both have scale 1.33 on the six gold materials. A seventh material, `tmp-entry-statue-bag-of-kittens/01`, binds the same programs with scale 1.32. At 0x0410 and 0x04d0 units 5 and 4 supply the green-channel specular masks for the upper and base layers. The same height blend mixes both specular and albedo layers. All six title gold materials bind both units to their own sampler 4. The vertex and fragment instruction streams select the shared `layered_blinn` material. The normal prepass (shader 35) binds its sole normal map on unit 1. Instructions 0x0020–0x0120 convert the red and green samples to signed XY, reconstruct positive Z with a square root and normalize, including for BC1-encoded maps. The screen-light input uses the shared renderer's shadow evaluation. The tangent basis is regenerated from positions, normals and UVs.
 
 Pass 5 holds the albedo alone. Materials whose pass 0 binds none (`snow-ground-main-noblend`) take it from there.
 
@@ -226,7 +235,11 @@ Render-settings regions belong to the `camera` category (0x89335b6e) and are tes
 
 ## Particle effects
 
-`src/particle.rs` documents the descriptor layout. Trigger regions name the area's particle DC module with a `part-module` entry (`menu-temple-ingame10` → `part-menu`, `train-wreck-ingame10` → `part-trainwreck`, `part-trainwreck-climb`), and `PartSpawner` spawners place an `effect-group-desc` by its `particle-group` string, with `color` and `effect-scale` (vec4, property type 8), `alpha` and `sprite-scale` tags (`sub_7616E8`). Each `particle-effect-desc` (version 8) holds looping cubic curves, ramps (step, linear, ease-in, ease-out, cosine), an attribute table, a spawn and an update program for the 23-operation interpreter of the SPU particle job (`sub_12E0`, the RNG `rng·0x6255 + 0x3619` restarted from each particle's seed), the emission (+0xc8, a burst count with flag 0x4, otherwise particles/s), the render orientation (+0x4c: 0 camera-facing, 1 about spawner Y, 2–4 velocity, 5/6 the spawner's YZ/XZ plane, 7 its frame) and the emitter shape (+0xec: point with a lifespan mode, or a volume). Materials are `particle.pak`'s `MATERIAL_TABLE_1` (+0xc count, +0x20 records, record +0x18 `StringId`; pass data +0x20 the colour blend factors). Float parameters at or above 2⁶³ reference ramps and above 2⁶⁴ curves. Every descriptor of the 61 installed particle modules translates (`examples/particle_effects --check`). The menu's light shafts are 1-particle infinite planes (`menu-godray-barndoor` 8.5 × 16 m about ±1.2 m offsets; `-skinny-hres` 0.63 × 10.5 m), the dust 14 particles/s for 3–10 s, 0.03 m, from a 2.0 × 0.4 × 2.3 m box.
+`src/particle.rs` documents the descriptor layout. Trigger regions name the area's particle DC module with a `part-module` entry (`menu-temple-ingame10` → `part-menu`, `train-wreck-ingame10` → `part-trainwreck`, `part-trainwreck-climb`), and `PartSpawner` spawners place an `effect-group-desc` by its `particle-group` string, with `color` and `effect-scale` (vec4, property type 8), `alpha` and `sprite-scale` tags (`sub_7616E8`). Each `particle-effect-desc` (version 8) holds looping cubic curves, ramps (step, linear, ease-in, ease-out, cosine), an attribute table, a spawn and an update program for the 23-operation interpreter of the SPU particle job (`sub_12E0`, the RNG `rng·0x6255 + 0x3619` restarted from each particle's seed), the emission (+0xc8, a burst count with flag 0x4, otherwise particles/s), the render orientation (+0x4c: 0 camera-facing, 1 about spawner Y, 2–4 velocity, 5/6 the spawner's YZ/XZ plane, 7 its frame) and the emitter shape (+0xec: point with a lifespan mode, or a volume). Materials are `particle.pak`'s `MATERIAL_TABLE_1` (+0xc count, +0x20 records, record +0x18 `StringId`; pass data +0x30 the colour blend factors, +0x34 the alpha factors). Float parameters at or above 2⁶³ reference ramps and above 2⁶⁴ curves. Every descriptor of the 61 installed particle modules translates (`examples/particle_effects --check`). The menu's light shafts are 1-particle infinite planes (`menu-godray-barndoor` 8.5 × 16 m about ±1.2 m offsets; `-skinny-hres` 0.63 × 10.5 m), the dust 14 particles/s for 3–10 s, 0.03 m, from a 2.0 × 0.4 × 2.3 m box.
+
+The menu shaft material `godrays-fog/default` (0xd9a5e9e2) uses RSX pass 0, shader 0x1e. Its RGB is the sRGB-decoded diffuse times the interpolated vertex RGB and fog transmittance. The six scrolling world-space `fog-trans` taps, opaque-depth fade and vertex alpha feed the separate alpha output. Both blend operations add source and destination with unit factors. The particle build job (image 0xbb8900, file offsets 0x5ed4 and 0x6068–0x6250) scales and packs the four vertex channels independently. The quad twists its two scaled basis vectors in the placed emitter frame, including when the particle centre is already in world coordinates. Dust uses shader 0x23 and factors `ONE, ONE_MINUS_SRC_ALPHA`. Its vertex alpha comes from render map 5, destination 4, channel 3: the eight-byte binding selects ramp 3 although the named `alpha` attribute has no slot. The dust fragment program emits zero output alpha; its visible brightness still follows the render-map ramp.
+
+The cull job reads the pass from the low nibble at descriptor +0x48 (SPU 0xdc64–0xdc8c). Pass 3 resolves per particle by Euclidean camera distance into buckets 0, 1 or 2 (0xe078–0xe100). The active render settings supply mid and far thresholds at +0x49c/+0x4a0 through PPU `sub_76A230`; the temple values are 10 and 50 m. The sort job reads the same nibble (0x1b28–0x1b58). All six menu shaft types request pass 3; dust requests pass 4. PPU `sub_6B2B8` draws the low-resolution buckets before pass 4 and composites them once with `post-56.pak`'s `levels/post/particle-techs/Default`, RSX shader 0x92, factors `ONE, ONE_MINUS_SRC_ALPHA`. Source RGB remains independent of coverage. The adapter applies the six `fog-trans.g` world-coordinate samples (material scroll 0, 0.075, 0; scale 0.35) and renders the title shafts with independent additive RGB. An experiment applying the shared full-resolution coverage composite to these shafts exposed dark quad boundaries against the temple. The native low-resolution target's per-material channel writes and prior contents require further evidence before enabling it on this material. The original adaptive lower-resolution targets and depth-directed upsampling, the exact radial soft-depth factor, floor fog and the random dust atlas frame remain open.
 
 ## Navigation, splines and cover
 
@@ -315,9 +328,13 @@ Further natives: `enable-`/`disable-nav-blocker-object` and `block-`/`unblock-na
 
 `src/sound.rs`. `audio.bin` records of type 0xEE0BFF2F are `{id, Scream name, flags, class, …, half-float parameters}`; `play-sound` (name [volume 1] [pitch 0]), `play-sound-at-position` (name point [volume] [pitch]) and `play-sound-at-joint` (name object joint [volume] [pitch]) start a sound process for the record (`sub_138650`) and return its id; `stop-sound` (id) ends it (`sub_7092F0`, `sub_7095F0`). `set-mixer-override` selects a mixer snapshot (`sub_2F04B8`); `cache-sound-stream` prefetches a stream (`sub_2FA2E0`); `sync-audio-meta-data`/`sync-vox-meta-data` reload the tables (`sub_3037B8`, `sub_32FD08`).
 
-Scream banks (`sound1/banks.psarc`): `{3, section count, (offset, size)…}`; section 0 is the `SBlk` block (magic stored `klBS`, version 4), section 1 the samples. `SBlk` +0x14 sound count, +0x18 grain count (high half), +0x1C sounds (12 bytes: volume, …, +4 grain count, +8 first grain offset), +0x20 grains (8 bytes: `command << 24 | data offset`, delay), +0x34 grain data, +0x38 name table (`{bank name[8], buckets, strings offset}`, then 16-byte `{string, hash, sound, next}` per sound). Grain command 1 plays a tone: 24 bytes ending in the sample offset and size; command 5 plays another sound — by name when the word at +0xC is −1 (name at +0x14), else by the index in byte 8. Tones are raw PS-ADPCM (VAG loop flags 0x04 start, 0x02 repeat) or MP3 behind a 0x80-byte header `{1, codec 3, …, +0x0C rate 48000, …, +0x34 data size}` (MPEG-1 Layer III, 48 kHz, 288-byte frames).
+Scream banks (`sound1/banks.psarc`): `{3, section count, (offset, size)…}`; section 0 is the `SBlk` block (magic stored `klBS`, version 4), section 1 the samples. `SBlk` +0x14 sound count, +0x18 grain count (high half), +0x1C sounds (12 bytes: volume, …, +4 grain count, +8 first grain offset), +0x20 grains (8 bytes: `command << 24 | data offset`, delay), +0x34 grain data, +0x38 name table (`{bank name[8], buckets, strings offset}`, then 16-byte `{string:u32, hash:u32, bucket-head:u16, next:u16, sound-index:u16, pad:u16}` per sound). Grain command 1 plays a tone: 24 bytes ending in the sample offset and size; command 5 plays another sound — by name when the word at +0xC is −1 (name at +0x14), else by the index in byte 8. Tones are raw PS-ADPCM (VAG loop flags 0x04 start, 0x02 repeat) or MP3 behind a 0x80-byte header `{1, codec 3, …, +0x0C rate 48000, …, +0x34 data size}` (MPEG-1 Layer III, 48 kHz, 288-byte frames).
 
-On the disc, 182 banks hold 4,792 sounds and 12,713 tones (2,297 MP3); 3,373 of the 3,966 sound records name a bank sound and 2,539 reach a tone.
+On the disc, 182 banks hold 4,792 sounds and 12,806 tone grains (2,297 MP3). Of 3,966 audio records, 3,373 name a bank sound. The sound index at +12 forms a permutation in all 182 banks; in hud.bnk, +8 has 232 distinct values for 359 sounds.
+
+The bank tone `hud.bnk/drake-impact-foot` carries extended PS3 VAG predictor indices 5, 6 and 9 in ordinary frames. All eleven extra indices (5–15) occur before the end marker somewhere on this disc. Flag 1 ends playback after the final samples; flag 7 is a silent pad. The shared decoder represents the extended coefficients in units of 1/256, retaining its existing rounded accumulation. [Extended predictor table and frame semantics in vgmstream](https://github.com/vgmstream/vgmstream/blob/025860b137a392e017942c078161b67a25bdc016/src/coding/psx_decoder.c).
+
+Player animation effects use the ARTGROUP_DATA pointer at +0x10 in `proto-eff.pak`. A clip table contains triples of clip SID, cue count and cue pointer (PPU 0x7C624). Each cue contains the effect SID, authored frame, tag count and tag pointer (0x7C5E8–0x7C600). The on-disk count includes the frame already stored in the header. Tags such as name, joint, volume and type occupy 8 bytes apiece. The installed config has 244 mesh audio profiles (`mesh-audio-config.bin`). The dispatcher at 0x30CBF8 passes direct sound IDs through, formats gear sounds from the mesh gear prefix, and uses 0x30B0E8 to combine the character prefix, contact name, PAT surface and mesh suffix for foot and hand effects. The adapter follows the presenting player's primary clip across authored 30 Hz cue frames and self-loops. Its contact probes use the support or held edge; articulated per-joint contact and the original blend-limiter policy remain unverified.
 
 ## Vehicles
 
@@ -372,3 +389,92 @@ Free ropes are `ProcessFreeRope` (0xAAF85EAD) spawners hanging from the spawner 
 ## Hints, wall ropes and events to native processes
 
 `Hint` spawners (process type 0x9711BC65) are native processes. Their tags: `message-type` (the HUD element, `*hud-hint*` 0xD38744BD: the triangle-down button with `HINT_HINT`), `message` (the text key, `HINT_MOVE_PLAYER`, `HINT_X_JUMP`, …), `on-timer`, `display-time-initial`, `display-time-repeat`, `repeat-time`, `repeat-count` (−1 without end), `off-leave-region`, `dpad-activate`, `category`, `vox`, `vox-speaker`, `contextual-look-object`/`-spawner` and `camera-entity-fade-time`. Scripts drive them with events: `turn-on` (0x93F72B34), `turn-off` (0xE31EE130) and `reset` (0xD8B09E0C); `hide-hint` hides the shown one. The same `turn-on`/`turn-off` events switch script dynamic lights (`fx-lit-…`), and `disable-object-features` (0x0CEB848A) removes an object's climbing features. `WallRope` spawners (0xF9CB4287) hang from their position with tags `Length` (0xFDC4BC55, metres), `disable-swing`, `physStartIndex`, `physJointSpacing`, `physStartUnusable`, `physStartInactive`, `spawn-task` and `spawn-sub-task`; `ProcessFreeRope` adds `play-idle-swing-anim`, `grab-dist-from-bottom`, `no-hang-from` and `no-features`.
+
+## BCAS20097 movie and music playback
+
+The 47 task-film resources in `movie1` use elementary MPEG video and separate
+soundtracks. The unlocalized `sce-ndi-logos` mix is in `sound1/streams`. The
+other 46 same-stem mixes are in `sound1/speech/english` on this disc.
+`start-movie-audio` (0x13C5E0) passes the C string and signed second argument to
+0xD919C and returns zero. The helper starts the stream once and retains the
+offset at +0x1A0. The movie update at 0xDACB4 reads the audio clock and subtracts
+the offset for picture timing. Task entry reuses a matching prestarted voice.
+The engine projects the six encoded planes to stereo using their XVAG speaker
+roles. The logo and story film mixes put the centre channel on different planes.
+
+The menu subnode points at its audio settings at +0x2C. Slot +0x0C of those
+settings selects music-settings record 0x824AFBB3. Records of type 0x40A43830
+contain a selection mode at +0, four previous indices starting at +0x98,
+and an entry count and pointer at +0xA8/+0xAC. Each eight-byte entry has a
+filename pointer and a binary16 dB adjustment at +4. The menu mode starts on
+entry zero, `81_UNCH2_NatesTheme`, at −8 dB. Script native
+`play-music-stinger` (0x13BA68) passes a record ID to 0x319F78 and returns
+zero. Cue selection follows 0x319598. CrySirror uses its own deterministic
+random sequence. Native mixer snapshots, layered adaptive transitions and the
+exact sub-frame timing of the two scripted flashback handoffs remain unverified.
+
+
+### Wall-rope traversal (BCAS20097 01.00)
+
+The edge-to-rope requests in `anim-player.bin` are 0xCE340538 (right) and
+0xB1FB62DF (left). The reverse requests are 0x08FDB8EC and 0x7732DF0B.
+Each plays two clips in the same align frame, then automatically enters
+`wall-rope-idle` or `ledge-grab` with a 0.4 s fade. The right-hand pair in
+`proto.pak` moves the root horizontally by about 0.49 m and vertically by
+0.47 m. The player fits this trajectory to the selected world-space grips.
+
+`sub_6A4618` requests 0x668C107F on a swing reversal. The turn's auto
+transition returns to swing with a 0.5 s fade. `anim-proto-ropes.pak` holds
+the run, walk, turn, release and catch clips. The movement direction feeds
+the mirror lambda at instance +0x1C. The turn uses its inverse. Absolute
+tangential speed drives the run/walk blend at info +0xDC between 1.6 and
+5.0 m/s. The portable pendulum retains its own pump and damping constants.
+
+For a parallel edge, `sub_7058CC` tests the wall normal (0.7), lateral travel
+against the normal (0.3), and grab height against horizontal distance.
+`sub_705634` sets the targeted jump duration using horizontal travel and
+height with gravity 10 m/s². The catch begins at the target edge transformed
+by the clip's action-pack reference and initial align. The adapter samples
+the resulting arc, checks it against solid geometry and completes the catch
+through the native animation table. It currently searches nearby collision
+edges and uses ray segments for clearance. Exact native candidate generation,
+the swept-volume test and the perpendicular catch variants are outside this
+parallel-edge implementation. A release with no selected target enters
+`wall-rope-jump-miss` and carries the swing tangent into airborne movement.
+
+### BCAS20097 title text
+
+The retail descriptor `PS3_GAME/USRDIR/data/fonts/main.fnt` names Adelon-Serial
+DB, bold, size 42, line height 42 and baseline 34. Its 204 Unicode glyphs
+and 621 kerning pairs refer to the 256 × 128 `main_00.tga` VRAM descriptor
+in `build/main/misc1/debugrenderingf.pak`. The packed mask values 1, 2, 4, 8
+select alpha, red, green, blue of the decoded surface with Y inverted. In
+that orientation every glyph's outer texel border is clear. The English
+catalog string “Press the START button” advances 324 pixels at native size
+and “New Game” advances 160. Title text uses the shared retained image-glyph
+path with per-character offsets, advances and pair kerning. The disc also
+provides Japanese, Korean, Chinese and Russian menu font descriptors.
+
+The PPU root-page path in `sub_4196E8` requests drawable type 8 aligned to
+horizontal centre and top. `sub_42EC60` gives it a 1024 × 256 rectangle.
+`sub_426C40` computes the alignment and `sub_429720` case 8 adds 80 pixels
+to Y before drawing material slot 0. This yields (128, 80) at 1280 × 720.
+`sub_428558` populates slots 0 and 1 with the logo and edge materials. In
+a user-supplied video frame, the best correlation between the English disc
+logo and the normalized capture was 0.963 at (128.84, 79.37), with scale
+(1.002, 1.006). The root prompt and legal notice use measured tracking,
+line spacing, neutral tints and downward shadows from the same English frame.
+Their exact native colour constants and other locales' visual layout are
+unverified. Submenu coordinates and focus styles have independent layout.
+
+The menu drawer loads `general/menu/menu-edge/Default` into slot 1 at
+`sub_428558`. Before drawing widgets, `sub_431E18` checks that page flag
+`0x2` is clear and calls the edge draw through `sub_431CB0` and
+`sub_4271A0`. `sub_4242FC` spans the current viewport. The root page has
+flags `0x5001`. All five passes of the edge material in `pak22/menu.pak`
+bind colour `0x3290a96d` and mask `0x4bd4efea`. The shared image layer
+reads the 256 × 256 board below the logo and text and clears it when the VM
+leaves the menu. The mask's red channel is 186 at the corners, 140 at the
+middle of the top edge and zero at the centre. Its corner colour is sRGB
+(24, 34, 28). The tomb's distance and height fog and the statue's material
+are separate world draws.

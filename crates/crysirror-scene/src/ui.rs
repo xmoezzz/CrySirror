@@ -335,6 +335,8 @@ pub struct UiSystem {
     pub window_policy: Option<(u32, WindowPolicy)>,
     #[serde(default)]
     pub fullscreen: Option<(u32, bool)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_scale: Option<(u32, u32)>,
     #[serde(default)]
     pub presentation_scale: Option<(u32, crysirror_core::service::PresentationScale)>,
     clients: BTreeMap<u32, BTreeMap<u32, Widget>>,
@@ -522,6 +524,8 @@ pub enum UiCommand {
         decorated: bool,
         resizable: bool,
     },
+    /// Render presentation captures at a multiple of the logical canvas.
+    SetCaptureScale { scale: u32 },
     SetFullscreen {
         enabled: bool,
     },
@@ -795,6 +799,10 @@ impl UiSystem {
                     staged.pointer_warp = Some((client.0, *position));
                     staged.pointer_override = Some(*position);
                 }
+                UiCommand::SetCaptureScale { scale } => {
+                    ensure!(matches!(scale, 1 | 2 | 4), "capture scale");
+                    staged.capture_scale = Some((client.0, *scale));
+                }
                 UiCommand::SetFullscreen { enabled } => {
                     staged.fullscreen = Some((client.0, *enabled));
                 }
@@ -1052,6 +1060,7 @@ impl UiSystem {
             .chain(self.title.as_ref().map(|v| v.0))
             .chain(self.window_policy.as_ref().map(|v| v.0))
             .chain(self.fullscreen.as_ref().map(|v| v.0))
+            .chain(self.capture_scale.map(|v| v.0))
             .chain(self.presentation_scale.as_ref().map(|v| v.0))
             .chain(self.window_requests.size.as_ref().map(|v| v.0))
             .chain(self.window_requests.position.as_ref().map(|v| v.0))
@@ -1119,6 +1128,7 @@ impl UiSystem {
         Ok(())
     }
     pub fn validate(&self) -> Result<()> {
+        ensure!(self.capture_scale.is_none_or(|(_, scale)| matches!(scale, 1 | 2 | 4)), "capture scale");
         self.motions.validate(false, |owner, id| {
             self.clients
                 .get(&owner)

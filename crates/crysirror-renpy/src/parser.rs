@@ -16,12 +16,22 @@ pub trait ScriptContext: ParseContext {
     fn user_statement_names(&self) -> Vec<Vec<String>>;
     /// Parses a creator-defined statement. Called with the lexer positioned
     /// after the statement keywords.
-    fn parse_user_statement(&self, arena: &mut Arena, name: &[String], l: &mut Lexer, loc: &(Rc<str>, u32)) -> PResult<Vec<NodeId>>;
+    fn parse_user_statement(
+        &self,
+        arena: &mut Arena,
+        name: &[String],
+        l: &mut Lexer,
+        loc: &(Rc<str>, u32),
+    ) -> PResult<Vec<NodeId>>;
     /// Screen-language statements (built-in and creator-defined).
     fn sl2_registry(&self) -> &crate::sl2::Registry;
     /// Evaluates a parse-time `IF` condition.
     fn eval_parse_condition(&self, _expr: &PyExpr) -> PResult<bool> {
         Ok(false)
+    }
+    /// The Ren'Py release whose grammar applies, `(major, minor)`.
+    fn release(&self) -> (u32, u32) {
+        (8, 6)
     }
 }
 
@@ -39,14 +49,23 @@ fn imspec_name_parts(name: &[String]) -> Vec<String> {
 
 impl<'a> Parser<'a> {
     pub fn new(arena: &'a mut Arena, cx: &'a dyn ScriptContext) -> Self {
-        Parser { arena, cx, errors: Vec::new() }
+        Parser {
+            arena,
+            cx,
+            errors: Vec::new(),
+        }
     }
 
     fn add(&mut self, loc: &Loc, kind: NodeKind) -> NodeId {
         self.arena.add(loc, kind)
     }
 
-    pub fn parse_image_name(&mut self, l: &mut Lexer, string: bool, nodash: bool) -> PResult<Vec<String>> {
+    pub fn parse_image_name(
+        &mut self,
+        l: &mut Lexer,
+        string: bool,
+        nodash: bool,
+    ) -> PResult<Vec<String>> {
         let mut rv = vec![match l.image_name_component() {
             Some(c) => c,
             None => return l.error("expected 'image_name_component' not found."),
@@ -68,11 +87,21 @@ impl<'a> Parser<'a> {
     }
 
     fn simple_list(&mut self, l: &mut Lexer, image: bool) -> PResult<Vec<PyExpr>> {
-        let first = if image { l.image_simple_expression()? } else { l.simple_expression()? };
-        let Some(first) = first else { return l.error("expected 'simple_expression' not found.") };
+        let first = if image {
+            l.image_simple_expression()?
+        } else {
+            l.simple_expression()?
+        };
+        let Some(first) = first else {
+            return l.error("expected 'simple_expression' not found.");
+        };
         let mut rv = vec![first];
         while l.match_re(",").is_some() {
-            let e = if image { l.image_simple_expression()? } else { l.simple_expression()? };
+            let e = if image {
+                l.image_simple_expression()?
+            } else {
+                l.simple_expression()?
+            };
             match e {
                 Some(e) => rv.push(e),
                 None => break,
@@ -98,7 +127,11 @@ impl<'a> Parser<'a> {
                 if spec.layer.is_some() {
                     return l.error("multiple onlayer clauses are prohibited.");
                 }
-                spec.layer = Some(l.image_name_component().map_or_else(|| l.error("expected 'image_name_component' not found."), Ok)?);
+                spec.layer =
+                    Some(l.image_name_component().map_or_else(
+                        || l.error("expected 'image_name_component' not found."),
+                        Ok,
+                    )?);
                 continue;
             }
             if l.keyword("at") {
@@ -149,8 +182,20 @@ impl<'a> Parser<'a> {
             return Ok(vec![node]);
         }
         let expr = l.require_simple()?;
-        let a = self.add(&loc, NodeKind::With { expr: None, paired: Some(expr.clone()) });
-        let b = self.add(&loc, NodeKind::With { expr: Some(expr), paired: None });
+        let a = self.add(
+            &loc,
+            NodeKind::With {
+                expr: None,
+                paired: Some(expr.clone()),
+            },
+        );
+        let b = self.add(
+            &loc,
+            NodeKind::With {
+                expr: Some(expr),
+                paired: None,
+            },
+        );
         Ok(vec![a, node, b])
     }
 
@@ -169,7 +214,11 @@ impl<'a> Parser<'a> {
             }
             if l.match_re(r"\*\*").is_some() {
                 let n = l.require_name()?;
-                params.push(Parameter { name: n, kind: 4, default: None });
+                params.push(Parameter {
+                    name: n,
+                    kind: 4,
+                    default: None,
+                });
                 l.match_re(",");
                 l.require_re(r"\)", ")")?;
                 break;
@@ -181,11 +230,16 @@ impl<'a> Parser<'a> {
                 kind = 3;
                 now_default = false;
                 if let Some(n) = l.name() {
-                    params.push(Parameter { name: n, kind: 2, default: None });
+                    params.push(Parameter {
+                        name: n,
+                        kind: 2,
+                        default: None,
+                    });
                 }
             } else if l.match_re("/").is_some() {
                 if kwonly || got_slash || params.is_empty() {
-                    return l.error("/ must follow at least one parameter, before *, and appear once");
+                    return l
+                        .error("/ must follow at least one parameter, before *, and appear once");
                 }
                 for p in params.iter_mut() {
                     p.kind = 0;
@@ -203,12 +257,18 @@ impl<'a> Parser<'a> {
                     default = Some(d);
                     now_default = true;
                 } else if now_default && !kwonly {
-                    return l.error(format!("non-default parameter {name:?} follows a default parameter"));
+                    return l.error(format!(
+                        "non-default parameter {name:?} follows a default parameter"
+                    ));
                 }
                 if params.iter().any(|p| p.name == name) {
                     return l.error(format!("duplicate parameter name {name:?}"));
                 }
-                params.push(Parameter { name, kind, default });
+                params.push(Parameter {
+                    name,
+                    kind,
+                    default,
+                });
             }
             if l.match_re(r"\)").is_some() {
                 break;
@@ -289,7 +349,16 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn finish_say(&mut self, l: &mut Lexer, loc: &Loc, who: Option<PyExpr>, what: What, attributes: Option<Vec<String>>, temporary: Option<Vec<String>>, mut interact: bool) -> PResult<Vec<NodeId>> {
+    fn finish_say(
+        &mut self,
+        l: &mut Lexer,
+        loc: &Loc,
+        who: Option<PyExpr>,
+        what: What,
+        attributes: Option<Vec<String>>,
+        temporary: Option<Vec<String>>,
+        mut interact: bool,
+    ) -> PResult<Vec<NodeId>> {
         let mut with_ = None;
         let mut arguments = None;
         let mut identifier = None;
@@ -316,17 +385,20 @@ impl<'a> Parser<'a> {
             }
         }
         let mk = |p: &mut Self, loc: &Loc, text: String| {
-            p.add(loc, NodeKind::Say {
-                who: who.clone(),
-                what: text,
-                with_: with_.clone(),
-                interact,
-                attributes: attributes.clone(),
-                temporary_attributes: temporary.clone(),
-                arguments: arguments.clone(),
-                explicit_identifier: identifier.is_some(),
-                identifier: identifier.clone(),
-            })
+            p.add(
+                loc,
+                NodeKind::Say {
+                    who: who.clone(),
+                    what: text,
+                    with_: with_.clone(),
+                    interact,
+                    attributes: attributes.clone(),
+                    temporary_attributes: temporary.clone(),
+                    arguments: arguments.clone(),
+                    explicit_identifier: identifier.is_some(),
+                    identifier: identifier.clone(),
+                },
+            )
         };
         match what {
             What::One(s) => Ok(vec![mk(self, loc, s)]),
@@ -338,7 +410,19 @@ impl<'a> Parser<'a> {
                 for (off, text) in parts {
                     let ploc = (loc.0.clone(), loc.1 + off);
                     if text == "{clear}" {
-                        rv.push(self.add(&ploc, NodeKind::UserStatement { line: "nvl clear".into(), block: Rc::new(Vec::new()), parsed: None, subparses: Vec::new(), code_block: None, init_priority: 0, translatable: false, atl: None }));
+                        rv.push(self.add(
+                            &ploc,
+                            NodeKind::UserStatement {
+                                line: "nvl clear".into(),
+                                block: Rc::new(Vec::new()),
+                                parsed: None,
+                                subparses: Vec::new(),
+                                code_block: None,
+                                init_priority: 0,
+                                translatable: false,
+                                atl: None,
+                            },
+                        ));
                     } else {
                         rv.push(mk(self, &ploc, text));
                     }
@@ -348,7 +432,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_menu(&mut self, stmtl: &mut Lexer, loc: &Loc, arguments: Option<ArgumentInfo>) -> PResult<Vec<NodeId>> {
+    fn parse_menu(
+        &mut self,
+        stmtl: &mut Lexer,
+        loc: &Loc,
+        arguments: Option<ArgumentInfo>,
+    ) -> PResult<Vec<NodeId>> {
         let mut l = stmtl.subblock_lexer(false);
         let mut has_choice = false;
         let mut say_ast: Option<NodeId> = None;
@@ -372,7 +461,11 @@ impl<'a> Parser<'a> {
             let state = l.checkpoint();
             let who = l.simple_expression()?;
             let attributes = self.say_attributes(&mut l);
-            let temporary = if l.match_re(r"\@").is_some() { self.say_attributes(&mut l) } else { None };
+            let temporary = if l.match_re(r"\@").is_some() {
+                self.say_attributes(&mut l)
+            } else {
+                None
+            };
             let what = self.what(&mut l);
             if let (Some(who), Some(what)) = (who, what) {
                 if has_caption {
@@ -382,7 +475,8 @@ impl<'a> Parser<'a> {
                     return l.error("Only one say menuitem may exist per menu.");
                 }
                 let sloc = l.location();
-                let v = self.finish_say(&mut l, &sloc, Some(who), what, attributes, temporary, false)?;
+                let v =
+                    self.finish_say(&mut l, &sloc, Some(who), what, attributes, temporary, false)?;
                 if v.len() != 1 {
                     return l.error("Monologue mode cannot be used in a menu.");
                 }
@@ -392,7 +486,9 @@ impl<'a> Parser<'a> {
                 continue;
             }
             l.revert(&state);
-            let Some(label) = l.string() else { return l.error("expected menuitem") };
+            let Some(label) = l.string() else {
+                return l.error("expected menuitem");
+            };
             if l.eol() {
                 if l.has_block() {
                     return l.error("Line is followed by a block, despite not being a menu choice. Did you forget a colon at the end of the line?");
@@ -403,18 +499,32 @@ impl<'a> Parser<'a> {
                 if !label.is_empty() {
                     has_caption = true;
                 }
-                items.push(MenuItem { label, condition: l.expr("True".into()), block: None, arguments: None });
+                items.push(MenuItem {
+                    label,
+                    condition: l.expr("True".into()),
+                    block: None,
+                    arguments: None,
+                });
                 continue;
             }
             has_choice = true;
             let args = self.parse_arguments(&mut l)?;
-            let condition = if l.keyword("if") { l.python_expression()? } else { l.expr("True".into()) };
+            let condition = if l.keyword("if") {
+                l.python_expression()?
+            } else {
+                l.expr("True".into())
+            };
             l.require_re(":", ":")?;
             l.expect_eol()?;
             l.expect_block("choice menuitem")?;
             let mut sub = l.subblock_lexer(false);
             let block = self.parse_block(&mut sub)?;
-            items.push(MenuItem { label, condition, block: Some(block), arguments: args });
+            items.push(MenuItem {
+                label,
+                condition,
+                block: Some(block),
+                arguments: args,
+            });
         }
         if !has_choice {
             return stmtl.error("Menu does not contain any choices.");
@@ -423,17 +533,43 @@ impl<'a> Parser<'a> {
         if let Some(s) = say_ast {
             rv.push(s);
         }
-        let m = self.add(loc, NodeKind::Menu { items, set, with_, has_caption: say_ast.is_some() || has_caption, arguments });
+        let m = self.add(
+            loc,
+            NodeKind::Menu {
+                items,
+                set,
+                with_,
+                has_caption: say_ast.is_some() || has_caption,
+                arguments,
+            },
+        );
         rv.push(m);
         for (i, id) in rv.iter().enumerate() {
-            self.arena.get_mut(*id).rollback = if i == 0 { Rollback::Force } else { Rollback::Normal };
+            self.arena.get_mut(*id).rollback = if i == 0 {
+                Rollback::Force
+            } else {
+                Rollback::Normal
+            };
         }
         Ok(rv)
     }
 
-    fn init_wrap(&mut self, l: &Lexer, loc: &Loc, node: NodeId, priority: i32, create: bool) -> NodeId {
+    fn init_wrap(
+        &mut self,
+        l: &Lexer,
+        loc: &Loc,
+        node: NodeId,
+        priority: i32,
+        create: bool,
+    ) -> NodeId {
         if create {
-            self.add(loc, NodeKind::Init { block: vec![node], priority: priority + l.init_offset })
+            self.add(
+                loc,
+                NodeKind::Init {
+                    block: vec![node],
+                    priority: priority + l.init_offset,
+                },
+            )
         } else {
             node
         }
@@ -448,16 +584,23 @@ impl<'a> Parser<'a> {
 
     fn store_name(&mut self, l: &mut Lexer, word: bool) -> PResult<(String, String)> {
         let mut store = String::from("store");
-        let mut name = if word { l.word() } else { l.name() }.map_or_else(|| l.error("expected 'name' not found."), Ok)?;
+        let mut name = if word { l.word() } else { l.name() }
+            .map_or_else(|| l.error("expected 'name' not found."), Ok)?;
         while l.match_re(r"\.").is_some() {
             store = format!("{store}.{name}");
-            name = l.word().map_or_else(|| l.error("expected 'word' not found."), Ok)?;
+            name = l
+                .word()
+                .map_or_else(|| l.error("expected 'word' not found."), Ok)?;
         }
         Ok((store, name))
     }
 
     fn pycode(&self, src: PyExpr, mode: &'static str) -> PyCode {
-        PyCode { source: src, mode, py3: false }
+        PyCode {
+            source: src,
+            mode,
+            py3: false,
+        }
     }
 
     /// One statement at the lexer's current line (may produce several nodes).
@@ -500,12 +643,27 @@ impl<'a> Parser<'a> {
                 let (target, expression) = if l.keyword("expression") {
                     (l.require_simple()?.text.to_string(), true)
                 } else {
-                    (l.label_name().map_or_else(|| l.error("expected 'label_name' not found."), Ok)?, false)
+                    (
+                        l.label_name()
+                            .map_or_else(|| l.error("expected 'label_name' not found."), Ok)?,
+                        false,
+                    )
                 };
                 l.expect_eol()?;
                 l.advance();
-                let gl = if expression { l.global_label.as_deref().unwrap_or("").to_string() } else { String::new() };
-                Ok(vec![self.add(&loc, NodeKind::Jump { target, expression, global_label: gl })])
+                let gl = if expression {
+                    l.global_label.as_deref().unwrap_or("").to_string()
+                } else {
+                    String::new()
+                };
+                Ok(vec![self.add(
+                    &loc,
+                    NodeKind::Jump {
+                        target,
+                        expression,
+                        global_label: gl,
+                    },
+                )])
             }
             "call" => self.call_statement(l, &loc),
             "scene" => self.scene_statement(l, &loc),
@@ -544,14 +702,23 @@ impl<'a> Parser<'a> {
                 }
                 l.expect_noblock("one-line python statement")?;
                 l.advance();
-                Ok(vec![self.add(&loc, NodeKind::Python { code: self.pycode(code, "exec"), hide: false, store: "store".into() })])
+                Ok(vec![self.add(
+                    &loc,
+                    NodeKind::Python {
+                        code: self.pycode(code, "exec"),
+                        hide: false,
+                        store: "store".into(),
+                    },
+                )])
             }
             "python" => self.python_statement(l, &loc),
             "label" => self.label_statement(l, &loc, false),
             "init" => {
                 if l.keyword("offset") {
                     l.require_re("=", "=")?;
-                    let off = l.integer().map_or_else(|| l.error("expected 'integer' not found."), Ok)?;
+                    let off = l
+                        .integer()
+                        .map_or_else(|| l.error("expected 'integer' not found."), Ok)?;
                     l.expect_eol()?;
                     l.expect_noblock("init offset statement")?;
                     l.advance();
@@ -582,8 +749,21 @@ impl<'a> Parser<'a> {
                 if l.keyword("python") {
                     let mut rv = Vec::new();
                     loop {
-                        let r = l.match_re("3").map_or_else(|| l.word().map_or_else(|| l.error("expected '__future__ name' not found."), Ok), Ok)?;
-                        rv.push(self.add(&loc, NodeKind::Rpy { rest: ("python".into(), r) }));
+                        let r = l.match_re("3").map_or_else(
+                            || {
+                                l.word().map_or_else(
+                                    || l.error("expected '__future__ name' not found."),
+                                    Ok,
+                                )
+                            },
+                            Ok,
+                        )?;
+                        rv.push(self.add(
+                            &loc,
+                            NodeKind::Rpy {
+                                rest: ("python".into(), r),
+                            },
+                        ));
                         if l.match_re(",").is_none() {
                             break;
                         }
@@ -607,7 +787,12 @@ impl<'a> Parser<'a> {
                 let mut pa = |ll: &mut Lexer| self.parse_parameters(ll);
                 let screen = cx.sl2_registry().parse_screen(l, &loc, cx, &mut pa)?;
                 l.advance();
-                let n = self.add(&loc, NodeKind::Screen { screen: Rc::new(screen) });
+                let n = self.add(
+                    &loc,
+                    NodeKind::Screen {
+                        screen: Rc::new(screen),
+                    },
+                );
                 let create = !l.init;
                 Ok(vec![self.init_wrap(l, &loc, n, -500, create)])
             }
@@ -646,7 +831,12 @@ impl<'a> Parser<'a> {
                     break;
                 }
             }
-            if ok && best.as_ref().map(|(len, _, _)| n.len() > *len).unwrap_or(true) {
+            if ok
+                && best
+                    .as_ref()
+                    .map(|(len, _, _)| n.len() > *len)
+                    .unwrap_or(true)
+            {
                 best = Some((n.len(), n.clone(), l.checkpoint()));
             }
         }
@@ -734,7 +924,13 @@ impl<'a> Parser<'a> {
         let mut sub = l.subblock_lexer(false);
         let block = self.parse_block(&mut sub)?;
         l.advance();
-        Ok(vec![self.add(loc, NodeKind::While { condition: cond, block })])
+        Ok(vec![self.add(
+            loc,
+            NodeKind::While {
+                condition: cond,
+                block,
+            },
+        )])
     }
 
     fn menu_statement(&mut self, l: &mut Lexer, loc: &Loc) -> PResult<Vec<NodeId>> {
@@ -750,7 +946,15 @@ impl<'a> Parser<'a> {
         l.advance();
         let mut rv = Vec::new();
         if let Some(lb) = label {
-            rv.push(self.add(loc, NodeKind::Label { name: lb.as_str().into(), block: Vec::new(), parameters: None, hide: false }));
+            rv.push(self.add(
+                loc,
+                NodeKind::Label {
+                    name: lb.as_str().into(),
+                    block: Vec::new(),
+                    parameters: None,
+                    hide: false,
+                },
+            ));
         }
         rv.extend(menu);
         let first = rv[0];
@@ -767,15 +971,41 @@ impl<'a> Parser<'a> {
         let (target, expression) = if l.keyword("expression") {
             (l.require_simple()?.text.to_string(), true)
         } else {
-            (l.label_name().map_or_else(|| l.error("expected 'label_name' not found."), Ok)?, false)
+            (
+                l.label_name()
+                    .map_or_else(|| l.error("expected 'label_name' not found."), Ok)?,
+                false,
+            )
         };
         l.keyword("pass");
         let arguments = self.parse_arguments(l)?;
-        let gl = if expression { l.global_label.as_deref().unwrap_or("").to_string() } else { String::new() };
-        let mut rv = vec![self.add(loc, NodeKind::Call { label: target, expression, arguments, global_label: gl })];
+        let gl = if expression {
+            l.global_label.as_deref().unwrap_or("").to_string()
+        } else {
+            String::new()
+        };
+        let mut rv = vec![self.add(
+            loc,
+            NodeKind::Call {
+                label: target,
+                expression,
+                arguments,
+                global_label: gl,
+            },
+        )];
         if l.keyword("from") {
-            let name = l.label_name().map_or_else(|| l.error("expected 'label_name' not found."), Ok)?;
-            rv.push(self.add(loc, NodeKind::Label { name: name.as_str().into(), block: Vec::new(), parameters: None, hide: false }));
+            let name = l
+                .label_name()
+                .map_or_else(|| l.error("expected 'label_name' not found."), Ok)?;
+            rv.push(self.add(
+                loc,
+                NodeKind::Label {
+                    name: name.as_str().into(),
+                    block: Vec::new(),
+                    parameters: None,
+                    hide: false,
+                },
+            ));
         }
         rv.push(self.add(loc, NodeKind::Pass));
         l.expect_eol()?;
@@ -786,16 +1016,33 @@ impl<'a> Parser<'a> {
     fn scene_statement(&mut self, l: &mut Lexer, loc: &Loc) -> PResult<Vec<NodeId>> {
         let mut layer = None;
         if l.keyword("onlayer") {
-            layer = Some(l.image_name_component().map_or_else(|| l.error("expected 'image_name_component' not found."), Ok)?);
+            layer = Some(
+                l.image_name_component()
+                    .map_or_else(|| l.error("expected 'image_name_component' not found."), Ok)?,
+            );
             l.expect_eol()?;
         }
         if layer.is_some() || l.eol() {
             l.advance();
-            return Ok(vec![self.add(loc, NodeKind::Scene { imspec: None, layer, atl: None })]);
+            return Ok(vec![self.add(
+                loc,
+                NodeKind::Scene {
+                    imspec: None,
+                    layer,
+                    atl: None,
+                },
+            )]);
         }
         let spec = self.parse_image_specifier(l)?;
         let layer = spec.layer.clone();
-        let n = self.add(loc, NodeKind::Scene { imspec: Some(spec), layer, atl: None });
+        let n = self.add(
+            loc,
+            NodeKind::Scene {
+                imspec: Some(spec),
+                layer,
+                atl: None,
+            },
+        );
         let rv = self.parse_with(l, n)?;
         if l.match_re(":").is_some() {
             l.expect_block("scene statement")?;
@@ -814,7 +1061,13 @@ impl<'a> Parser<'a> {
 
     fn show_statement(&mut self, l: &mut Lexer, loc: &Loc) -> PResult<Vec<NodeId>> {
         let spec = self.parse_image_specifier(l)?;
-        let n = self.add(loc, NodeKind::Show { imspec: spec, atl: None });
+        let n = self.add(
+            loc,
+            NodeKind::Show {
+                imspec: spec,
+                atl: None,
+            },
+        );
         let rv = self.parse_with(l, n)?;
         if l.match_re(":").is_some() {
             l.expect_block("show statement")?;
@@ -835,20 +1088,45 @@ impl<'a> Parser<'a> {
         let layer = if camera {
             l.image_name_component().unwrap_or_else(|| "master".into())
         } else {
-            l.image_name_component().map_or_else(|| l.error("expected 'image_name_component' not found."), Ok)?
+            l.image_name_component()
+                .map_or_else(|| l.error("expected 'image_name_component' not found."), Ok)?
         };
-        let at_list = if l.keyword("at") { self.simple_list(l, false)? } else { Vec::new() };
+        let at_list = if l.keyword("at") {
+            self.simple_list(l, false)?
+        } else {
+            Vec::new()
+        };
         let atl = if l.match_re(":").is_some() {
-            l.expect_block(if camera { "camera statement" } else { "show layer statement" })?;
+            l.expect_block(if camera {
+                "camera statement"
+            } else {
+                "show layer statement"
+            })?;
             let mut sub = l.subblock_lexer(false);
             Some(Rc::new(atl::parse_atl(&mut sub, self.cx)?))
         } else {
-            l.expect_noblock(if camera { "camera statement" } else { "show layer statement" })?;
+            l.expect_noblock(if camera {
+                "camera statement"
+            } else {
+                "show layer statement"
+            })?;
             None
         };
         l.expect_eol()?;
         l.advance();
-        let kind = if camera { NodeKind::Camera { layer, at_list, atl } } else { NodeKind::ShowLayer { layer, at_list, atl } };
+        let kind = if camera {
+            NodeKind::Camera {
+                layer,
+                at_list,
+                atl,
+            }
+        } else {
+            NodeKind::ShowLayer {
+                layer,
+                at_list,
+                atl,
+            }
+        };
         Ok(vec![self.add(loc, kind)])
     }
 
@@ -899,7 +1177,16 @@ impl<'a> Parser<'a> {
             return l.error("expected expression");
         }
         l.expect_noblock("define statement")?;
-        let n = self.add(loc, NodeKind::Define { store, name, index, operator: operator.into(), code: self.pycode(e, "eval") });
+        let n = self.add(
+            loc,
+            NodeKind::Define {
+                store,
+                name,
+                index,
+                operator: operator.into(),
+                code: self.pycode(e, "eval"),
+            },
+        );
         let rv = self.init_wrap(l, loc, n, priority, create);
         l.advance();
         Ok(vec![rv])
@@ -915,7 +1202,14 @@ impl<'a> Parser<'a> {
             return l.error("expected expression");
         }
         l.expect_noblock("default statement")?;
-        let n = self.add(loc, NodeKind::Default { store, name, code: self.pycode(e, "eval") });
+        let n = self.add(
+            loc,
+            NodeKind::Default {
+                store,
+                name,
+                code: self.pycode(e, "eval"),
+            },
+        );
         let rv = self.init_wrap(l, loc, n, priority, create);
         l.advance();
         Ok(vec![rv])
@@ -941,7 +1235,15 @@ impl<'a> Parser<'a> {
         l.expect_block("transform statement")?;
         let mut sub = l.subblock_lexer(false);
         let a = atl::parse_atl(&mut sub, self.cx)?;
-        let n = self.add(loc, NodeKind::Transform { store, name, atl: Rc::new(a), parameters });
+        let n = self.add(
+            loc,
+            NodeKind::Transform {
+                store,
+                name,
+                atl: Rc::new(a),
+                parameters,
+            },
+        );
         let rv = self.init_wrap(l, loc, n, priority, create);
         l.advance();
         Ok(vec![rv])
@@ -952,21 +1254,37 @@ impl<'a> Parser<'a> {
         let hide = l.keyword("hide");
         let mut store = String::from("store");
         if l.keyword("in") {
-            let d = l.dotted_name()?.map_or_else(|| l.error("expected 'dotted_name' not found."), Ok)?;
+            let d = l
+                .dotted_name()?
+                .map_or_else(|| l.error("expected 'dotted_name' not found."), Ok)?;
             store = format!("store.{d}");
         }
         l.require_re(":", ":")?;
-        l.expect_eol()?;
+        // Before 7.3 the rest of the line after the colon was not checked
+        // (6.99's own 00compat.rpy has `init 1900 python hide::`).
+        if self.cx.release() >= (7, 3) {
+            l.expect_eol()?;
+        }
         l.expect_block("python block")?;
         let src = l.python_block();
-        let code = PyCode { source: PyExpr::new(src, l.filename.clone(), l.number + 1), mode: if hide { "hide" } else { "exec" }, py3: false };
+        let code = PyCode {
+            source: PyExpr::new(src, l.filename.clone(), l.number + 1),
+            mode: if hide { "hide" } else { "exec" },
+            py3: false,
+        };
         l.advance();
-        let kind = if early { NodeKind::EarlyPython { code, hide, store } } else { NodeKind::Python { code, hide, store } };
+        let kind = if early {
+            NodeKind::EarlyPython { code, hide, store }
+        } else {
+            NodeKind::Python { code, hide, store }
+        };
         Ok(vec![self.add(loc, kind)])
     }
 
     fn label_statement(&mut self, l: &mut Lexer, loc: &Loc, init: bool) -> PResult<Vec<NodeId>> {
-        let name = l.label_name().map_or_else(|| l.error("expected 'label_name' not found."), Ok)?;
+        let name = l
+            .label_name()
+            .map_or_else(|| l.error("expected 'label_name' not found."), Ok)?;
         l.set_global_label(&name);
         let parameters = self.parse_parameters(l)?;
         let hide = l.keyword("hide");
@@ -975,7 +1293,15 @@ impl<'a> Parser<'a> {
         let mut sub = l.subblock_lexer(init);
         let block = self.parse_block(&mut sub)?;
         l.advance();
-        Ok(vec![self.add(loc, NodeKind::Label { name: name.as_str().into(), block, parameters, hide })])
+        Ok(vec![self.add(
+            loc,
+            NodeKind::Label {
+                name: name.as_str().into(),
+                block,
+                parameters,
+                hide,
+            },
+        )])
     }
 
     fn init_statement(&mut self, l: &mut Lexer, loc: &Loc) -> PResult<Vec<NodeId>> {
@@ -1000,10 +1326,21 @@ impl<'a> Parser<'a> {
             }
             r
         };
-        Ok(vec![self.add(loc, NodeKind::Init { block, priority: priority + l.init_offset })])
+        Ok(vec![self.add(
+            loc,
+            NodeKind::Init {
+                block,
+                priority: priority + l.init_offset,
+            },
+        )])
     }
 
-    fn translate_strings(&mut self, init_loc: &Loc, language: Option<String>, l: &mut Lexer) -> PResult<Vec<NodeId>> {
+    fn translate_strings(
+        &mut self,
+        init_loc: &Loc,
+        language: Option<String>,
+        l: &mut Lexer,
+    ) -> PResult<Vec<NodeId>> {
         l.require_re(":", ":")?;
         l.expect_eol()?;
         l.expect_block("translate strings statement")?;
@@ -1016,12 +1353,23 @@ impl<'a> Parser<'a> {
                     return ll.error("previous string is missing a translation");
                 }
                 let loc = ll.location();
-                let s = literal_string(&ll.raw_rest()).map_or_else(|| ll.error("could not parse string"), Ok)?;
+                let s = literal_string(&ll.raw_rest())
+                    .map_or_else(|| ll.error("could not parse string"), Ok)?;
                 old = Some((s, loc));
             } else if ll.keyword("new") {
-                let Some((o, loc)) = old.take() else { return ll.error("no string to translate") };
-                let s = literal_string(&ll.raw_rest()).map_or_else(|| ll.error("could not parse string"), Ok)?;
-                block.push(self.add(&loc, NodeKind::TranslateString { language: language.clone(), old: o, new: s }));
+                let Some((o, loc)) = old.take() else {
+                    return ll.error("no string to translate");
+                };
+                let s = literal_string(&ll.raw_rest())
+                    .map_or_else(|| ll.error("could not parse string"), Ok)?;
+                block.push(self.add(
+                    &loc,
+                    NodeKind::TranslateString {
+                        language: language.clone(),
+                        old: o,
+                        new: s,
+                    },
+                ));
             } else {
                 return ll.error("unknown statement");
             }
@@ -1033,13 +1381,25 @@ impl<'a> Parser<'a> {
         if l.init {
             return Ok(block);
         }
-        Ok(vec![self.add(init_loc, NodeKind::Init { block, priority: l.init_offset })])
+        Ok(vec![self.add(
+            init_loc,
+            NodeKind::Init {
+                block,
+                priority: l.init_offset,
+            },
+        )])
     }
 
     fn translate_statement(&mut self, l: &mut Lexer, loc: &Loc) -> PResult<Vec<NodeId>> {
         let language = l.require_name()?;
-        let language = if language == "None" { None } else { Some(language) };
-        let ident = l.hash().map_or_else(|| l.error("expected 'hash' not found."), Ok)?;
+        let language = if language == "None" {
+            None
+        } else {
+            Some(language)
+        };
+        let ident = l
+            .hash()
+            .map_or_else(|| l.error("expected 'hash' not found."), Ok)?;
         match ident.as_str() {
             "strings" => return self.translate_strings(loc, language, l),
             "python" => {
@@ -1048,7 +1408,9 @@ impl<'a> Parser<'a> {
                 let r = self.python_statement(l, loc);
                 l.init = old;
                 let block = r?;
-                return Ok(vec![self.add(loc, NodeKind::TranslateEarlyBlock { language, block })]);
+                return Ok(vec![
+                    self.add(loc, NodeKind::TranslateEarlyBlock { language, block }),
+                ]);
             }
             "style" => {
                 let old = l.init;
@@ -1056,7 +1418,9 @@ impl<'a> Parser<'a> {
                 let r = self.style_statement(l, loc);
                 l.init = old;
                 let block = r?;
-                return Ok(vec![self.add(loc, NodeKind::TranslateBlock { language, block })]);
+                return Ok(vec![
+                    self.add(loc, NodeKind::TranslateBlock { language, block }),
+                ]);
             }
             _ => {}
         }
@@ -1066,20 +1430,41 @@ impl<'a> Parser<'a> {
         let mut sub = l.subblock_lexer(false);
         let block = self.parse_block(&mut sub)?;
         l.advance();
-        let t = self.add(loc, NodeKind::Translate { identifier: ident, language, block, alternate: None });
+        let t = self.add(
+            loc,
+            NodeKind::Translate {
+                identifier: ident,
+                language,
+                block,
+                alternate: None,
+            },
+        );
         let e = self.add(loc, NodeKind::EndTranslate);
         Ok(vec![t, e])
     }
 
     fn style_statement(&mut self, l: &mut Lexer, loc: &Loc) -> PResult<Vec<NodeId>> {
-        let name = l.word().map_or_else(|| l.error("expected 'word' not found."), Ok)?;
-        let mut st = Style { name, parent: None, clear: false, take: None, delattr: Vec::new(), variant: None, properties: Vec::new() };
+        let name = l
+            .word()
+            .map_or_else(|| l.error("expected 'word' not found."), Ok)?;
+        let mut st = Style {
+            name,
+            parent: None,
+            clear: false,
+            take: None,
+            delattr: Vec::new(),
+            variant: None,
+            properties: Vec::new(),
+        };
         fn clause(l: &mut Lexer, st: &mut Style) -> PResult<bool> {
             if l.keyword("is") {
                 if st.parent.is_some() {
                     return l.error("parent clause appears twice.");
                 }
-                st.parent = Some(l.word().map_or_else(|| l.error("expected 'word' not found."), Ok)?);
+                st.parent = Some(
+                    l.word()
+                        .map_or_else(|| l.error("expected 'word' not found."), Ok)?,
+                );
                 return Ok(true);
             }
             if l.keyword("clear") {
@@ -1150,7 +1535,11 @@ impl<'a> Parser<'a> {
         l.revert(&state);
         let who = l.say_expression()?;
         let attributes = self.say_attributes(l);
-        let temporary = if l.match_re(r"\@").is_some() { self.say_attributes(l) } else { None };
+        let temporary = if l.match_re(r"\@").is_some() {
+            self.say_attributes(l)
+        } else {
+            None
+        };
         let what = self.what(l);
         if let (Some(who), Some(what)) = (who, what) {
             let rv = self.finish_say(l, loc, Some(who), what, attributes, temporary, true)?;
@@ -1178,13 +1567,21 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses a whole file; appends the implicit trailing `return`.
-    pub fn parse_file(&mut self, block: Rc<Vec<GroupedLine>>, filename: &str, last_line: u32) -> Vec<NodeId> {
+    pub fn parse_file(
+        &mut self,
+        block: Rc<Vec<GroupedLine>>,
+        filename: &str,
+        last_line: u32,
+    ) -> Vec<NodeId> {
         let mut l = Lexer::new(block, false);
         l.filename = filename.into();
         let mut rv = self.parse_block(&mut l).unwrap_or_default();
         if !rv.is_empty() {
             let f = self.arena.get(*rv.last().unwrap()).filename.clone();
-            rv.push(self.arena.add(&(f, last_line + 1), NodeKind::Return { expression: None }));
+            rv.push(
+                self.arena
+                    .add(&(f, last_line + 1), NodeKind::Return { expression: None }),
+            );
         }
         rv
     }
@@ -1199,9 +1596,15 @@ enum What {
 /// implicit concatenation).
 pub fn literal_string(s: &str) -> Option<String> {
     let s = s.trim();
-    let expr = crysirror_python::parser::parse_expression(s, crysirror_python::parser::ParseOptions::py3()).ok()?;
+    let expr = crysirror_python::parser::parse_expression(
+        s,
+        crysirror_python::parser::ParseOptions::py3(),
+    )
+    .ok()?;
     match expr.kind {
-        crysirror_python::ast::ExprKind::Constant(crysirror_python::ast::Constant::Str(v)) => Some(v),
+        crysirror_python::ast::ExprKind::Constant(crysirror_python::ast::Constant::Str(v)) => {
+            Some(v)
+        }
         _ => None,
     }
 }

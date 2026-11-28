@@ -416,7 +416,7 @@ pub fn particle_system(scene: &Scene6, p: &SceneParticles<'_>, material: Option<
         fps = frames as f32 * cycles / ((lifetime[0] + lifetime[1]) * 0.5).max(0.01);
         notes.push("texture sheet animation at a fixed rate over the mean lifetime".into());
     }
-    let render = RenderSpec::Sprite { texture: None, columns, rows, frames, fps, soft_distance: if soft { 0.5 } else { 0. }, blend, facing };
+    let render = RenderSpec::Sprite { texture: None, columns, rows, frames, fps, soft_distance: if soft { 0.5 } else { 0. }, triplanar_coverage: None, blend, facing };
 
     let capacity = init.int("maxNumParticles").unwrap_or(1000).clamp(1, 16_384) as u32;
     let max_life = lifetime[1].max(0.01);

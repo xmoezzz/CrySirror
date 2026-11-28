@@ -20,7 +20,9 @@ use std::rc::Rc;
 const MODULE: &str = "renpy.loadsave";
 
 fn at_least(vm: &Vm, major: u32, minor: u32) -> bool {
-    super::state::try_rt(vm).map(|r| r.profile.at_least(major, minor)).unwrap_or(true)
+    super::state::try_rt(vm)
+        .map(|r| r.profile.at_least(major, minor))
+        .unwrap_or(true)
 }
 
 fn m(vm: &mut Vm) -> PyResult<Value> {
@@ -34,7 +36,10 @@ fn mget(vm: &mut Vm, n: &str) -> PyResult<Value> {
 fn location(vm: &mut Vm) -> PyResult<Value> {
     let l = mget(vm, "location")?;
     if py::is_none(&l) {
-        return Err(py::error(vm, "Saving is not available before the save location is initialized."));
+        return Err(py::error(
+            vm,
+            "Saving is not available before the save location is initialized.",
+        ));
     }
     Ok(l)
 }
@@ -53,7 +58,10 @@ fn store_true(vm: &mut Vm, n: &str) -> bool {
 }
 
 fn now() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
 }
 
 fn bytes_of(vm: &mut Vm, v: &Value) -> PyResult<Vec<u8>> {
@@ -67,7 +75,10 @@ fn bytes_of(vm: &mut Vm, v: &Value) -> PyResult<Vec<u8>> {
 
 fn sr_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    for (i, n) in ["screenshot", "extra_info", "json", "log"].iter().enumerate() {
+    for (i, n) in ["screenshot", "extra_info", "json", "log"]
+        .iter()
+        .enumerate()
+    {
         py::set(vm, this, n, args.get(i + 1).cloned().unwrap_or(Value::None))?;
     }
     py::set(vm, this, "first_filename", Value::None)?;
@@ -84,12 +95,17 @@ fn sr_write_file(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if !py::is_none(&first) {
         let f = py::string(vm, &first)?;
         if let Some(b) = st.read(&f) {
-            st.write(&filename, &b).map_err(|e| vm.exc_msg("OSError", e))?;
+            st.write(&filename, &b)
+                .map_err(|e| vm.exc_msg("OSError", e))?;
             return Ok(Value::None);
         }
     }
     let shot = py::get(vm, this, "screenshot")?;
-    let shot = if py::is_none(&shot) { None } else { Some(bytes_of(vm, &shot)?) };
+    let shot = if py::is_none(&shot) {
+        None
+    } else {
+        Some(bytes_of(vm, &shot)?)
+    };
     let extra = py::get(vm, this, "extra_info")?;
     let extra = py::string(vm, &extra)?;
     let json = py::get(vm, this, "json")?;
@@ -98,7 +114,11 @@ fn sr_write_file(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let version = py::string(vm, &version)?;
     let log = py::get(vm, this, "log")?;
     let log = bytes_of(vm, &log)?;
-    let signatures = if at_least(vm, 8, 1) { Some(super::savetoken::sign_data(vm, &log)) } else { None };
+    let signatures = if at_least(vm, 8, 1) {
+        Some(super::savetoken::sign_data(vm, &log))
+    } else {
+        None
+    };
     let mut entries: Vec<(&str, &[u8])> = Vec::new();
     if let Some(s) = &shot {
         entries.push(("screenshot.png", s));
@@ -111,7 +131,8 @@ fn sr_write_file(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         entries.push(("signatures", s.as_bytes()));
     }
     let z = savestore::zip_write(&entries, savestore::dos_time(now()));
-    st.write(&filename, &z).map_err(|e| vm.exc_msg("OSError", e))?;
+    st.write(&filename, &z)
+        .map_err(|e| vm.exc_msg("OSError", e))?;
     py::set(vm, this, "first_filename", vm.types.new_str(&filename))?;
     Ok(Value::None)
 }
@@ -121,7 +142,9 @@ fn sr_write_file(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn mutate_flag(vm: &mut Vm, set: Option<bool>) -> PyResult<bool> {
     let mut rv = false;
     for module in ["renpy.revertable", "renpy.python"] {
-        let Ok(mo) = py::import(vm, module) else { continue };
+        let Ok(mo) = py::import(vm, module) else {
+            continue;
+        };
         match set {
             Some(b) => py::set(vm, &mo, "mutate_flag", Value::Bool(b))?,
             None => {
@@ -138,7 +161,13 @@ fn save_abort(vm: &mut Vm) -> PyErr {
 }
 
 /// `save(slotname, extra_info='', mutate_flag=False, include_screenshot=True)`.
-pub fn save(vm: &mut Vm, slot: &Value, extra_info: &Value, mutate: bool, include_screenshot: bool) -> PyResult<()> {
+pub fn save(
+    vm: &mut Vm,
+    slot: &Value,
+    extra_info: &Value,
+    mutate: bool,
+    include_screenshot: bool,
+) -> PyResult<()> {
     if !py::config_bool(vm, "save").unwrap_or(true) {
         return Ok(());
     }
@@ -170,7 +199,11 @@ pub fn save(vm: &mut Vm, slot: &Value, extra_info: &Value, mutate: bool, include
     }
     let screenshot = if include_screenshot {
         let iface = py::import_attr(vm, "renpy.game", "interface")?;
-        if py::is_none(&iface) { Value::None } else { vm.call_method(&iface, "get_screenshot", Vec::new())? }
+        if py::is_none(&iface) {
+            Value::None
+        } else {
+            vm.call_method(&iface, "get_screenshot", Vec::new())?
+        }
     } else {
         Value::None
     };
@@ -197,7 +230,11 @@ pub fn save(vm: &mut Vm, slot: &Value, extra_info: &Value, mutate: bool, include
     let jd = py::import_attr(vm, "json", "dumps")?;
     let json = vm.call(&jd, vec![json], Vec::new())?;
     let sr = mget(vm, "SaveRecord")?;
-    let record = vm.call(&sr, vec![screenshot, extra_info.clone(), json, data], Vec::new())?;
+    let record = vm.call(
+        &sr,
+        vec![screenshot, extra_info.clone(), json, data],
+        Vec::new(),
+    )?;
     let loc = location(vm)?;
     vm.call_method(&loc, "save", vec![slot.clone(), record])?;
     vm.call_method(&loc, "scan", Vec::new())?;
@@ -216,7 +253,13 @@ fn f_save(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 /// A path to the first object in the save roots that cannot be reduced.
 fn find_bad_reduction(vm: &mut Vm, roots: &Value, log: &Value) -> PyResult<Option<String>> {
-    fn visit(vm: &mut Vm, o: &Value, path: &str, seen: &mut std::collections::HashSet<usize>, depth: usize) -> Option<String> {
+    fn visit(
+        vm: &mut Vm,
+        o: &Value,
+        path: &str,
+        seen: &mut std::collections::HashSet<usize>,
+        depth: usize,
+    ) -> Option<String> {
         if depth > 64 {
             return None;
         }
@@ -225,7 +268,9 @@ fn find_bad_reduction(vm: &mut Vm, roots: &Value, log: &Value) -> PyResult<Optio
             return None;
         }
         match o.payload() {
-            Some(crysirror_python::Payload::Str(_) | crysirror_python::Payload::Bytes(_)) => return None,
+            Some(crysirror_python::Payload::Str(_) | crysirror_python::Payload::Bytes(_)) => {
+                return None;
+            }
             Some(crysirror_python::Payload::List(_) | crysirror_python::Payload::Tuple(_)) => {
                 for (i, v) in py::items(vm, o).ok()?.iter().enumerate() {
                     if let Some(r) = visit(vm, v, &format!("{path}[{i}]"), seen, depth + 1) {
@@ -247,7 +292,10 @@ fn find_bad_reduction(vm: &mut Vm, roots: &Value, log: &Value) -> PyResult<Optio
         }
         if ob.class_name() == "module" {
             let r = ops::repr(vm, o).unwrap_or_default();
-            return Some(format!("{path} = {}", r.chars().take(160).collect::<String>()));
+            return Some(format!(
+                "{path} = {}",
+                r.chars().take(160).collect::<String>()
+            ));
         }
         let red = match vm.call_method(o, "__reduce_ex__", vec![Value::Int(2)]) {
             Ok(r) => r,
@@ -257,7 +305,10 @@ fn find_bad_reduction(vm: &mut Vm, roots: &Value, log: &Value) -> PyResult<Optio
                     return None;
                 }
                 let r = ops::repr(vm, o).unwrap_or_default();
-                return Some(format!("{path} = {}", r.chars().take(160).collect::<String>()));
+                return Some(format!(
+                    "{path} = {}",
+                    r.chars().take(160).collect::<String>()
+                ));
             }
         };
         if red.as_str().is_some() {
@@ -272,7 +323,13 @@ fn find_bad_reduction(vm: &mut Vm, roots: &Value, log: &Value) -> PyResult<Optio
                         return Some(r);
                     }
                 }
-            } else if let Some(r) = visit(vm, state, &format!("{path}.__getstate__()"), seen, depth + 1) {
+            } else if let Some(r) = visit(
+                vm,
+                state,
+                &format!("{path}.__getstate__()"),
+                seen,
+                depth + 1,
+            ) {
                 return Some(r);
             }
         }
@@ -318,7 +375,12 @@ fn do_autosave(vm: &mut Vm, take_screenshot: bool) -> PyResult<()> {
     let prefix = autosave_prefix(vm)?;
     let extra = extra_info(vm)?;
     if take_screenshot {
-        super::exports::util::ex(vm, "take_screenshot", Vec::new(), vec![("background".into(), Value::Bool(true))])?;
+        super::exports::util::ex(
+            vm,
+            "take_screenshot",
+            Vec::new(),
+            vec![("background".into(), Value::Bool(true))],
+        )?;
     }
     if at_least(vm, 8, 3) {
         save(vm, &slot(vm, "_auto"), &extra, true, true)?;
@@ -518,7 +580,11 @@ fn c_get_mtime(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn c_get_json(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let j = cached(vm, &args[0], "json")?;
-    if at_least(vm, 7, 4) { wrap_json(vm, &j) } else { Ok(j) }
+    if at_least(vm, 7, 4) {
+        wrap_json(vm, &j)
+    } else {
+        Ok(j)
+    }
 }
 
 fn c_get_screenshot(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -572,7 +638,11 @@ fn f_list_saved_games(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     for slot in s {
         let c = get_cache(vm, &slot)?;
         let j = c_get_json(vm, &[c.clone()], &[])?;
-        let extra = if py::is_none(&j) { py::s(vm, "") } else { vm.call_method(&j, "get", vec![py::s(vm, "_save_name"), py::s(vm, "")])? };
+        let extra = if py::is_none(&j) {
+            py::s(vm, "")
+        } else {
+            vm.call_method(&j, "get", vec![py::s(vm, "_save_name"), py::s(vm, "")])?
+        };
         let shot = c_get_screenshot(vm, &[c.clone()], &[])?;
         let mt = c_get_mtime(vm, &[c], &[])?;
         out.push(vm.types.new_tuple(vec![slot, extra, shot, mt]));
@@ -671,7 +741,13 @@ fn f_load(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let pair = vm.call(&loads, vec![log_data], Vec::new())?;
     let p = py::items(vm, &pair)?;
     let (roots, log) = (p[0].clone(), p[1].clone());
-    py::method_kw(vm, &log, "unfreeze", vec![roots], vec![("label".into(), py::s(vm, "_after_load"))])?;
+    py::method_kw(
+        vm,
+        &log,
+        "unfreeze",
+        vec![roots],
+        vec![("label".into(), py::s(vm, "_after_load"))],
+    )?;
     Ok(Value::None)
 }
 
@@ -685,7 +761,11 @@ fn rename_save(vm: &mut Vm, old: &Value, new: &Value) -> PyResult<()> {
 fn cycle_saves(vm: &mut Vm, name: &str, count: i64) -> PyResult<()> {
     let mut i = count - 1;
     while i > 0 {
-        rename_save(vm, &slot(vm, &format!("{name}{i}")), &slot(vm, &format!("{name}{}", i + 1)))?;
+        rename_save(
+            vm,
+            &slot(vm, &format!("{name}{i}")),
+            &slot(vm, &format!("{name}{}", i + 1)),
+        )?;
         i -= 1;
     }
     Ok(())
@@ -811,11 +891,45 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let exc = Value::Obj(vm.types.exc("Exception"));
     let sa = py::class(vm, MODULE, "SaveAbort", &[exc], &[], &[])?;
     set(vm, "SaveAbort", Value::Obj(sa));
-    let sr = py::class(vm, MODULE, "SaveRecord", &[], &[("__init__", sr_init), ("write_file", sr_write_file)], &[])?;
+    let sr = py::class(
+        vm,
+        MODULE,
+        "SaveRecord",
+        &[],
+        &[("__init__", sr_init), ("write_file", sr_write_file)],
+        &[],
+    )?;
     set(vm, "SaveRecord", Value::Obj(sr));
-    let cache = py::class(vm, MODULE, "Cache", &[], &[("__init__", c_init), ("clear", c_clear), ("get_mtime", c_get_mtime), ("get_json", c_get_json), ("get_screenshot", c_get_screenshot), ("preload", c_preload)], &[])?;
+    let cache = py::class(
+        vm,
+        MODULE,
+        "Cache",
+        &[],
+        &[
+            ("__init__", c_init),
+            ("clear", c_clear),
+            ("get_mtime", c_get_mtime),
+            ("get_json", c_get_json),
+            ("get_screenshot", c_get_screenshot),
+            ("preload", c_preload),
+        ],
+        &[],
+    )?;
     set(vm, "Cache", Value::Obj(cache));
-    let ev = py::class(vm, MODULE, "_Event", &[], &[("__init__", ev_init), ("is_set", ev_is_set), ("set", ev_set), ("clear", ev_clear), ("wait", ev_wait)], &[])?;
+    let ev = py::class(
+        vm,
+        MODULE,
+        "_Event",
+        &[],
+        &[
+            ("__init__", ev_init),
+            ("is_set", ev_is_set),
+            ("set", ev_set),
+            ("clear", ev_clear),
+            ("wait", ev_wait),
+        ],
+        &[],
+    )?;
     let e = vm.call(&Value::Obj(ev), Vec::new(), Vec::new())?;
     set(vm, "autosave_not_running", e);
     let sentinel = py::import_attr(vm, "renpy.object", "Sentinel")?;

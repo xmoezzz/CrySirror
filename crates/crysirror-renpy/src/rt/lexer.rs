@@ -33,7 +33,8 @@ fn classes(vm: &mut Vm) -> PyResult<Rc<Classes>> {
 /// The Rust lexer behind a Python `Lexer`.
 pub fn state(vm: &Vm, v: &Value) -> PyResult<LexRef> {
     let st = v.obj().and_then(|o| ops::get_raw_attr(o, STATE));
-    st.and_then(|s| py::native::<LexRef, _>(&s, |r| r.clone())).ok_or_else(|| vm.type_error("not a Ren'Py lexer"))
+    st.and_then(|s| py::native::<LexRef, _>(&s, |r| r.clone()))
+        .ok_or_else(|| vm.type_error("not a Ren'Py lexer"))
 }
 
 /// Wraps a Rust lexer as a Python `Lexer` sharing `subparses`.
@@ -41,7 +42,9 @@ pub fn new_lexer(vm: &mut Vm, l: Lexer, subparses: Value) -> PyResult<Value> {
     let c = classes(vm)?;
     let this = vm.call(&Value::Obj(c.lexer.clone()), vec![Value::None], Vec::new())?;
     let o = this.obj().unwrap().clone();
-    let h = vm.types.new_native(&c.holder, Box::new(Rc::new(RefCell::new(l)) as LexRef));
+    let h = vm
+        .types
+        .new_native(&c.holder, Box::new(Rc::new(RefCell::new(l)) as LexRef));
     ops::set_raw_attr(vm, &o, STATE, h);
     ops::set_raw_attr(vm, &o, "subparses", subparses);
     Ok(this)
@@ -57,8 +60,13 @@ pub fn parse_error(vm: &mut Vm, e: &ParseError) -> crysirror_python::PyErr {
         vm.types.new_str(&e.filename),
         Value::Int(e.line as i64),
         vm.types.new_str(&e.msg),
-        e.text.as_deref().map(|t| vm.types.new_str(t)).unwrap_or(Value::None),
-        e.offset.map(|o| Value::Int(o as i64 - 1)).unwrap_or(Value::None),
+        e.text
+            .as_deref()
+            .map(|t| vm.types.new_str(t))
+            .unwrap_or(Value::None),
+        e.offset
+            .map(|o| Value::Int(o as i64 - 1))
+            .unwrap_or(Value::None),
     ];
     match vm.call(&Value::Obj(c.parse_error.clone()), args, Vec::new()) {
         Ok(v) => crysirror_python::PyErr::Exc(v.obj().unwrap().clone()),
@@ -66,13 +74,17 @@ pub fn parse_error(vm: &mut Vm, e: &ParseError) -> crysirror_python::PyErr {
     }
 }
 
-fn with<R>(vm: &mut Vm, this: &Value, f: impl FnOnce(&mut Lexer) -> R) -> PyResult<R> {
+pub fn with<R>(vm: &mut Vm, this: &Value, f: impl FnOnce(&mut Lexer) -> R) -> PyResult<R> {
     let l = state(vm, this)?;
     let r = f(&mut l.borrow_mut());
     Ok(r)
 }
 
-fn try_with<R>(vm: &mut Vm, this: &Value, f: impl FnOnce(&mut Lexer) -> crate::lexer::PResult<R>) -> PyResult<R> {
+fn try_with<R>(
+    vm: &mut Vm,
+    this: &Value,
+    f: impl FnOnce(&mut Lexer) -> crate::lexer::PResult<R>,
+) -> PyResult<R> {
     let r = with(vm, this, f)?;
     r.map_err(|e| parse_error(vm, &e))
 }
@@ -90,7 +102,8 @@ pub fn block_value(vm: &Vm, b: &[GroupedLine]) -> Value {
             let f = vm.types.new_str(&l.filename);
             let tv = vm.types.new_str(&t);
             let sub = block_value(vm, &l.block);
-            vm.types.new_tuple(vec![f, Value::Int(l.number as i64), tv, sub])
+            vm.types
+                .new_tuple(vec![f, Value::Int(l.number as i64), tv, sub])
         })
         .collect();
     vm.types.new_list(items)
@@ -104,7 +117,11 @@ pub fn block_from(vm: &mut Vm, v: &Value) -> PyResult<Vec<GroupedLine>> {
         let (f, n, indent, text, sub) = match p.len() {
             4 => (&p[0], &p[1], None, &p[2], &p[3]),
             5 => (&p[0], &p[1], Some(&p[2]), &p[3], &p[4]),
-            _ => return Err(vm.type_error("lexer block entries are (filename, number, text, subblock)")),
+            _ => {
+                return Err(
+                    vm.type_error("lexer block entries are (filename, number, text, subblock)")
+                );
+            }
         };
         let filename: Rc<str> = py::string(vm, f)?.into();
         let number = py::int(vm, n)? as u32;
@@ -114,7 +131,13 @@ pub fn block_from(vm: &mut Vm, v: &Value) -> PyResult<Vec<GroupedLine>> {
         };
         let text: Rc<[char]> = py::string(vm, text)?.chars().collect::<Vec<_>>().into();
         let block = Rc::new(block_from(vm, sub)?);
-        out.push(GroupedLine { filename, number, indent, text, block });
+        out.push(GroupedLine {
+            filename,
+            number,
+            indent,
+            text,
+            block,
+        });
     }
     Ok(out)
 }
@@ -142,14 +165,29 @@ fn l_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     l.monologue_delimiter = py::string(vm, &mondel)?;
     let c = classes(vm)?;
-    let h = vm.types.new_native(&c.holder, Box::new(Rc::new(RefCell::new(l)) as LexRef));
+    let h = vm
+        .types
+        .new_native(&c.holder, Box::new(Rc::new(RefCell::new(l)) as LexRef));
     let o = this.obj().unwrap().clone();
     ops::set_raw_attr(vm, &o, STATE, h);
     ops::set_raw_attr(vm, &o, "subparses", subparses);
     Ok(Value::None)
 }
 
-const FIELDS: &[&str] = &["line", "eob", "filename", "text", "number", "subblock", "pos", "init", "init_offset", "global_label", "block", "monologue_delimiter"];
+const FIELDS: &[&str] = &[
+    "line",
+    "eob",
+    "filename",
+    "text",
+    "number",
+    "subblock",
+    "pos",
+    "init",
+    "init_offset",
+    "global_label",
+    "block",
+    "monologue_delimiter",
+];
 
 fn l_getattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let n = py::string(vm, &args[1])?;
@@ -171,7 +209,11 @@ fn l_getattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         "pos" => Value::Int(l.pos as i64),
         "init" => Value::Bool(l.init),
         "init_offset" => Value::Int(l.init_offset as i64),
-        "global_label" => l.global_label.as_deref().map(|g| vm.types.new_str(g)).unwrap_or(Value::None),
+        "global_label" => l
+            .global_label
+            .as_deref()
+            .map(|g| vm.types.new_str(g))
+            .unwrap_or(Value::None),
         "block" => block_value(vm, &l.block),
         _ => vm.types.new_str(&l.monologue_delimiter),
     })
@@ -199,7 +241,13 @@ fn l_setattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         "pos" => st.borrow_mut().pos = py::int(vm, v)?.max(0) as usize,
         "init" => st.borrow_mut().init = py::truthy(vm, v)?,
         "init_offset" => st.borrow_mut().init_offset = py::int(vm, v)? as i32,
-        "global_label" => st.borrow_mut().global_label = if py::is_none(v) { None } else { Some(py::string(vm, v)?.into()) },
+        "global_label" => {
+            st.borrow_mut().global_label = if py::is_none(v) {
+                None
+            } else {
+                Some(py::string(vm, v)?.into())
+            }
+        }
         "block" => {
             let b = block_from(vm, v)?;
             st.borrow_mut().block = Rc::new(b);
@@ -259,7 +307,11 @@ fn l_match_multiple(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn l_keyword(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let w = py::string(vm, &args[1])?;
     let r = with(vm, &args[0], |l| l.keyword(&w))?;
-    Ok(if r { vm.types.new_str(&w) } else { py::s(vm, "") })
+    Ok(if r {
+        vm.types.new_str(&w)
+    } else {
+        py::s(vm, "")
+    })
 }
 
 fn l_error(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -413,7 +465,11 @@ fn l_dotted_name(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 /// `PyExpr(s, filename, number)` as a Python value.
 pub fn pyexpr(vm: &mut Vm, s: &str, filename: &str, number: u32) -> PyResult<Value> {
     let c = py::import_attr(vm, "renpy.ast", "PyExpr")?;
-    let a = vec![vm.types.new_str(s), vm.types.new_str(filename), Value::Int(number as i64)];
+    let a = vec![
+        vm.types.new_str(s),
+        vm.types.new_str(filename),
+        Value::Int(number as i64),
+    ];
     vm.call(&c, a, Vec::new())
 }
 
@@ -426,7 +482,14 @@ fn expr_value(vm: &mut Vm, this: &Value, s: Option<String>, expr: bool) -> PyRes
     pyexpr(vm, &s, &f, n)
 }
 
-fn flag(vm: &mut Vm, args: &[Value], kw: Kw, i: usize, name: &str, default: bool) -> PyResult<bool> {
+fn flag(
+    vm: &mut Vm,
+    args: &[Value],
+    kw: Kw,
+    i: usize,
+    name: &str,
+    default: bool,
+) -> PyResult<bool> {
     let v = arg_or(&args[1..], kw, i, name, Value::Bool(default));
     py::truthy(vm, &v)
 }
@@ -453,13 +516,20 @@ fn l_python_expression(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn l_parenthesised_python(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let st = state(vm, &args[0])?;
     let start = st.borrow().pos;
-    let ok = st.borrow_mut().parenthesised_python().map_err(|e| parse_error(vm, &e))?;
+    let ok = st
+        .borrow_mut()
+        .parenthesised_python()
+        .map_err(|e| parse_error(vm, &e))?;
     if !ok {
         return Ok(Value::None);
     }
     let (s, f, n) = {
         let l = st.borrow();
-        (l.text[start..l.pos].iter().collect::<String>(), l.filename.clone(), l.number)
+        (
+            l.text[start..l.pos].iter().collect::<String>(),
+            l.filename.clone(),
+            l.number,
+        )
     };
     pyexpr(vm, s.trim(), &f, n)
 }
@@ -468,28 +538,37 @@ fn l_simple_expression(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let comma = flag(vm, args, kw, 0, "comma", false)?;
     let operator = flag(vm, args, kw, 1, "operator", true)?;
     let image = flag(vm, args, kw, 2, "image", false)?;
-    let s = try_with(vm, &args[0], |l| l.simple_expression_text(comma, operator, image))?;
+    let s = try_with(vm, &args[0], |l| {
+        l.simple_expression_text(comma, operator, image)
+    })?;
     expr_value(vm, &args[0], s, true)
 }
 
 fn l_comma_expression(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let s = try_with(vm, &args[0], |l| l.simple_expression_text(true, true, false))?;
+    let s = try_with(vm, &args[0], |l| {
+        l.simple_expression_text(true, true, false)
+    })?;
     expr_value(vm, &args[0], s, true)
 }
 
 fn l_say_expression(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let s = try_with(vm, &args[0], |l| l.simple_expression_text(false, false, false))?;
+    let s = try_with(vm, &args[0], |l| {
+        l.simple_expression_text(false, false, false)
+    })?;
     expr_value(vm, &args[0], s, true)
 }
 
 fn l_checkpoint(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let c = with(vm, &args[0], |l| l.clone())?;
     let h = classes(vm)?.holder.clone();
-    Ok(vm.types.new_native(&h, Box::new(Rc::new(RefCell::new(c)) as LexRef)))
+    Ok(vm
+        .types
+        .new_native(&h, Box::new(Rc::new(RefCell::new(c)) as LexRef)))
 }
 
 fn l_revert(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let saved = py::native::<LexRef, _>(&args[1], |r| r.borrow().clone()).ok_or_else(|| vm.type_error("not a lexer checkpoint"))?;
+    let saved = py::native::<LexRef, _>(&args[1], |r| r.borrow().clone())
+        .ok_or_else(|| vm.type_error("not a lexer checkpoint"))?;
     let st = state(vm, &args[0])?;
     let mut l = st.borrow_mut();
     let block = l.block.clone();
@@ -508,7 +587,11 @@ fn l_get_location(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn l_require(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let thing = &args[1];
-    let mut name = args.get(2).cloned().or_else(|| py::kw(kw, "name").cloned()).unwrap_or(Value::None);
+    let mut name = args
+        .get(2)
+        .cloned()
+        .or_else(|| py::kw(kw, "name").cloned())
+        .unwrap_or(Value::None);
     let rest: Vec<_> = kw.iter().filter(|(k, _)| &**k != "name").cloned().collect();
     let rv = if let Some(pat) = thing.as_str() {
         if py::is_none(&name) {
@@ -526,7 +609,10 @@ fn l_require(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             name = py::get_opt(vm, &f, "__name__")?.unwrap_or_else(|| py::s(vm, "thing"));
         }
         let n = py::string(vm, &name)?;
-        let e = with(vm, this, |l| l.error::<()>(format!("expected '{n}' not found.")).unwrap_err())?;
+        let e = with(vm, this, |l| {
+            l.error::<()>(format!("expected '{n}' not found."))
+                .unwrap_err()
+        })?;
         return Err(parse_error(vm, &e));
     }
     Ok(rv)
@@ -587,7 +673,10 @@ fn subparse(vm: &mut Vm, this: &Value, ids: Vec<crate::ast::NodeId>) -> PyResult
 
 fn require_subparses(vm: &mut Vm, this: &Value, what: &str) -> PyResult<()> {
     if py::is_none(&py::get_or_none(vm, this, "subparses")?) {
-        return Err(py::error(vm, format!("A {what} can only be parsed inside a creator-defined statement.")));
+        return Err(py::error(
+            vm,
+            format!("A {what} can only be parsed inside a creator-defined statement."),
+        ));
     }
     Ok(())
 }
@@ -694,9 +783,18 @@ const LEXER_METHODS: py::Methods = &[
 
 /// Upstream's message: location, the line, a caret, and a hint for an
 /// unterminated string.
-fn error_message(filename: &str, number: i64, msg: &str, line: Option<String>, mut pos: Option<i64>, first: bool) -> String {
+fn error_message(
+    filename: &str,
+    number: i64,
+    msg: &str,
+    line: Option<String>,
+    mut pos: Option<i64>,
+    first: bool,
+) -> String {
     let mut message = format!("File \"{filename}\", line {number}: {msg}");
-    let Some(line) = line.filter(|l| !l.is_empty()) else { return message };
+    let Some(line) = line.filter(|l| !l.is_empty()) else {
+        return message;
+    };
     let lines: Vec<&str> = line.split('\n').collect();
     if !lines[0].contains("\"\"\"") && !lines[0].contains("'''") && lines.len() > 1 {
         let chars: Vec<char> = lines[0].chars().collect();
@@ -715,7 +813,9 @@ fn error_message(filename: &str, number: i64, msg: &str, line: Option<String>, m
             i += 1;
         }
         if let Some(o) = open {
-            message.push_str(&format!("\n(Perhaps you left out a {o} at the end of the first line.)"));
+            message.push_str(&format!(
+                "\n(Perhaps you left out a {o} at the end of the first line.)"
+            ));
         }
     }
     for l in lines {
@@ -755,7 +855,11 @@ fn pe_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         Some(py::string(vm, &line)?)
     };
     let pos = arg_or(&args[1..], kw, 4, "pos", Value::None);
-    let pos = if py::is_none(&pos) { None } else { Some(py::int(vm, &pos)?) };
+    let pos = if py::is_none(&pos) {
+        None
+    } else {
+        Some(py::int(vm, &pos)?)
+    };
     let first = flag(vm, args, kw, 5, "first", false)?;
     let filename = filename.clone();
     let m = error_message(&filename, number, &msg, line, pos, first);
@@ -805,11 +909,18 @@ fn f_elide_filename(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     // strip a base-directory prefix the way upstream does.
     let base = py::config(vm, "basedir").ok().filter(|b| !py::is_none(b));
     let base = match base {
-        Some(b) => format!("{}/", py::string(vm, &b)?.replace('\\', "/").trim_end_matches('/')),
+        Some(b) => format!(
+            "{}/",
+            py::string(vm, &b)?.replace('\\', "/").trim_end_matches('/')
+        ),
         None => String::new(),
     };
     let f = f.replace('\\', "/");
-    let rv = if !base.is_empty() && f.starts_with(&base) { f[base.len()..].to_owned() } else { f };
+    let rv = if !base.is_empty() && f.starts_with(&base) {
+        f[base.len()..].to_owned()
+    } else {
+        f
+    };
     Ok(vm.types.new_str(&rv))
 }
 
@@ -834,9 +945,13 @@ fn f_munge_filename(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn f_get_line_text(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let f = py::string(vm, &args[0])?;
     let n = py::int(vm, &args[1])?;
-    let Some(r) = super::state::try_rt(vm) else { return Ok(Value::None) };
+    let Some(r) = super::state::try_rt(vm) else {
+        return Ok(Value::None);
+    };
     let data = r.files.read(&f).or_else(|| r.files.common_read(&f));
-    let Some(data) = data else { return Ok(Value::None) };
+    let Some(data) = data else {
+        return Ok(Value::None);
+    };
     let text = String::from_utf8_lossy(&data).into_owned();
     Ok(match text.lines().nth((n - 1).max(0) as usize) {
         Some(l) => vm.types.new_str(&format!("{l}\n")),
@@ -860,21 +975,57 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
             ("get_line_text", f_get_line_text),
         ],
     );
-    let holder = vm.types.new_builtin_type("LexerState", &vm.types.object.clone(), crysirror_python::object::BaseKind::Native, true);
+    let holder = vm.types.new_builtin_type(
+        "LexerState",
+        &vm.types.object.clone(),
+        crysirror_python::object::BaseKind::Native,
+        true,
+    );
     let n = vm.types.new_builtin("__new__", no_new);
     let n = py::staticmethod(vm, n);
     vm.types.set_attr(&holder, "__new__", n);
     let exc = Value::Obj(vm.types.exc("Exception"));
-    let pe = py::class(vm, MODULE, "ParseError", &[exc], &[("__init__", pe_init), ("__str__", pe_str), ("__unicode__", pe_str), ("defer", pe_defer)], &[])?;
+    let pe = py::class(
+        vm,
+        MODULE,
+        "ParseError",
+        &[exc],
+        &[
+            ("__init__", pe_init),
+            ("__str__", pe_str),
+            ("__unicode__", pe_str),
+            ("defer", pe_defer),
+        ],
+        &[],
+    )?;
     let lexer = py::class(vm, MODULE, "Lexer", &[], LEXER_METHODS, &[])?;
-    let sp = py::class(vm, MODULE, "SubParse", &[], &[("__init__", sp_init), ("__repr__", sp_repr)], &[])?;
-    let ce = py::class(vm, MODULE, "_CatchError", &[], &[("__enter__", ce_enter), ("__exit__", ce_exit)], &[])?;
+    let sp = py::class(
+        vm,
+        MODULE,
+        "SubParse",
+        &[],
+        &[("__init__", sp_init), ("__repr__", sp_repr)],
+        &[],
+    )?;
+    let ce = py::class(
+        vm,
+        MODULE,
+        "_CatchError",
+        &[],
+        &[("__enter__", ce_enter), ("__exit__", ce_exit)],
+        &[],
+    )?;
     let set = |vm: &Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     set(vm, "ParseError", Value::Obj(pe.clone()));
     set(vm, "Lexer", Value::Obj(lexer.clone()));
     set(vm, "SubParse", Value::Obj(sp.clone()));
     set(vm, "_CatchError", Value::Obj(ce));
-    vm.ext_set(Rc::new(Classes { lexer, holder, parse_error: pe, subparse: sp }));
+    vm.ext_set(Rc::new(Classes {
+        lexer,
+        holder,
+        parse_error: pe,
+        subparse: sp,
+    }));
     Ok(m)
 }
 

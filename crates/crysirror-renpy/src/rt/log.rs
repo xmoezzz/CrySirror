@@ -25,12 +25,22 @@ const KEEP: usize = 2048;
 struct Sinks(HashMap<String, VecDeque<String>>);
 
 fn sinks(vm: &Vm) -> Rc<RefCell<Sinks>> {
-    vm.ext_get::<Rc<RefCell<Sinks>>>().expect("renpy.log sinks").clone()
+    vm.ext_get::<Rc<RefCell<Sinks>>>()
+        .expect("renpy.log sinks")
+        .clone()
 }
 
 /// The retained lines of log `name` (without the trailing newline).
 pub fn lines(vm: &Vm, name: &str) -> Vec<String> {
-    vm.ext_get::<Rc<RefCell<Sinks>>>().map(|s| s.borrow().0.get(name).map(|l| l.iter().cloned().collect()).unwrap_or_default()).unwrap_or_default()
+    vm.ext_get::<Rc<RefCell<Sinks>>>()
+        .map(|s| {
+            s.borrow()
+                .0
+                .get(name)
+                .map(|l| l.iter().cloned().collect())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) fn push(vm: &Vm, name: &str, text: &str) {
@@ -67,10 +77,30 @@ fn this_name(vm: &mut Vm, this: &Value) -> PyResult<String> {
 
 fn lf_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    py::set(vm, this, "name", py::arg_or(args, kw, 1, "name", Value::None))?;
-    py::set(vm, this, "append", py::arg_or(args, kw, 2, "append", Value::Bool(false)))?;
-    py::set(vm, this, "developer", py::arg_or(args, kw, 3, "developer", Value::Bool(false)))?;
-    py::set(vm, this, "flush", py::arg_or(args, kw, 4, "flush", Value::Bool(true)))?;
+    py::set(
+        vm,
+        this,
+        "name",
+        py::arg_or(args, kw, 1, "name", Value::None),
+    )?;
+    py::set(
+        vm,
+        this,
+        "append",
+        py::arg_or(args, kw, 2, "append", Value::Bool(false)),
+    )?;
+    py::set(
+        vm,
+        this,
+        "developer",
+        py::arg_or(args, kw, 3, "developer", Value::Bool(false)),
+    )?;
+    py::set(
+        vm,
+        this,
+        "flush",
+        py::arg_or(args, kw, 4, "flush", Value::Bool(true)),
+    )?;
     py::set(vm, this, "file", Value::None)?;
     py::set(vm, this, "softspace", Value::Int(0))?;
     py::set(vm, this, "newlines", Value::None)?;
@@ -80,7 +110,10 @@ fn lf_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn header(vm: &mut Vm, this: &Value) -> PyResult<()> {
     let mut out = Vec::new();
-    if { let t__ = py::get(vm, this, "append")?; py::truthy(vm, &t__) }? {
+    if {
+        let t__ = py::get(vm, this, "append")?;
+        py::truthy(vm, &t__)
+    }? {
         out.extend([String::new(), "=".repeat(78), String::new()]);
     }
     let time = py::import(vm, "time")?;
@@ -122,11 +155,17 @@ fn lf_open(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         Value::Bool(false) => return Ok(Value::Bool(false)),
         _ => {}
     }
-    if { let t__ = py::get(vm, this, "developer")?; py::truthy(vm, &t__) }? && !py::config_bool(vm, "developer")? {
+    if {
+        let t__ = py::get(vm, this, "developer")?;
+        py::truthy(vm, &t__)
+    }? && !py::config_bool(vm, "developer")?
+    {
         return Ok(Value::Bool(false));
     }
-    if let Some(v) = { let t__ = py::import(vm, "renpy.config")?; ops::getattr_opt(vm, &t__, "log_enable") }?
-        && !py::truthy(vm, &v)?
+    if let Some(v) = {
+        let t__ = py::import(vm, "renpy.config")?;
+        ops::getattr_opt(vm, &t__, "log_enable")
+    }? && !py::truthy(vm, &v)?
     {
         return Ok(Value::Bool(false));
     }
@@ -145,12 +184,24 @@ fn lf_write(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if let Some(b) = ops::bytes_of(&s)
         && s.as_str().is_none()
     {
-        s = vm.types.new_str(&b.iter().map(|&c| c as char).collect::<String>());
+        s = vm
+            .types
+            .new_str(&b.iter().map(|&c| c as char).collect::<String>());
     }
     let mut text = py::string(vm, &s)?;
-    if !{ let t__ = py::get(vm, this, "raw_write")?; py::truthy(vm, &t__) }? {
+    if !{
+        let t__ = py::get(vm, this, "raw_write")?;
+        py::truthy(vm, &t__)
+    }? {
         let rest = vm.types.new_tuple(args[2..].to_vec());
-        text = match ops::binary_op(vm, &s, &rest, crysirror_python::ast::BinOp::Mod, false, false) {
+        text = match ops::binary_op(
+            vm,
+            &s,
+            &rest,
+            crysirror_python::ast::BinOp::Mod,
+            false,
+            false,
+        ) {
             Ok(v) => py::string(vm, &v)?,
             Err(_) => {
                 let mut all = vec![s.clone()];
@@ -182,13 +233,20 @@ fn lf_exception(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn f_open(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let name = py::arg_or(args, kw, 0, "name", Value::None);
     let cache = py::import_attr(vm, MODULE, "log_cache")?;
-    let d = cache.obj().cloned().ok_or_else(|| vm.type_error("log_cache"))?;
+    let d = cache
+        .obj()
+        .cloned()
+        .ok_or_else(|| vm.type_error("log_cache"))?;
     if let Some(v) = ops::dict_get(vm, &d, &name)? {
         return Ok(v);
     }
     let cls = py::import_attr(vm, MODULE, "LogFile")?;
     let mut kwargs = Vec::new();
-    for (i, n, def) in [(1, "append", false), (2, "developer", false), (3, "flush", false)] {
+    for (i, n, def) in [
+        (1, "append", false),
+        (2, "developer", false),
+        (3, "flush", false),
+    ] {
         kwargs.push((Rc::from(n), py::arg_or(args, kw, i, n, Value::Bool(def))));
     }
     let rv = vm.call(&cls, vec![name.clone()], kwargs)?;
@@ -197,7 +255,12 @@ fn f_open(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 fn tl_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    py::set(vm, &args[0], "duration", py::arg_or(args, kw, 1, "duration", Value::None))?;
+    py::set(
+        vm,
+        &args[0],
+        "duration",
+        py::arg_or(args, kw, 1, "duration", Value::None),
+    )?;
     Ok(Value::None)
 }
 
@@ -237,16 +300,48 @@ fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     if vm.ext_get::<Rc<RefCell<Sinks>>>().is_none() {
         vm.ext_set(Rc::new(RefCell::new(Sinks::default())));
     }
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[("open", f_open), ("post_init", noop)]);
-    let lf = py::class(vm, MODULE, "LogFile", &[], &[("__init__", lf_init), ("open", lf_open), ("write", lf_write), ("exception", lf_exception)], &[])?;
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[("open", f_open), ("post_init", noop)],
+    );
+    let lf = py::class(
+        vm,
+        MODULE,
+        "LogFile",
+        &[],
+        &[
+            ("__init__", lf_init),
+            ("open", lf_open),
+            ("write", lf_write),
+            ("exception", lf_exception),
+        ],
+        &[],
+    )?;
     crysirror_python::modules::set(vm, &m, "LogFile", Value::Obj(lf));
     let list = Value::Obj(vm.types.list.clone());
-    let tl = py::class(vm, MODULE, "TimeLog", &[list], &[("__init__", tl_init), ("append", tl_append), ("prune", tl_prune)], &[])?;
+    let tl = py::class(
+        vm,
+        MODULE,
+        "TimeLog",
+        &[list],
+        &[
+            ("__init__", tl_init),
+            ("append", tl_append),
+            ("prune", tl_prune),
+        ],
+        &[],
+    )?;
     crysirror_python::modules::set(vm, &m, "TimeLog", Value::Obj(tl));
     crysirror_python::modules::set(vm, &m, "log_cache", vm.types.new_dict());
     crysirror_python::modules::set(vm, &m, "log_file", Value::None);
     let sys = py::import(vm, "sys")?;
-    for (n, s) in [("real_stdout", "stdout"), ("real_stderr", "stderr"), ("sys_stdout", "stdout"), ("sys_stderr", "stderr")] {
+    for (n, s) in [
+        ("real_stdout", "stdout"),
+        ("real_stderr", "stderr"),
+        ("sys_stdout", "stdout"),
+        ("sys_stderr", "stderr"),
+    ] {
         let v = py::get_or_none(vm, &sys, s)?;
         crysirror_python::modules::set(vm, &m, n, v);
     }

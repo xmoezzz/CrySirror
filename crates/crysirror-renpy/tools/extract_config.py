@@ -51,8 +51,15 @@ def evaluate(node):
 
 
 for node in tree.body:
+    # 8.4+ annotates the defaults (`name: type = value`); the annotation
+    # names engine types, so the default is kept as a plain assignment.
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        if node.value is None:
+            continue
+        node = ast.Assign(targets=[node.target], value=node.value, lineno=node.lineno, col_offset=node.col_offset,
+                          end_lineno=node.end_lineno, end_col_offset=node.end_col_offset)
     if isinstance(node, ast.Assign) and all(isinstance(t, ast.Name) for t in node.targets):
-        seg = ast.get_source_segment(src, node)
+        seg = " = ".join(t.id for t in node.targets) + " = " + ast.get_source_segment(src, node.value)
         if ok(node.value) or isinstance(node.value, ast.Name) and node.value.id in ("None", "True", "False"):
             lines.append(seg)
             names.extend(t.id for t in node.targets)

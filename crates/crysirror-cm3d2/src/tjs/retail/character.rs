@@ -59,16 +59,26 @@ pub(super) fn parameter(m: &MaidStatus, extra: &Status, name: &str) -> Result<i3
 pub(super) fn eligible(s: &mut TjsState, a: &[Variant]) -> Result<Variant> {
     arity(a, 2)?;
     let slot = arg_int(a, 0) as usize;
-    ensure!(s.maid(slot).is_some(), "empty maid slot {slot}");
+    let maid = s.active_maids.get(slot).copied().flatten().with_context(|| format!("empty maid slot {slot}"))?;
+    let man = number(&s.retail, "男種類");
+    Ok(boolean(eligible_for(s, maid, arg_int(a, 1) as i32, man)?))
+}
+
+pub(super) fn eligible_for(s: &mut TjsState, maid: usize, play: i32, man: i32) -> Result<bool> {
     let t = s.retail.table("kasizuki_play_list.nei")?;
-    let r = row_id(&t, arg_int(a, 1) as i32)?;
-    ensure!(
-        matches!(number(&s.retail, "男種類"), 10 | 20),
-        "unknown guest type"
-    );
-    if likability(s, slot)? < t.int(16, r) {
-        return Ok(boolean(false));
+    let r = row_id(&t, play)?;
+    let m = s.maids.get(&maid).context("missing maid")?;
+    let values = s.retail.kasizuki.maids.get(&m.guid_id);
+    let value = |key| values.and_then(|flags| flags.get(key)).and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
+    let likability = match man {
+        10 => m.likability,
+        20 => value("好感度＿傅き男１"),
+        _ => bail!("unknown guest type"),
+    };
+    if likability < t.int(16, r) {
+        return Ok(false);
     }
+    let work_count = value("仕事回数");
     let names = s.retail.table("kasizuki_work_count_convert_list.nei")?;
     let tiers: BTreeMap<_, _> = (1..names.rows)
         .map(|i| (names.int(0, i), names.string(1, i)))
@@ -80,12 +90,12 @@ pub(super) fn eligible(s: &mut TjsState, a: &[Variant]) -> Result<Variant> {
         .filter_map(|(i, label)| marked(17 + i).then_some(label))
         .collect();
     if !allowed.is_empty() {
-        let label = threshold_name(&names, maid_flag(s, slot, "仕事回数")?)?;
+        let label = threshold_name(&names, work_count)?;
         if !allowed.contains(&&label) {
-            return Ok(boolean(false));
+            return Ok(false);
         }
     }
-    let m = s.maid(slot).context("missing maid")?;
+    let m = s.maids.get(&maid).context("missing maid")?;
     let defaults = Status::default();
     let extra = s.retail.characters.get(&m.guid_id).unwrap_or(&defaults);
     let conditions = t.string(10, r);
@@ -93,7 +103,7 @@ pub(super) fn eligible(s: &mut TjsState, a: &[Variant]) -> Result<Variant> {
         for cond in conditions.split(',') {
             let (name, min) = cond.split_once('|').context("malformed play condition")?;
             if parameter(m, extra, name)? < min.trim().parse::<i32>()? {
-                return Ok(boolean(false));
+                return Ok(false);
             }
         }
     }
@@ -101,18 +111,16 @@ pub(super) fn eligible(s: &mut TjsState, a: &[Variant]) -> Result<Variant> {
     if !skills.is_empty() {
         for id in skills.split(',') {
             if m.skill_data.get(&id.trim().parse::<i32>()?).is_none() {
-                return Ok(boolean(false));
+                return Ok(false);
             }
         }
     }
     if !(0..4).contains(&m.seikeiken) || !marked(11 + m.seikeiken as usize) {
-        return Ok(boolean(false));
+        return Ok(false);
     }
     let rel = 17 + tiers.len();
-    Ok(boolean(
-        !(0..3).any(|i| marked(rel + i))
-            || ((0..3).contains(&extra.relation) && marked(rel + extra.relation as usize)),
-    ))
+    Ok(!(0..3).any(|i| marked(rel + i))
+        || ((0..3).contains(&extra.relation) && marked(rel + extra.relation as usize)))
 }
 
 pub(super) fn add_status(s: &mut TjsState, a: &[Variant]) -> Result<Variant> {

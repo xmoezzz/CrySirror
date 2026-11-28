@@ -16,7 +16,11 @@ fn mget(vm: &mut Vm, n: &str) -> PyResult<Value> {
 
 fn fget(vm: &mut Vm, o: &Value, n: &str) -> PyResult<f64> {
     let v = py::get_or_none(vm, o, n)?;
-    if py::is_none(&v) { Ok(0.) } else { py::f64_of(vm, &v) }
+    if py::is_none(&v) {
+        Ok(0.)
+    } else {
+        py::f64_of(vm, &v)
+    }
 }
 
 fn bget(vm: &mut Vm, o: &Value, n: &str) -> PyResult<bool> {
@@ -100,7 +104,14 @@ fn sm_create(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let sc = mget(vm, "Sprite")?;
     let s = vm.call(&sc, Vec::new(), Vec::new())?;
-    for (n, v) in [("x", Value::Int(0)), ("y", Value::Int(0)), ("zorder", Value::Int(0)), ("live", Value::Bool(true)), ("manager", this.clone()), ("events", Value::Bool(false))] {
+    for (n, v) in [
+        ("x", Value::Int(0)),
+        ("y", Value::Int(0)),
+        ("zorder", Value::Int(0)),
+        ("live", Value::Bool(true)),
+        ("manager", this.clone()),
+        ("events", Value::Bool(false)),
+    ] {
         py::set(vm, &s, n, v)?;
     }
     vm.call_method(&s, "set_child", vec![args[1].clone()])?;
@@ -129,10 +140,18 @@ fn sm_redraw(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 fn is_fast(vm: &mut Vm, r: &Value) -> PyResult<bool> {
-    let Some(rd) = render::render_data(r) else { return Ok(false) };
+    let Some(rd) = render::render_data(r) else {
+        return Ok(false);
+    };
     let (mesh, uniforms, shaders, properties, plain) = {
         let d = rd.borrow();
-        (d.mesh.clone(), d.uniforms.clone(), d.shaders.clone(), d.properties.clone(), d.forward.is_none() && !d.xclipping && !d.yclipping)
+        (
+            d.mesh.clone(),
+            d.uniforms.clone(),
+            d.shaders.clone(),
+            d.properties.clone(),
+            d.forward.is_none() && !d.xclipping && !d.yclipping,
+        )
     };
     if !plain {
         return Ok(false);
@@ -209,7 +228,13 @@ fn sm_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             let blits: Vec<render::Blit> = src.borrow().children.clone();
             let mut dst = rvd.borrow_mut();
             for b in blits {
-                dst.children.push(render::Blit { source: b.source, x: b.x + x, y: b.y + y, focus: false, main: false });
+                dst.children.push(render::Blit {
+                    source: b.source,
+                    x: b.x + x,
+                    y: b.y + y,
+                    focus: false,
+                    main: false,
+                });
             }
         } else {
             let pos = vm.types.new_tuple(vec![Value::Float(x), Value::Float(y)]);
@@ -234,8 +259,21 @@ fn sm_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         if bget(vm, s, "events")? {
             let cache = py::get(vm, s, "cache")?;
             let child = py::get(vm, &cache, "child")?;
-            let (sx, sy, cst) = (fget(vm, s, "x")?, fget(vm, s, "y")?, fget(vm, &cache, "st")?);
-            let rv = vm.call_method(&child, "event", vec![ev.clone(), Value::Float(x - sx), Value::Float(y - sy), Value::Float(st - cst)])?;
+            let (sx, sy, cst) = (
+                fget(vm, s, "x")?,
+                fget(vm, s, "y")?,
+                fget(vm, &cache, "st")?,
+            );
+            let rv = vm.call_method(
+                &child,
+                "event",
+                vec![
+                    ev.clone(),
+                    Value::Float(x - sx),
+                    Value::Float(y - sy),
+                    Value::Float(st - cst),
+                ],
+            )?;
             if !py::is_none(&rv) {
                 return Ok(rv);
             }
@@ -277,7 +315,11 @@ fn new_sm(vm: &mut Vm, this: &Value) -> PyResult<Value> {
     let smc = mget(vm, "SpriteManager")?;
     let u = py::get(vm, this, "update_callback")?;
     let p = py::get(vm, this, "predict_callback")?;
-    vm.call(&smc, Vec::new(), vec![("update".into(), u), ("predict".into(), p)])
+    vm.call(
+        &smc,
+        Vec::new(),
+        vec![("update".into(), u), ("predict".into(), p)],
+    )
 }
 
 fn particles_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -296,7 +338,11 @@ fn particles_after_setstate(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Valu
 fn particles_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let factory = arg_or(args, kw, 1, "factory", Value::None);
-    let props: Vec<_> = kw.iter().filter(|(k, _)| &**k != "factory").cloned().collect();
+    let props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| &**k != "factory")
+        .cloned()
+        .collect();
     super::core::d_init(vm, &[this.clone()], &props)?;
     let sm = new_sm(vm, this)?;
     py::set(vm, this, "sm", sm)?;
@@ -315,7 +361,11 @@ fn particles_update(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         particles = vm.types.new_list(Vec::new());
     }
     let factory = py::get(vm, this, "factory")?;
-    let add = vm.call_method(&factory, "create", vec![particles.clone(), Value::Float(st)])?;
+    let add = vm.call_method(
+        &factory,
+        "create",
+        vec![particles.clone(), Value::Float(st)],
+    )?;
     let mut new = Vec::new();
     for pair in py::items(vm, &particles)? {
         let pp = py::items(vm, &pair)?;
@@ -373,7 +423,9 @@ fn particles_visit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 // SnowBlossom ---------------------------------------------------------------------------------------
 
-const SBF: &[&str] = &["image", "count", "xspeed", "yspeed", "border", "start", "fast", "rotate"];
+const SBF: &[&str] = &[
+    "image", "count", "xspeed", "yspeed", "border", "start", "fast", "rotate",
+];
 
 fn sbf_setstate(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
@@ -408,14 +460,19 @@ fn sbf_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn sbf_init_starts(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let start = fget(vm, this, "start")?;
-    let count = { let v = py::get(vm, this, "count")?; py::int(vm, &v)? };
+    let count = {
+        let v = py::get(vm, this, "count")?;
+        py::int(vm, &v)?
+    };
     let mut starts = Vec::new();
     for _ in 0..count {
         starts.push(uniform(vm, 0., start)?);
     }
     starts.push(start);
     starts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let l = vm.types.new_list(starts.into_iter().map(Value::Float).collect());
+    let l = vm
+        .types
+        .new_list(starts.into_iter().map(Value::Float).collect());
     py::set(vm, this, "starts", l)?;
     Ok(Value::None)
 }
@@ -439,14 +496,21 @@ fn new_particle(vm: &mut Vm, this: &Value, st: f64, fast: bool) -> PyResult<Valu
     let border = py::get(vm, this, "border")?;
     let off = uniform(vm, 0., 100.)?;
     let rot = py::get_or_none(vm, this, "rotate")?;
-    vm.call(&c, vec![image, xs, ys, border, Value::Float(st), Value::Float(off)], vec![("fast".into(), Value::Bool(fast)), ("rotate".into(), rot)])
+    vm.call(
+        &c,
+        vec![image, xs, ys, border, Value::Float(st), Value::Float(off)],
+        vec![("fast".into(), Value::Bool(fast)), ("rotate".into(), rot)],
+    )
 }
 
 fn sbf_create(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let particles = args[1].clone();
     let st = py::f64_of(vm, &args[2])?;
-    let count = { let v = py::get(vm, this, "count")?; py::int(vm, &v)? };
+    let count = {
+        let v = py::get(vm, this, "count")?;
+        py::int(vm, &v)?
+    };
     let has = !py::is_none(&particles) && ops::truthy(vm, &particles)?;
     if st == 0. && !has && bget(vm, this, "fast")? {
         let mut rv = Vec::new();
@@ -455,7 +519,11 @@ fn sbf_create(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         }
         return Ok(vm.types.new_list(rv));
     }
-    let n = if py::is_none(&particles) { 0 } else { ops::len(vm, &particles)? as i64 };
+    let n = if py::is_none(&particles) {
+        0
+    } else {
+        ops::len(vm, &particles)? as i64
+    };
     if py::is_none(&particles) || n < count {
         if has {
             let starts = py::get(vm, this, "starts")?;
@@ -483,7 +551,9 @@ fn screen_dims(vm: &mut Vm, rotate: bool) -> PyResult<(f64, f64)> {
 
 fn sbp_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["image", "xspeed", "yspeed", "border", "start", "offset", "fast", "rotate"];
+    let names = [
+        "image", "xspeed", "yspeed", "border", "start", "offset", "fast", "rotate",
+    ];
     let mut v = vec![Value::None; names.len()];
     for (i, a) in args.iter().skip(1).enumerate().take(names.len()) {
         v[i] = a.clone();
@@ -503,7 +573,11 @@ fn sbp_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let rotate = ops::truthy(vm, &v[7])?;
     let (sw, sh) = screen_dims(vm, rotate)?;
-    let (xspeed, yspeed, border) = (py::f64_of(vm, &v[1])?, py::f64_of(vm, &v[2])?, py::f64_of(vm, &v[3])?);
+    let (xspeed, yspeed, border) = (
+        py::f64_of(vm, &v[1])?,
+        py::f64_of(vm, &v[2])?,
+        py::f64_of(vm, &v[3])?,
+    );
     let mut ystart = if yspeed > 0. { -border } else { sh + border };
     let travel = (2. * border + sh) / yspeed.abs();
     let xdist = xspeed * travel;
@@ -532,15 +606,32 @@ fn sbp_update(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let image = py::get(vm, this, "image")?;
     let t = Value::Float(to + fget(vm, this, "offset")?);
     let (a, b) = if rotate { (ypos, xpos) } else { (xpos, ypos) };
-    Ok(vm.types.new_tuple(vec![Value::Int(a.trunc() as i64), Value::Int(b.trunc() as i64), t, image]))
+    Ok(vm.types.new_tuple(vec![
+        Value::Int(a.trunc() as i64),
+        Value::Int(b.trunc() as i64),
+        t,
+        image,
+    ]))
 }
 
 fn f_snow_blossom(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let d = arg_or(args, kw, 0, "d", Value::None);
     let count = arg_or(args, kw, 1, "count", Value::Int(10));
     let border = arg_or(args, kw, 2, "border", Value::Int(50));
-    let mut xs = arg_or(args, kw, 3, "xspeed", vm.types.new_tuple(vec![Value::Int(20), Value::Int(50)]));
-    let mut ys = arg_or(args, kw, 4, "yspeed", vm.types.new_tuple(vec![Value::Int(100), Value::Int(200)]));
+    let mut xs = arg_or(
+        args,
+        kw,
+        3,
+        "xspeed",
+        vm.types.new_tuple(vec![Value::Int(20), Value::Int(50)]),
+    );
+    let mut ys = arg_or(
+        args,
+        kw,
+        4,
+        "yspeed",
+        vm.types.new_tuple(vec![Value::Int(100), Value::Int(200)]),
+    );
     let start = arg_or(args, kw, 5, "start", Value::Int(0));
     let fast = arg_or(args, kw, 6, "fast", Value::Bool(false));
     let horizontal = arg_or(args, kw, 7, "horizontal", Value::Bool(false));
@@ -548,10 +639,20 @@ fn f_snow_blossom(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         std::mem::swap(&mut xs, &mut ys);
     }
     let fc = mget(vm, "SnowBlossomFactory")?;
-    let f = vm.call(&fc, Vec::new(), vec![
-        ("image".into(), d), ("count".into(), count), ("border".into(), border), ("xspeed".into(), xs), ("yspeed".into(), ys),
-        ("start".into(), start), ("fast".into(), fast), ("rotate".into(), horizontal),
-    ])?;
+    let f = vm.call(
+        &fc,
+        Vec::new(),
+        vec![
+            ("image".into(), d),
+            ("count".into(), count),
+            ("border".into(), border),
+            ("xspeed".into(), xs),
+            ("yspeed".into(), ys),
+            ("start".into(), start),
+            ("fast".into(), fast),
+            ("rotate".into(), horizontal),
+        ],
+    )?;
     let pc = mget(vm, "Particles")?;
     vm.call(&pc, vec![f], Vec::new())
 }
@@ -561,33 +662,102 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let object = py::import_attr(vm, "renpy.object", "Object")?;
     let norollback = py::import_attr(vm, "renpy.python", "NoRollback")?;
     let d = Value::Obj(super::core::displayable_class(vm));
-    let nosave = |vm: &mut Vm, names: &[&str]| -> Value { let l = names.iter().map(|n| vm.types.new_str(n)).collect(); vm.types.new_list(l) };
+    let nosave = |vm: &mut Vm, names: &[&str]| -> Value {
+        let l = names.iter().map(|n| vm.types.new_str(n)).collect();
+        vm.types.new_list(l)
+    };
     let sc_nosave = nosave(vm, &["st", "render"]);
     let p_nosave = nosave(vm, &["particles"]);
-    let mut c = |vm: &mut Vm, name: &str, bases: &[Value], methods: Methods, attrs: &[(&str, Value)]| -> PyResult<()> {
+    let mut c = |vm: &mut Vm,
+                 name: &str,
+                 bases: &[Value],
+                 methods: Methods,
+                 attrs: &[(&str, Value)]|
+     -> PyResult<()> {
         let cls = py::class(vm, MODULE, name, bases, methods, attrs)?;
         crysirror_python::modules::set(vm, &m, name, Value::Obj(cls));
         Ok(())
     };
-    c(vm, "SpriteCache", &[object.clone()], &[], &[
-        ("nosave", sc_nosave), ("child", Value::None), ("child_copy", Value::None), ("st", Value::None), ("render", Value::None), ("fast", Value::Bool(false)),
-    ])?;
-    c(vm, "Sprite", &[object], &[("set_child", sprite_set_child), ("destroy", sprite_destroy)], &[
-        ("x", Value::Int(0)), ("y", Value::Int(0)), ("zorder", Value::Int(0)), ("child", Value::None), ("render", Value::None), ("live", Value::Bool(true)),
-        ("manager", Value::None),
-    ])?;
-    c(vm, "SpriteManager", &[d.clone()], &[
-        ("__init__", sm_init), ("create", sm_create), ("predict_one", sm_predict_one), ("redraw", sm_redraw), ("render", sm_render),
-        ("event", sm_event), ("visit", sm_visit), ("destroy_all", sm_destroy_all),
-    ], &[])?;
-    c(vm, "Particles", &[d, norollback.clone()], &[
-        ("after_upgrade", particles_after_upgrade), ("after_setstate", particles_after_setstate), ("__init__", particles_init),
-        ("update_callback", particles_update), ("predict_callback", particles_predict), ("render", particles_render), ("visit", particles_visit),
-    ], &[("__version__", Value::Int(1)), ("nosave", p_nosave)])?;
-    c(vm, "SnowBlossomFactory", &[norollback.clone()], &[
-        ("__setstate__", sbf_setstate), ("__init__", sbf_init), ("init", sbf_init_starts), ("create", sbf_create), ("predict", sbf_predict),
-    ], &[("rotate", Value::Bool(false))])?;
-    c(vm, "SnowBlossomParticle", &[norollback], &[("__init__", sbp_init), ("update", sbp_update)], &[])?;
+    c(
+        vm,
+        "SpriteCache",
+        &[object.clone()],
+        &[],
+        &[
+            ("nosave", sc_nosave),
+            ("child", Value::None),
+            ("child_copy", Value::None),
+            ("st", Value::None),
+            ("render", Value::None),
+            ("fast", Value::Bool(false)),
+        ],
+    )?;
+    c(
+        vm,
+        "Sprite",
+        &[object],
+        &[("set_child", sprite_set_child), ("destroy", sprite_destroy)],
+        &[
+            ("x", Value::Int(0)),
+            ("y", Value::Int(0)),
+            ("zorder", Value::Int(0)),
+            ("child", Value::None),
+            ("render", Value::None),
+            ("live", Value::Bool(true)),
+            ("manager", Value::None),
+        ],
+    )?;
+    c(
+        vm,
+        "SpriteManager",
+        &[d.clone()],
+        &[
+            ("__init__", sm_init),
+            ("create", sm_create),
+            ("predict_one", sm_predict_one),
+            ("redraw", sm_redraw),
+            ("render", sm_render),
+            ("event", sm_event),
+            ("visit", sm_visit),
+            ("destroy_all", sm_destroy_all),
+        ],
+        &[],
+    )?;
+    c(
+        vm,
+        "Particles",
+        &[d, norollback.clone()],
+        &[
+            ("after_upgrade", particles_after_upgrade),
+            ("after_setstate", particles_after_setstate),
+            ("__init__", particles_init),
+            ("update_callback", particles_update),
+            ("predict_callback", particles_predict),
+            ("render", particles_render),
+            ("visit", particles_visit),
+        ],
+        &[("__version__", Value::Int(1)), ("nosave", p_nosave)],
+    )?;
+    c(
+        vm,
+        "SnowBlossomFactory",
+        &[norollback.clone()],
+        &[
+            ("__setstate__", sbf_setstate),
+            ("__init__", sbf_init),
+            ("init", sbf_init_starts),
+            ("create", sbf_create),
+            ("predict", sbf_predict),
+        ],
+        &[("rotate", Value::Bool(false))],
+    )?;
+    c(
+        vm,
+        "SnowBlossomParticle",
+        &[norollback],
+        &[("__init__", sbp_init), ("update", sbp_update)],
+        &[],
+    )?;
     Ok(m)
 }
 

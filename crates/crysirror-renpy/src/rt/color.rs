@@ -29,7 +29,8 @@ pub fn parse_hex(text: &str) -> Option<[u8; 4]> {
 
 pub fn rgba(vm: &mut Vm, v: &Value) -> PyResult<[u8; 4]> {
     if let Some(s) = v.as_str() {
-        return parse_hex(s).ok_or_else(|| vm.value_error(format!("Color string {s:?} must be in hex format.")));
+        return parse_hex(s)
+            .ok_or_else(|| vm.value_error(format!("Color string {s:?} must be in hex format.")));
     }
     let items = match v.payload() {
         Some(Payload::Tuple(_)) | Some(Payload::List(_)) => py::seq(v).unwrap_or_default(),
@@ -54,12 +55,18 @@ pub fn rgba(vm: &mut Vm, v: &Value) -> PyResult<[u8; 4]> {
 }
 
 pub fn rgba_opt(vm: &mut Vm, v: &Value) -> PyResult<Option<[u8; 4]>> {
-    if py::is_none(v) { Ok(None) } else { rgba(vm, v).map(Some) }
+    if py::is_none(v) {
+        Ok(None)
+    } else {
+        rgba(vm, v).map(Some)
+    }
 }
 
 fn f_rgba(vm: &mut Vm, args: &[Value], _: crysirror_python::builtins::Kw) -> PyResult<Value> {
     let c = rgba(vm, &args.first().cloned().unwrap_or(Value::None))?;
-    Ok(vm.types.new_tuple(c.iter().map(|x| Value::Int(*x as i64)).collect()))
+    Ok(vm
+        .types
+        .new_tuple(c.iter().map(|x| Value::Int(*x as i64)).collect()))
 }
 
 pub fn functions() -> &'static [(&'static str, crysirror_python::object::NativeFn)] {
@@ -99,7 +106,13 @@ fn rgb_to_hsv(r: f64, g: f64, b: f64) -> [f64; 3] {
     let rc = (maxc - r) / (maxc - minc);
     let gc = (maxc - g) / (maxc - minc);
     let bc = (maxc - b) / (maxc - minc);
-    let h = if r == maxc { bc - gc } else if g == maxc { 2. + rc - bc } else { 4. + gc - rc };
+    let h = if r == maxc {
+        bc - gc
+    } else if g == maxc {
+        2. + rc - bc
+    } else {
+        4. + gc - rc
+    };
     [(h / 6.).rem_euclid(1.), s, v]
 }
 
@@ -110,11 +123,21 @@ fn rgb_to_hls(r: f64, g: f64, b: f64) -> [f64; 3] {
     if minc == maxc {
         return [0., l, 0.];
     }
-    let s = if l <= 0.5 { (maxc - minc) / (maxc + minc) } else { (maxc - minc) / (2. - maxc - minc) };
+    let s = if l <= 0.5 {
+        (maxc - minc) / (maxc + minc)
+    } else {
+        (maxc - minc) / (2. - maxc - minc)
+    };
     let rc = (maxc - r) / (maxc - minc);
     let gc = (maxc - g) / (maxc - minc);
     let bc = (maxc - b) / (maxc - minc);
-    let h = if r == maxc { bc - gc } else if g == maxc { 2. + rc - bc } else { 4. + gc - rc };
+    let h = if r == maxc {
+        bc - gc
+    } else if g == maxc {
+        2. + rc - bc
+    } else {
+        4. + gc - rc
+    };
     [(h / 6.).rem_euclid(1.), l, s]
 }
 
@@ -122,7 +145,11 @@ fn hls_to_rgb(h: f64, l: f64, s: f64) -> [f64; 3] {
     if s == 0. {
         return [l, l, l];
     }
-    let m2 = if l <= 0.5 { l * (1. + s) } else { l + s - l * s };
+    let m2 = if l <= 0.5 {
+        l * (1. + s)
+    } else {
+        l + s - l * s
+    };
     let m1 = 2. * l - m2;
     let v = |hue: f64| {
         let hue = hue.rem_euclid(1.);
@@ -155,15 +182,34 @@ pub fn make_color(vm: &mut Vm, c: [i64; 4]) -> PyResult<Value> {
     tuple_new(vm, &cls, c.iter().map(|v| Value::Int(*v)).collect())
 }
 
-fn from_unit(vm: &mut Vm, cls: &ObjRef, rgb: [f64; 3], alpha: f64, hls: Value, hsv: Value) -> PyResult<Value> {
-    let items = vec![Value::Int((rgb[0] * 255.) as i64), Value::Int((rgb[1] * 255.) as i64), Value::Int((rgb[2] * 255.) as i64), Value::Int((alpha * 255.) as i64)];
+fn from_unit(
+    vm: &mut Vm,
+    cls: &ObjRef,
+    rgb: [f64; 3],
+    alpha: f64,
+    hls: Value,
+    hsv: Value,
+) -> PyResult<Value> {
+    let items = vec![
+        Value::Int((rgb[0] * 255.) as i64),
+        Value::Int((rgb[1] * 255.) as i64),
+        Value::Int((rgb[2] * 255.) as i64),
+        Value::Int((alpha * 255.) as i64),
+    ];
     let rv = tuple_new(vm, cls, items)?;
-    let rgbt = vm.types.new_tuple(rgb.iter().map(|v| Value::Float(*v)).collect());
+    let rgbt = vm
+        .types
+        .new_tuple(rgb.iter().map(|v| Value::Float(*v)).collect());
     p::set(vm, &rv, "_rgb", rgbt)?;
     p::set(vm, &rv, "_hls", hls)?;
     p::set(vm, &rv, "_hsv", hsv)?;
     p::set(vm, &rv, "_alpha", Value::Float(alpha))?;
-    let rgba = vm.types.new_tuple(vec![Value::Float(rgb[0]), Value::Float(rgb[1]), Value::Float(rgb[2]), Value::Float(alpha)]);
+    let rgba = vm.types.new_tuple(vec![
+        Value::Float(rgb[0]),
+        Value::Float(rgb[1]),
+        Value::Float(rgb[2]),
+        Value::Float(alpha),
+    ]);
     p::set(vm, &rv, "_rgba", rgba)?;
     Ok(rv)
 }
@@ -173,22 +219,35 @@ fn triple(vm: &mut Vm, v: &Value) -> PyResult<[f64; 3]> {
     if i.len() < 3 {
         return Err(vm.value_error("expected three components"));
     }
-    Ok([p::f64_of(vm, &i[0])?, p::f64_of(vm, &i[1])?, p::f64_of(vm, &i[2])?])
+    Ok([
+        p::f64_of(vm, &i[0])?,
+        p::f64_of(vm, &i[1])?,
+        p::f64_of(vm, &i[2])?,
+    ])
 }
 
 fn c_new(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let cls = args[0].obj().cloned().ok_or_else(|| vm.type_error("Color.__new__"))?;
+    let cls = args[0]
+        .obj()
+        .cloned()
+        .ok_or_else(|| vm.type_error("Color.__new__"))?;
     let a = &args[1..];
     let color = arg_or(a, kw, 0, "color", Value::None);
     let hls = arg_or(a, kw, 1, "hls", Value::None);
     let hsv = arg_or(a, kw, 2, "hsv", Value::None);
     let rgb = arg_or(a, kw, 3, "rgb", Value::None);
-    let alpha = match arg(a, kw, 4, "alpha") { Some(v) => p::f64_of(vm, v)?, None => 1. };
+    let alpha = match arg(a, kw, 4, "alpha") {
+        Some(v) => p::f64_of(vm, v)?,
+        None => 1.,
+    };
     if !p::is_none(&color) {
         if let Some(s) = color.as_str() {
             let t = s.strip_prefix('#').unwrap_or(s);
             if !matches!(t.len(), 3 | 4 | 6 | 8) || !t.bytes().all(|b| b.is_ascii_hexdigit()) {
-                return Err(p::error(vm, format!("Color string {t:?} must be 3, 4, 6, or 8 hex digits long.")));
+                return Err(p::error(
+                    vm,
+                    format!("Color string {t:?} must be 3, 4, 6, or 8 hex digits long."),
+                ));
             }
             let mut c = parse_hex(t).unwrap_or([0; 4]);
             if matches!(t.len(), 3 | 6) {
@@ -196,7 +255,10 @@ fn c_new(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             }
             return tuple_new(vm, &cls, c.iter().map(|v| Value::Int(*v as i64)).collect());
         }
-        if color.obj().is_some_and(|o| ops::isinstance(vm, &Value::Obj(o.clone()), &cls)) {
+        if color
+            .obj()
+            .is_some_and(|o| ops::isinstance(vm, &Value::Obj(o.clone()), &cls))
+        {
             return Ok(color);
         }
         let mut c = p::items(vm, &color)?;
@@ -243,12 +305,18 @@ fn comps(vm: &mut Vm, v: &Value) -> PyResult<[f64; 4]> {
 fn c_hexcode(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let c = comps(vm, &args[0])?;
     let [r, g, b, a] = c.map(|v| v as i64);
-    Ok(vm.types.new_string(if a != 255 { format!("#{r:02x}{g:02x}{b:02x}{a:02x}") } else { format!("#{r:02x}{g:02x}{b:02x}") }))
+    Ok(vm.types.new_string(if a != 255 {
+        format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+    } else {
+        format!("#{r:02x}{g:02x}{b:02x}")
+    }))
 }
 
 fn c_repr(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let h = c_hexcode(vm, args, kw)?;
-    Ok(vm.types.new_string(format!("<Color {}>", h.as_str().unwrap_or(""))))
+    Ok(vm
+        .types
+        .new_string(format!("<Color {}>", h.as_str().unwrap_or(""))))
 }
 
 fn c_getnewargs(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -263,7 +331,8 @@ fn unit(vm: &mut Vm, this: &Value) -> PyResult<[f64; 4]> {
 }
 
 fn ftuple(vm: &Vm, v: &[f64]) -> Value {
-    vm.types.new_tuple(v.iter().map(|x| Value::Float(*x)).collect())
+    vm.types
+        .new_tuple(v.iter().map(|x| Value::Float(*x)).collect())
 }
 
 fn c_rgb(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -378,7 +447,10 @@ fn lerp_value(vm: &mut Vm, a: &Value, b: &Value, f: f64) -> PyResult<Value> {
     let x = p::f64_of(vm, a)?;
     let y = p::f64_of(vm, b)?;
     let r = x + (y - x) * f;
-    Ok(match a { Value::Int(_) => Value::Int(r as i64), _ => Value::Float(r) })
+    Ok(match a {
+        Value::Int(_) => Value::Int(r as i64),
+        _ => Value::Float(r),
+    })
 }
 
 fn py_is_plain_tuple(vm: &Vm, t: &ObjRef) -> bool {
@@ -403,18 +475,44 @@ fn interp_space(vm: &mut Vm, args: &[Value], hsv: bool) -> PyResult<Value> {
     let cls = color_class(vm)?;
     let key = if hsv { "hsv" } else { "hls" };
     let o = if other.as_str().is_some() {
-        vm.call(&Value::Obj(cls.clone()), vec![other.clone()], vec![("alpha".into(), Value::Float(a))])?
-    } else if other.obj().is_some_and(|o| ops::isinstance(vm, &Value::Obj(o.clone()), &cls)) {
+        vm.call(
+            &Value::Obj(cls.clone()),
+            vec![other.clone()],
+            vec![("alpha".into(), Value::Float(a))],
+        )?
+    } else if other
+        .obj()
+        .is_some_and(|o| ops::isinstance(vm, &Value::Obj(o.clone()), &cls))
+    {
         other.clone()
     } else {
-        vm.call(&Value::Obj(cls.clone()), Vec::new(), vec![(key.into(), other.clone()), ("alpha".into(), Value::Float(a))])?
+        vm.call(
+            &Value::Obj(cls.clone()),
+            Vec::new(),
+            vec![
+                (key.into(), other.clone()),
+                ("alpha".into(), Value::Float(a)),
+            ],
+        )?
     };
-    let (s, t) = if hsv { (hsv_of(vm, this)?, hsv_of(vm, &o)?) } else { (hls_of(vm, this)?, hls_of(vm, &o)?) };
-    let mix = [s[0] + (t[0] - s[0]) * f, s[1] + (t[1] - s[1]) * f, s[2] + (t[2] - s[2]) * f];
+    let (s, t) = if hsv {
+        (hsv_of(vm, this)?, hsv_of(vm, &o)?)
+    } else {
+        (hls_of(vm, this)?, hls_of(vm, &o)?)
+    };
+    let mix = [
+        s[0] + (t[0] - s[0]) * f,
+        s[1] + (t[1] - s[1]) * f,
+        s[2] + (t[2] - s[2]) * f,
+    ];
     let oa = alpha_of(vm, &o)?;
     let alpha = a + (oa - a) * f;
     let m = ftuple(vm, &mix);
-    vm.call(&Value::Obj(cls), Vec::new(), vec![(key.into(), m), ("alpha".into(), Value::Float(alpha))])
+    vm.call(
+        &Value::Obj(cls),
+        Vec::new(),
+        vec![(key.into(), m), ("alpha".into(), Value::Float(alpha))],
+    )
 }
 fn c_interpolate_hsv(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     interp_space(vm, args, true)
@@ -442,7 +540,11 @@ fn c_opacity(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn from_space(vm: &mut Vm, key: &str, v: [f64; 3], alpha: f64) -> PyResult<Value> {
     let cls = color_class(vm)?;
     let t = ftuple(vm, &v);
-    vm.call(&Value::Obj(cls), Vec::new(), vec![(key.into(), t), ("alpha".into(), Value::Float(alpha))])
+    vm.call(
+        &Value::Obj(cls),
+        Vec::new(),
+        vec![(key.into(), t), ("alpha".into(), Value::Float(alpha))],
+    )
 }
 fn hls_edit(vm: &mut Vm, args: &[Value], f: impl Fn([f64; 3], f64) -> [f64; 3]) -> PyResult<Value> {
     let h = hls_of(vm, &args[0])?;
@@ -487,45 +589,74 @@ fn c_rep_opacity(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let c = comps(vm, &args[0])?;
     let o = p::f64_of(vm, &args[1])?.clamp(0., 1.);
     let cls = color_class(vm)?;
-    let t = vm.types.new_tuple(vec![Value::Int(c[0] as i64), Value::Int(c[1] as i64), Value::Int(c[2] as i64)]);
-    vm.call(&Value::Obj(cls), vec![t], vec![("alpha".into(), Value::Float(o))])
+    let t = vm.types.new_tuple(vec![
+        Value::Int(c[0] as i64),
+        Value::Int(c[1] as i64),
+        Value::Int(c[2] as i64),
+    ]);
+    vm.call(
+        &Value::Obj(cls),
+        vec![t],
+        vec![("alpha".into(), Value::Float(o))],
+    )
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let m = crysirror_python::modules::module_with(vm, "renpy.color", functions());
     let tuple = Value::Obj(vm.types.tuple.clone());
-    let cls = p::class(vm, "renpy.color", "Color", &[tuple], &[
-        ("__repr__", c_repr),
-        ("__getnewargs__", c_getnewargs),
-        ("normalize", c_normalize),
-        ("__add__", c_add),
-        ("__radd__", c_add),
-        ("__sub__", c_sub),
-        ("__rsub__", c_rsub),
-        ("__mul__", c_mul),
-        ("__rmul__", c_mul),
-        ("interpolate_core", c_interpolate_core),
-        ("interpolate", c_interpolate),
-        ("interpolate_hsv", c_interpolate_hsv),
-        ("interpolate_hls", c_interpolate_hls),
-        ("tint", c_tint),
-        ("shade", c_shade),
-        ("opacity", c_opacity),
-        ("rotate_hue", c_rotate_hue),
-        ("replace_hue", c_replace_hue),
-        ("multiply_hls_saturation", c_mul_hls_sat),
-        ("multiply_hsv_saturation", c_mul_hsv_sat),
-        ("multiply_value", c_mul_value),
-        ("replace_hls_saturation", c_rep_hls_sat),
-        ("replace_hsv_saturation", c_rep_hsv_sat),
-        ("replace_value", c_rep_value),
-        ("replace_lightness", c_rep_lightness),
-        ("replace_opacity", c_rep_opacity),
-    ], &[("_rgb", Value::None), ("_hls", Value::None), ("_hsv", Value::None), ("_alpha", Value::None), ("_rgba", Value::None)])?;
+    let cls = p::class(
+        vm,
+        "renpy.color",
+        "Color",
+        &[tuple],
+        &[
+            ("__repr__", c_repr),
+            ("__getnewargs__", c_getnewargs),
+            ("normalize", c_normalize),
+            ("__add__", c_add),
+            ("__radd__", c_add),
+            ("__sub__", c_sub),
+            ("__rsub__", c_rsub),
+            ("__mul__", c_mul),
+            ("__rmul__", c_mul),
+            ("interpolate_core", c_interpolate_core),
+            ("interpolate", c_interpolate),
+            ("interpolate_hsv", c_interpolate_hsv),
+            ("interpolate_hls", c_interpolate_hls),
+            ("tint", c_tint),
+            ("shade", c_shade),
+            ("opacity", c_opacity),
+            ("rotate_hue", c_rotate_hue),
+            ("replace_hue", c_replace_hue),
+            ("multiply_hls_saturation", c_mul_hls_sat),
+            ("multiply_hsv_saturation", c_mul_hsv_sat),
+            ("multiply_value", c_mul_value),
+            ("replace_hls_saturation", c_rep_hls_sat),
+            ("replace_hsv_saturation", c_rep_hsv_sat),
+            ("replace_value", c_rep_value),
+            ("replace_lightness", c_rep_lightness),
+            ("replace_opacity", c_rep_opacity),
+        ],
+        &[
+            ("_rgb", Value::None),
+            ("_hls", Value::None),
+            ("_hsv", Value::None),
+            ("_alpha", Value::None),
+            ("_rgba", Value::None),
+        ],
+    )?;
     let new = vm.types.new_builtin("__new__", c_new);
     let new = p::staticmethod(vm, new);
     vm.types.set_attr(&cls, "__new__", new);
-    for (n, f) in [("hexcode", c_hexcode as crysirror_python::object::NativeFn), ("rgb", c_rgb), ("rgba", c_rgba), ("premultiplied", c_premultiplied), ("hls", c_hls), ("hsv", c_hsv), ("alpha", c_alpha)] {
+    for (n, f) in [
+        ("hexcode", c_hexcode as crysirror_python::object::NativeFn),
+        ("rgb", c_rgb),
+        ("rgba", c_rgba),
+        ("premultiplied", c_premultiplied),
+        ("hls", c_hls),
+        ("hsv", c_hsv),
+        ("alpha", c_alpha),
+    ] {
         let g = vm.types.new_builtin(n, f);
         let prop = p::property(vm, g, None)?;
         vm.types.set_attr(&cls, n, prop);

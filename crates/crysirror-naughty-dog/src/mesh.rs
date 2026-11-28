@@ -130,6 +130,8 @@ pub struct Fragment {
     /// Layer masks (attribute 0x15) in 0..1, or empty when not stored per
     /// vertex.
     pub masks: Vec<[f32; 3]>,
+    /// Instance attribute 0x4c, diffuse light RGB and baked visibility.
+    pub placed_light: Vec<[f32; 4]>,
     pub uvs: Vec<[f32; 2]>,
     pub triangles: Vec<[u16; 3]>,
     /// Per vertex up to four  influences;
@@ -146,6 +148,8 @@ pub struct Material {
     pub passes: Vec<Vec<u32>>,
     /// The two-layer blend pass 0's fragment program computes, if any.
     pub layers: Option<crate::rsx::LayerBlend>,
+    /// Base and upper specular masks for a recognised dual-Blinn program.
+    pub blinn_masks: Option<[u8; 2]>,
     /// Pass 0's named fragment-program constants.
     pub parameters: Vec<(String, [f32; 4])>,
     /// Pass 0's render-state word (pass data +0x20). By its values on the
@@ -251,22 +255,45 @@ fn raw_attribute<const N: usize>(p: &Loaded, f: usize, id: u8, vertices: usize) 
         if row[0] != id {
             continue;
         }
-        let kind = row[1] >> 4;
-        ensure!((row[1] & 15) as usize == N && matches!(kind, 0 | 4 | 6), "ND attribute {id:#x} format {:#x}", row[1]);
-        let depths: [u8; N] = std::array::from_fn(|k| row[4 + k]);
-        ensure!(depths.iter().all(|d| *d <= 24), "ND attribute bit depth");
-        let param = desc + usize::from(u16::from_be_bytes([row[2], row[3]]));
-        let float = |k: usize| if kind == 0 { Ok(0.) } else { p.f32(param + 4 * k) };
-        let a = (0..N).map(float).collect::<Result<Vec<_>>>()?;
-        let b = (0..N).map(|k| float(N + k)).collect::<Result<Vec<_>>>()?;
-        let offset = (0..N).map(|k| if kind == 6 { p.u32(param + 4 * (2 * N + k)) } else { Ok(0) }).collect::<Result<Vec<_>>>()?;
-        let values = unpack(&p.data, p.ptr(f + 0x50 + 8 * row_index)?, vertices, &depths)?
-            .iter()
-            .map(|r| std::array::from_fn(|k| if kind == 6 { 4 * u64::from(r[k]) + u64::from(offset[k]) } else { u64::from(r[k]) }))
-            .collect();
-        return Ok(Some(Raw { kind, depths, a: std::array::from_fn(|k| a[k]), b: std::array::from_fn(|k| b[k]), values }));
+        return Ok(Some(decode_stream(p, desc, &row, p.ptr(f + 0x50 + 8 * row_index)?, vertices)?));
     }
     Ok(None)
+}
+
+fn decode_stream<const N: usize>(p: &Loaded, desc: usize, row: &[u8; 8], stream: usize, vertices: usize) -> Result<Raw<N>> {
+    let kind = row[1] >> 4;
+    ensure!((row[1] & 15) as usize == N && matches!(kind, 0 | 4 | 6), "ND attribute {:#x} format {:#x}", row[0], row[1]);
+    let depths: [u8; N] = std::array::from_fn(|k| row[4 + k]);
+    ensure!(depths.iter().all(|d| *d <= 24), "ND attribute bit depth");
+    let param = desc + usize::from(u16::from_be_bytes([row[2], row[3]]));
+    let float = |k: usize| if kind == 0 { Ok(0.) } else { p.f32(param + 4 * k) };
+    let a = (0..N).map(float).collect::<Result<Vec<_>>>()?;
+    let b = (0..N).map(|k| float(N + k)).collect::<Result<Vec<_>>>()?;
+    let offset = (0..N).map(|k| if kind == 6 { p.u32(param + 4 * (2 * N + k)) } else { Ok(0) }).collect::<Result<Vec<_>>>()?;
+    let values = unpack(&p.data, stream, vertices, &depths)?
+        .iter()
+        .map(|r| std::array::from_fn(|k| if kind == 6 { 4 * u64::from(r[k]) + u64::from(offset[k]) } else { u64::from(r[k]) }))
+        .collect();
+    Ok(Raw { kind, depths, a: std::array::from_fn(|k| a[k]), b: std::array::from_fn(|k| b[k]), values })
+}
+
+/// Placed fragments override the prototype's empty lighting attributes.
+/// The first pointer in the instance fragment's stream list supplies 0x4c.
+fn placed_light(p: &Loaded, table: Option<usize>, index: usize, f: usize, vertices: usize) -> Result<Vec<[f32; 4]>> {
+    let Some(entry) = table.map(|t| t + 8 * index) else { return Ok(Vec::new()) };
+    let (Ok(streams), Ok(desc)) = (p.ptr(entry), p.ptr(entry + 4)) else { return Ok(Vec::new()) };
+    for k in 0..described(p, f)? {
+        let at = desc + 8 + 8 * k;
+        let row: [u8; 8] = p.data.get(at..at + 8).context("ND placed descriptor outside package")?.try_into()?;
+        if row[0] != 0x4c || !matches!(row[1], 0x44 | 0x64) || row[4..7] == [0; 3] {
+            continue;
+        }
+        let raw = decode_stream(p, desc, &row, p.ptr(streams)?, vertices)?;
+        let result = dequantize(&raw);
+        ensure!(result.iter().flatten().all(|v| v.is_finite()), "ND non-finite placed vertex lighting");
+        return Ok(result);
+    }
+    Ok(Vec::new())
 }
 
 /// Dequantized values (module documentation).
@@ -430,7 +457,14 @@ pub fn material(p: &Loaded, m: usize) -> Result<Material> {
     let passes = (0..passes as usize).map(|i| p.ptr(list + 4 * i).and_then(pass_samplers)).collect::<Result<Vec<_>>>().unwrap_or_else(|_| vec![samplers.clone()]);
     let parameters = p.ptr(p.ptr(list)? + 0x10).and_then(|data| crate::rsx::pass_parameters(p, data)).unwrap_or_default();
     let state = p.ptr(p.ptr(list)? + 0x10).and_then(|data| p.u16(data + 0x20)).unwrap_or(0);
-    Ok(Material { name, samplers, passes, layers, parameters, state })
+    let blinn_masks = if passes.len() > 3 {
+        let data = p.ptr(p.ptr(list)? + 0x10)?;
+        let normal_pass = p.ptr(p.ptr(list + 12)? + 0x10)?;
+        crate::rsx::blinn_mask_slots(p, data, normal_pass).ok().flatten()
+    } else {
+        None
+    };
+    Ok(Material { name, samplers, passes, layers, blinn_masks, parameters, state })
 }
 
 /// First word of the collision-mesh collections in actor packages (the
@@ -454,10 +488,15 @@ pub fn prototype_meshes(p: &Loaded, payload: usize) -> Result<Vec<Mesh>> {
         let placed = p.u32(record + 8)? as usize;
         ensure!(placed <= 65536, "ND instance count");
         let (mut instances, mut spheres) = (Vec::with_capacity(placed), Vec::with_capacity(placed));
+        let mut lighting_table = None;
         if placed > 0 {
             let list = p.ptr(record + 4)?;
             for i in 0..placed {
                 let at = p.ptr(list + 4 * i)?;
+                // Shared prototype vertices cannot carry different instances' lighting.
+                if placed == 1 {
+                    lighting_table = p.ptr(at + 0x18).ok();
+                }
                 let m: [f32; 16] = std::array::from_fn(|k| p.f32(at + 0x40 + 4 * k).unwrap_or(f32::NAN));
                 let s: [f32; 4] = std::array::from_fn(|k| p.f32(at + 0x30 + 4 * k).unwrap_or(f32::NAN));
                 ensure!(m.iter().chain(&s).all(|v| v.is_finite()) && (m[15] - 1.).abs() < 1e-3, "ND instance matrix");
@@ -486,7 +525,8 @@ pub fn prototype_meshes(p: &Loaded, payload: usize) -> Result<Vec<Mesh>> {
                 Err(_) => Vec::new(),
             };
             let triangles = decode_indices(&p.data[p.ptr(f + 0x48)?..], usize::from(p.u16(f + 0x40)?), vertices)?;
-            decoded.push(Fragment { positions, normals, masks, uvs, triangles, skin });
+            let placed_light = placed_light(p, lighting_table, i, f, vertices)?;
+            decoded.push(Fragment { positions, normals, masks, placed_light, uvs, triangles, skin });
         }
         let fragments = decoded;
         let skinned = (0..usize::from(p.u16(header + 6)?)).any(|i| p.ptr(array + 4 * i).is_ok_and(|f| p.data[f + 0x2f] > p.data[f + 0x20]));

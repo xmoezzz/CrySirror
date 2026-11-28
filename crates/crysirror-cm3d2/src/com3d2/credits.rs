@@ -181,6 +181,7 @@ fn installed_credits_callers_scroll_and_return() -> Result<()> {
     let packs = ["sound", "sound2"];
     let (_tmp, mut rt, c, mut op, files, _, _) = daily::installed_panel(&packs)?;
     let mut vm = Vm {
+        linked_cm3d2: None,
         client: c,
         config: Config {
             data_dir: op.dir.clone(),

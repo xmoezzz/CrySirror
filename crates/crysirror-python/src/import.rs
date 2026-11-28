@@ -68,6 +68,9 @@ fn load_module(vm: &mut Vm, name: &str) -> PyResult<Value> {
         let m = init(vm)?;
         let k = vm.types.new_str(name);
         vm.modules.dict_set_raw(&vm.types, k, Value::Obj(m.clone()));
+        if let Some(hook) = vm.module_loaded {
+            hook(vm, name, &m)?;
+        }
         return Ok(Value::Obj(m));
     }
     let frozen = crate::modules::source_module(name).map(|s| (s.to_string(), format!("<frozen {name}>"), Dialect::Py3, crate::modules::is_package(name)));
@@ -106,9 +109,20 @@ fn load_module(vm: &mut Vm, name: &str) -> PyResult<Value> {
             return Err(e);
         }
         // The module may have replaced itself in sys.modules.
-        return Ok(get_module(vm, name).unwrap_or(Value::Obj(m)));
+        let rv = get_module(vm, name).unwrap_or(Value::Obj(m));
+        if let (Some(hook), Value::Obj(o)) = (vm.module_loaded, &rv) {
+            hook(vm, name, &o.clone())?;
+        }
+        return Ok(rv);
     }
-    Err(vm.exc_msg("ModuleNotFoundError", format!("No module named '{name}'")))
+    let msg = format!("No module named '{name}'");
+    let e = vm.exc_msg("ModuleNotFoundError", msg.clone());
+    if let crate::PyErr::Exc(o) = &e {
+        let (m, n) = (vm.types.new_string(msg), vm.types.new_str(name));
+        ops::set_raw_attr(vm, o, "msg", m);
+        ops::set_raw_attr(vm, o, "name", n);
+    }
+    Err(e)
 }
 
 pub fn import_name(vm: &mut Vm, name: &Value, fromlist: &Value, level: &Value) -> PyResult<Value> {

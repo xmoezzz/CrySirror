@@ -465,7 +465,8 @@ pub fn document_lit(name: &str, meshes: &[Mesh], source: &dyn AssetReader, direc
             // cannot differ between instances of one glTF mesh).
             let bake = probes.filter(|p| !p.is_empty() && mesh.instances.len() == 1);
             let mut material = Material { name: group.material.name.clone(), base_color_texture: image, ..Default::default() };
-            let mut engine = if bake.is_some() {
+            let has_placed_light = mesh.fragments[group.fragments.clone()].iter().all(|f| !f.placed_light.is_empty());
+            let mut engine = if has_placed_light || bake.is_some() {
                 crate::probes::baked_material(image, layer.as_ref())
             } else if let Some(l) = layer {
                 // Without per-vertex data a height-mask blend falls back to
@@ -519,8 +520,33 @@ pub fn document_lit(name: &str, meshes: &[Mesh], source: &dyn AssetReader, direc
                 _ => 0.,
             };
             engine.specular_texture = image_of(spec)?;
+            let matched_blinn = !blended && has_placed_light
+                && group.material.blinn_masks.is_some()
+                && group.material.parameter("g_fBlendUvScale").is_some_and(|v| v[0] == 1.)
+                && matches!(layers.map(|l| l.weight), Some(crate::rsx::Weight::Mask { .. }));
+            if matched_blinn
+                && let (Some([side, upper]), Some(scale), Some(blend)) = (group.material.blinn_masks, specular, group.material.parameter("g_fBlendSoftness_fBlendOffset"))
+                && let (Some(&side), Some(&upper)) = (group.material.samplers.get(usize::from(side)), group.material.samplers.get(usize::from(upper)))
+            {
+                engine.effect = Some(crysirror_scene::effect::ShaderEffect::LayeredBlinn {
+                    intensity: 1., softness: blend[0], mask_power: blend[1], specular_scale: scale[0], specular_exponent: scale[1],
+                });
+                engine.metallic_roughness_texture = image_of(Some(side))?;
+                engine.opacity_texture = image_of(Some(upper))?;
+                engine.specular_texture = None;
+                engine.metallic_factor = 0.;
+            }
+            let dual_blinn = matches!(engine.effect, Some(crysirror_scene::effect::ShaderEffect::LayeredBlinn { .. }));
+            let normal = if dual_blinn { group.material.passes[3].first().copied() } else { normal };
             if let Some(id) = normal {
-                engine.normal_encoding = if textures.get(&id).is_some_and(|d| d.format == crate::texture::Format::Dxt5) { crysirror_scene::material::NormalEncoding::Ag } else { crysirror_scene::material::NormalEncoding::Rgb };
+                use crysirror_scene::material::NormalEncoding;
+                engine.normal_encoding = if dual_blinn {
+                    NormalEncoding::Rg
+                } else if textures.get(&id).is_some_and(|d| d.format == crate::texture::Format::Dxt5) {
+                    NormalEncoding::Ag
+                } else {
+                    NormalEncoding::Rgb
+                };
                 engine.normal_texture = image_of(Some(id))?;
             }
             // Pass state: blending and culling (`Material::state`).
@@ -544,15 +570,29 @@ pub fn document_lit(name: &str, meshes: &[Mesh], source: &dyn AssetReader, direc
                     Some(r) if f.skin.len() == f.positions.len() => f.skin.iter().map(|v| influences(v, r.skeleton.names.len())).unzip(),
                     _ => (Vec::new(), Vec::new()),
                 };
-                let mut aux = match bake {
-                    Some(field) => crate::probes::bake(field, &placement(mesh, 0), &f.positions, &normals, &f.triangles),
-                    None => Vec::new(),
+                let mut aux = if !f.placed_light.is_empty() && (has_placed_light || bake.is_some()) {
+                    // TEX5.rgb multiplies albedo. The shared diffuse shader
+                    // consumes irradiance and divides by pi.
+                    f.placed_light.iter().map(|v| [v[0] * std::f32::consts::PI, v[1] * std::f32::consts::PI, v[2] * std::f32::consts::PI, 1.]).collect()
+                } else if let Some(field) = bake {
+                    let mut aux = crate::probes::bake(field, &placement(mesh, 0), &f.positions, &normals, &f.triangles);
+                    for vertex in &mut aux {
+                        for c in &mut vertex[..3] {
+                            *c *= crate::probes::INTENSITY;
+                        }
+                    }
+                    aux
+                } else {
+                    Vec::new()
                 };
                 // A height-mask blend reads the vertex mask (attribute
                 // 0x15 x) in `_AUX` w.
                 if group.material.layers.is_some_and(|l| matches!(l.weight, crate::rsx::Weight::Mask { .. })) && f.masks.len() == aux.len() {
+                    // The vertex program writes COL0.x = saturate(exp2(
+                    // log2(v4.x) * g_fBlendSoftness_fBlendOffset.y)).
+                    let exponent = group.material.parameter("g_fBlendSoftness_fBlendOffset").map_or(1., |v| v[1]);
                     for (a, m) in aux.iter_mut().zip(&f.masks) {
-                        a[3] = m[0];
+                        a[3] = if dual_blinn { m[0] } else { m[0].clamp(0., 1.).powf(exponent).clamp(0., 1.) };
                     }
                 }
                 primitives.push(Primitive {

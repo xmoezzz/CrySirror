@@ -23,6 +23,7 @@ pub struct Button {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Page {
     pub name: String,
+    pub flags: u32,
     pub title: Option<String>,
     pub buttons: Vec<Button>,
 }
@@ -55,7 +56,7 @@ pub fn pages(bytes: &[u8]) -> Result<Vec<Page>> {
                 });
             }
         }
-        out.push(Page { name: text(page).unwrap_or_default(), title: text(page + 0x10), buttons });
+        out.push(Page { name: text(page).unwrap_or_default(), flags: m.u32(page + 0x1c)?, title: text(page + 0x10), buttons });
     }
     Ok(out)
 }

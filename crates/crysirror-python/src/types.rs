@@ -134,13 +134,14 @@ fn type_payload(name: &str, bases: Vec<ObjRef>, kind: BaseKind, no_dict: bool) -
         base_kind: kind,
         builtin: true,
         no_dict,
+        finalizer: std::cell::Cell::new(false),
     })
 }
 
 impl Types {
     pub fn new() -> Types {
-        let object = Rc::new(PyObject { class: RefCell::new(None), dict: Some(RefCell::new(Dict::new())), payload: type_payload("object", Vec::new(), BaseKind::Object, false) });
-        let type_ = Rc::new(PyObject { class: RefCell::new(None), dict: Some(RefCell::new(Dict::new())), payload: type_payload("type", vec![object.clone()], BaseKind::Type, false) });
+        let object = PyObject::bootstrap_type(type_payload("object", Vec::new(), BaseKind::Object, false));
+        let type_ = PyObject::bootstrap_type(type_payload("type", vec![object.clone()], BaseKind::Type, false));
         type_.set_class(type_.clone());
         object.set_class(type_.clone());
         set_mro(&object, vec![object.clone()]);

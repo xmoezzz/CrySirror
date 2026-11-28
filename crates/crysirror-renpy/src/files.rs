@@ -41,12 +41,14 @@ impl ScopedFiles {
         for mount in archive_mounts {
             index(storage.as_ref(), mount, "", &mut game, &check)?;
         }
+        // The common directory is renpy/common from 6.15; through 6.14 it
+        // is common/ beside renpy/.
         let mut common = BTreeMap::new();
-        if storage
-            .metadata(Mount::Asset, "renpy/common")?
-            .is_some_and(|m| m.is_directory)
-        {
-            index(storage.as_ref(), "renpy/common", "", &mut common, &check)?;
+        for dir in ["renpy/common", "common"] {
+            if storage.metadata(Mount::Asset, dir)?.is_some_and(|m| m.is_directory) {
+                index(storage.as_ref(), dir, "", &mut common, &check)?;
+                break;
+            }
         }
         Ok(Self {
             storage,

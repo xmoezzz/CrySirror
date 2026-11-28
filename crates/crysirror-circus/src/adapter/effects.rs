@@ -443,6 +443,7 @@ fn native_spec(
                 frames: 1,
                 fps: 0.,
                 soft_distance: 0.,
+                triplanar_coverage: None,
                 blend: BlendMode::Alpha,
                 facing: FacingMode::Camera,
             };
@@ -523,6 +524,7 @@ fn drifting_spec(
             frames: 1,
             fps: 0.,
             soft_distance: 0.,
+            triplanar_coverage: None,
             blend: BlendMode::Alpha,
             facing: FacingMode::Camera,
         };
@@ -553,6 +555,7 @@ fn empty_pools(texture: &str, rng: SequenceRng, now: u64) -> SystemSpec {
             frames: 1,
             fps: 0.,
             soft_distance: 0.,
+            triplanar_coverage: None,
             blend: BlendMode::Alpha,
             facing: FacingMode::Camera,
         };
@@ -616,6 +619,7 @@ fn native_orbit_emitter(
         frames: 1,
         fps: 0.,
         soft_distance: 0.,
+        triplanar_coverage: None,
         blend: BlendMode::Alpha,
         facing: FacingMode::Camera,
     };

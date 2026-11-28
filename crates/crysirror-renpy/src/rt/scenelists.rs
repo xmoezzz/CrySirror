@@ -58,7 +58,10 @@ fn frozenset(vm: &mut Vm, items: Vec<Value>) -> PyResult<Value> {
 
 fn f_init_layers(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let m = py::import(vm, MODULE)?;
-    let ordered = concat(vm, &["detached_layers", "bottom_layers", "layers", "top_layers"])?;
+    let ordered = concat(
+        vm,
+        &["detached_layers", "bottom_layers", "layers", "top_layers"],
+    )?;
     py::set(vm, &m, "ordered_layers", vm.types.new_list(ordered.clone()))?;
     let l = frozenset(vm, ordered)?;
     py::set(vm, &m, "layers", l)?;
@@ -80,7 +83,14 @@ fn pair_none_list(vm: &Vm) -> Value {
 
 // SceneListEntry ---------------------------------------------------------------------------------------
 
-const SLE_FIELDS: [&str; 6] = ["tag", "zorder", "show_time", "animation_time", "displayable", "name"];
+const SLE_FIELDS: [&str; 6] = [
+    "tag",
+    "zorder",
+    "show_time",
+    "animation_time",
+    "displayable",
+    "name",
+];
 
 fn sle_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     for (i, n) in SLE_FIELDS.iter().enumerate() {
@@ -114,7 +124,10 @@ fn sle_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let v = py::get_or_none(vm, &args[0], n)?;
         parts.push(ops::repr(vm, &v)?);
     }
-    Ok(py::s(vm, &format!("<SLE: {} {} {}>", parts[0], parts[1], parts[2])))
+    Ok(py::s(
+        vm,
+        &format!("<SLE: {} {} {}>", parts[0], parts[1], parts[2]),
+    ))
 }
 
 fn new_sle(vm: &mut Vm, vals: Vec<Value>) -> PyResult<Value> {
@@ -139,7 +152,11 @@ fn sle_update_time(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         return Ok(this.clone());
     }
     let rv = sle_copy(vm, &[this.clone()], &[])?;
-    let st = if py::truthy(vm, &st)? { st } else { time.clone() };
+    let st = if py::truthy(vm, &st)? {
+        st
+    } else {
+        time.clone()
+    };
     let at = if py::truthy(vm, &at)? { at } else { time };
     py::set(vm, &rv, "show_time", st)?;
     py::set(vm, &rv, "animation_time", at)?;
@@ -223,7 +240,12 @@ fn sl_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             }
             ops::setitem(vm, &layers, k, vm.types.new_list(out))?;
         }
-        py::set(vm, this, "additional_transient", vm.types.new_list(Vec::new()))?;
+        py::set(
+            vm,
+            this,
+            "additional_transient",
+            vm.types.new_list(Vec::new()),
+        )?;
     }
     if version < 5 {
         py::set(vm, this, "drag_group", Value::None)?;
@@ -257,11 +279,25 @@ fn sl_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let oldsl = arg_or(args, kw, 1, "oldsl", Value::None);
     let shown = arg_or(args, kw, 2, "shown", Value::None);
     py::set(vm, this, "shown_window", Value::Bool(false))?;
-    for n in ["layers", "at_list", "layer_at_list", "camera_list", "layer_transform", "camera_transform", "config_layer_transform", "sticky_tags"] {
+    for n in [
+        "layers",
+        "at_list",
+        "layer_at_list",
+        "camera_list",
+        "layer_transform",
+        "camera_transform",
+        "config_layer_transform",
+        "sticky_tags",
+    ] {
         py::set(vm, this, n, vm.types.new_dict())?;
     }
     py::set(vm, this, "shown", shown)?;
-    py::set(vm, this, "additional_transient", vm.types.new_list(Vec::new()))?;
+    py::set(
+        vm,
+        this,
+        "additional_transient",
+        vm.types.new_list(Vec::new()),
+    )?;
     py::set(vm, this, "drag_group", Value::None)?;
     let layers = layers_of(vm, this)?;
     let at_list = py::get(vm, this, "at_list")?;
@@ -328,7 +364,10 @@ fn sl_set_transient_prefix(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value
     for ltp in py::get_items(vm, this, "additional_transient")? {
         let p = py::items(vm, &ltp)?;
         if ops::eq(vm, &p[0], layer)? && ops::eq(vm, &p[1], tag)? {
-            out.push(vm.types.new_tuple(vec![p[0].clone(), p[1].clone(), prefix.clone()]));
+            out.push(
+                vm.types
+                    .new_tuple(vec![p[0].clone(), p[1].clone(), prefix.clone()]),
+            );
         } else {
             out.push(ltp);
         }
@@ -344,10 +383,19 @@ fn replace_transient(vm: &mut Vm, this: &Value, prefix: &Value) -> PyResult<()> 
     }
     for ltp in py::get_items(vm, this, "additional_transient")? {
         let p = py::items(vm, &ltp)?;
-        let pre = if py::is_none(&p[2]) { prefix.clone() } else { p[2].clone() };
+        let pre = if py::is_none(&p[2]) {
+            prefix.clone()
+        } else {
+            p[2].clone()
+        };
         remove(vm, this, &p[0], &p[1], &pre)?;
     }
-    py::set(vm, this, "additional_transient", vm.types.new_list(Vec::new()))?;
+    py::set(
+        vm,
+        this,
+        "additional_transient",
+        vm.types.new_list(Vec::new()),
+    )?;
     Ok(())
 }
 
@@ -379,7 +427,11 @@ pub fn transform_state(vm: &mut Vm, old: &Value, new: &Value, execution: bool) -
         return Ok(new.clone());
     }
     let from_target = py::config_bool(vm, "take_state_from_target")?;
-    let old_t = if from_target { vm.call_method(old, "_target", Vec::new())? } else { old.clone() };
+    let old_t = if from_target {
+        vm.call_method(old, "_target", Vec::new())?
+    } else {
+        old.clone()
+    };
     if !is_transform(vm, &old_t)? {
         return Ok(new.clone());
     }
@@ -388,7 +440,11 @@ pub fn transform_state(vm: &mut Vm, old: &Value, new: &Value, execution: bool) -
         vm.call_method(&old_t, "update_state", Vec::new())?;
     }
     let mut new_thing = new.clone();
-    let mut new_t = if from_target { vm.call_method(new, "_target", Vec::new())? } else { new.clone() };
+    let mut new_t = if from_target {
+        vm.call_method(new, "_target", Vec::new())?
+    } else {
+        new.clone()
+    };
     if !is_transform(vm, &new_t)? {
         let t = py::import_attr(vm, "renpy.display.motion", "Transform")?;
         new_t = vm.call(&t, Vec::new(), vec![("child".into(), new_thing)])?;
@@ -410,7 +466,14 @@ fn sl_transform_state(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 /// `(add_index, remove_index, zorder)`.
-fn find_index(vm: &mut Vm, this: &Value, layer: &Value, tag: &Value, zorder: &Value, behind: &Value) -> PyResult<(usize, Option<usize>, Value)> {
+fn find_index(
+    vm: &mut Vm,
+    this: &Value,
+    layer: &Value,
+    tag: &Value,
+    zorder: &Value,
+    behind: &Value,
+) -> PyResult<(usize, Option<usize>, Value)> {
     let ll = layer_list(vm, this, layer)?;
     let l = py::items(vm, &ll)?;
     let mut zorder = zorder.clone();
@@ -449,11 +512,17 @@ fn find_index(vm: &mut Vm, this: &Value, layer: &Value, tag: &Value, zorder: &Va
 
 fn sl_find_index(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (a, r, z) = find_index(vm, &args[0], &args[1], &args[2], &args[3], &args[4])?;
-    Ok(vm.types.new_tuple(vec![Value::Int(a as i64), r.map(|r| Value::Int(r as i64)).unwrap_or(Value::None), z]))
+    Ok(vm.types.new_tuple(vec![
+        Value::Int(a as i64),
+        r.map(|r| Value::Int(r as i64)).unwrap_or(Value::None),
+        z,
+    ]))
 }
 
 fn take(kw: &mut Vec<(Rc<str>, Value)>, n: &str) -> Option<Value> {
-    kw.iter().position(|(k, _)| &**k == n).map(|i| kw.remove(i).1)
+    kw.iter()
+        .position(|(k, _)| &**k == n)
+        .map(|i| kw.remove(i).1)
 }
 
 fn sl_add(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -474,11 +543,17 @@ fn sl_add(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let keep_st = p("keep_st", &mut kw).unwrap_or(Value::Bool(false));
     if !super::core::is_displayable(vm, &thing) {
         let r = ops::repr(vm, &thing)?;
-        return Err(py::error(vm, format!("Attempting to show something that isn't a displayable:{r}")));
+        return Err(py::error(
+            vm,
+            format!("Attempting to show something that isn't a displayable:{r}"),
+        ));
     }
     if !has_layer(vm, this, &layer)? {
         let l = py::string(vm, &layer)?;
-        return Err(py::error(vm, format!("Trying to add something to non-existent layer '{l}'.")));
+        return Err(py::error(
+            vm,
+            format!("Trying to add something to non-existent layer '{l}'."),
+        ));
     }
     if py::truthy(vm, &key)? {
         remove_hide_replaced(vm, this, &layer, &key)?;
@@ -500,7 +575,9 @@ fn sl_add(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     if py::truthy(vm, &transient)? {
         let at = py::get(vm, this, "additional_transient")?;
-        let t = vm.types.new_tuple(vec![layer.clone(), key.clone(), Value::None]);
+        let t = vm
+            .types
+            .new_tuple(vec![layer.clone(), key.clone(), Value::None]);
         ops::list_append(vm, &at, t)?;
     }
     let l = layer_list(vm, this, &layer)?;
@@ -522,8 +599,15 @@ fn sl_add(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         if !hide_or_replace(vm, this, &layer, Some(ri), &r)? && add > ri {
             add -= 1;
         }
-        let keep = !py::truthy(vm, &atl)? && !py::truthy(vm, &at_list)? && py::config_bool(vm, "keep_running_transform")? && is_transform(vm, &old)?;
-        thing = if keep { vm.call_method(&old, "_change_transform_child", vec![thing])? } else { transform_state(vm, &old, &thing, false)? };
+        let keep = !py::truthy(vm, &atl)?
+            && !py::truthy(vm, &at_list)?
+            && py::config_bool(vm, "keep_running_transform")?
+            && is_transform(vm, &old)?;
+        thing = if keep {
+            vm.call_method(&old, "_change_transform_child", vec![thing])?
+        } else {
+            transform_state(vm, &old, &thing, false)?
+        };
         let e = py::s(vm, "replace");
         vm.call_method(&thing, "set_transform_event", vec![e])?;
     } else {
@@ -545,15 +629,29 @@ fn sl_add(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 /// Returns True when the entry stays as a hiding/replaced entry.
-fn hide_or_replace(vm: &mut Vm, this: &Value, layer: &Value, index: Option<usize>, prefix: &Value) -> PyResult<bool> {
+fn hide_or_replace(
+    vm: &mut Vm,
+    this: &Value,
+    layer: &Value,
+    index: Option<usize>,
+    prefix: &Value,
+) -> PyResult<bool> {
     let Some(index) = index else { return Ok(false) };
     let l = layer_list(vm, this, layer)?;
     let old = ops::getitem(vm, &l, Value::Int(index as i64))?;
     let now = now(vm)?;
     let st = py::get_or_none(vm, &old, "show_time")?;
-    let st = if py::truthy(vm, &st)? { py::f64_of(vm, &st)? } else { now };
+    let st = if py::truthy(vm, &st)? {
+        py::f64_of(vm, &st)?
+    } else {
+        now
+    };
     let at = py::get_or_none(vm, &old, "animation_time")?;
-    let at = if py::truthy(vm, &at)? { py::f64_of(vm, &at)? } else { now };
+    let at = if py::truthy(vm, &at)? {
+        py::f64_of(vm, &at)?
+    } else {
+        now
+    };
     let d = py::get(vm, &old, "displayable")?;
     let mut prefix = prefix.clone();
     if py::config_bool(vm, "fast_unhandled_event")? {
@@ -565,13 +663,24 @@ fn hide_or_replace(vm: &mut Vm, this: &Value, layer: &Value, index: Option<usize
     let tag = tag_str(vm, &old)?;
     if let (false, Some(tag)) = (py::is_none(&prefix), tag.filter(|t| !t.is_empty())) {
         let cur = vm.call_method(&d, "_in_current_store", Vec::new())?;
-        let nd = vm.call_method(&cur, "_hide", vec![Value::Float(now - st), Value::Float(now - at), prefix.clone()])?;
+        let nd = vm.call_method(
+            &cur,
+            "_hide",
+            vec![
+                Value::Float(now - st),
+                Value::Float(now - at),
+                prefix.clone(),
+            ],
+        )?;
         let idx = vm.call_method(&l, "index", vec![old.clone()])?;
         if !py::is_none(&nd) {
             let p = py::string(vm, &prefix)?;
             let z = py::get_or_none(vm, &old, "zorder")?;
             let t = py::s(vm, &format!("{p}${tag}"));
-            let sle = new_sle(vm, vec![t, z, Value::Float(st), Value::Float(at), nd, Value::None])?;
+            let sle = new_sle(
+                vm,
+                vec![t, z, Value::Float(st), Value::Float(at), nd, Value::None],
+            )?;
             ops::setitem(vm, &l, idx, sle)?;
             return Ok(true);
         }
@@ -581,8 +690,14 @@ fn hide_or_replace(vm: &mut Vm, this: &Value, layer: &Value, index: Option<usize
 }
 
 fn sl_hide_or_replace(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let idx = if py::is_none(&args[2]) { None } else { Some(py::int(vm, &args[2])? as usize) };
-    Ok(Value::Bool(hide_or_replace(vm, &args[0], &args[1], idx, &args[3])?))
+    let idx = if py::is_none(&args[2]) {
+        None
+    } else {
+        Some(py::int(vm, &args[2])? as usize)
+    };
+    Ok(Value::Bool(hide_or_replace(
+        vm, &args[0], &args[1], idx, &args[3],
+    )?))
 }
 
 fn sl_get_all_displayables(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -629,7 +744,10 @@ fn sl_remove_above(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn remove(vm: &mut Vm, this: &Value, layer: &Value, thing: &Value, prefix: &Value) -> PyResult<()> {
     if !has_layer(vm, this, layer)? {
         let l = py::string(vm, layer)?;
-        return Err(py::error(vm, format!("Trying to remove something from non-existent layer '{l}'.")));
+        return Err(py::error(
+            vm,
+            format!("Trying to remove something from non-existent layer '{l}'."),
+        ));
     }
     let behind = vm.types.new_list(Vec::new());
     let (_, ri, _) = find_index(vm, this, layer, thing, &Value::Int(0), &behind)?;
@@ -723,7 +841,15 @@ fn sl_set_layer_at_list(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> 
     let items = py::items(vm, &at)?;
     let l = vm.types.new_list(items);
     let t = vm.types.new_tuple(vec![Value::None, l]);
-    let d = py::get(vm, this, if camera { "camera_list" } else { "layer_at_list" })?;
+    let d = py::get(
+        vm,
+        this,
+        if camera {
+            "camera_list"
+        } else {
+            "layer_at_list"
+        },
+    )?;
     ops::setitem(vm, &d, layer.clone(), t)?;
     if reset {
         let lt = py::get(vm, this, "layer_transform")?;
@@ -739,7 +865,11 @@ fn sl_set_times(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let d = py::get(vm, this, n)?;
         for (l, v) in ops::mapping_items(vm, &d)? {
             let p = py::items(vm, &v)?;
-            let t = if py::truthy(vm, &p[0])? { p[0].clone() } else { time.clone() };
+            let t = if py::truthy(vm, &p[0])? {
+                p[0].clone()
+            } else {
+                time.clone()
+            };
             let nv = vm.types.new_tuple(vec![t, p[1].clone()]);
             ops::setitem(vm, &d, l, nv)?;
         }
@@ -783,7 +913,10 @@ fn sl_get_sorted_tags(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn sl_make_layer(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (this, layer) = (&args[0], &args[1]);
     let props = args.get(2).cloned().unwrap_or(Value::None);
-    let mut kw: Vec<(Rc<str>, Value)> = vec![("layout".into(), py::s(vm, "fixed")), ("focus".into(), layer.clone())];
+    let mut kw: Vec<(Rc<str>, Value)> = vec![
+        ("layout".into(), py::s(vm, "fixed")),
+        ("focus".into(), layer.clone()),
+    ];
     if !py::is_none(&props) {
         kw.extend(py::str_items(vm, &props)?);
     }
@@ -803,14 +936,28 @@ fn sl_make_layer(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 /// Wraps `rv` in each transform of `at_list` inside a fixed layer box.
-fn wrap_layer(vm: &mut Vm, this: &Value, layer: &Value, d: &Value, rv: Value, at_list: &[Value], time: Value, store: &str, keep_state: bool) -> PyResult<Value> {
+fn wrap_layer(
+    vm: &mut Vm,
+    this: &Value,
+    layer: &Value,
+    d: &Value,
+    rv: Value,
+    at_list: &[Value],
+    time: Value,
+    store: &str,
+    keep_state: bool,
+) -> PyResult<Value> {
     let st = py::get(vm, this, store)?;
     let old = vm.call_method(&st, "get", vec![layer.clone(), Value::None])?;
     let mut new_t = Value::None;
     let mut rv = rv;
     if !at_list.is_empty() {
         for a in at_list {
-            rv = if is_transform(vm, a)? { vm.call(a, Vec::new(), vec![("child".into(), rv)])? } else { vm.call(a, vec![rv], Vec::new())? };
+            rv = if is_transform(vm, a)? {
+                vm.call(a, Vec::new(), vec![("child".into(), rv)])?
+            } else {
+                vm.call(a, vec![rv], Vec::new())?
+            };
             vm.call_method(&rv, "_unique", Vec::new())?;
             if is_transform(vm, &rv)? {
                 new_t = rv.clone();
@@ -845,14 +992,48 @@ fn sl_transform_layer(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let p = py::items(vm, &lal)?;
     let at = py::items(vm, &p[1])?;
     let keep = py::config_bool(vm, "keep_show_layer_state")?;
-    let rv = wrap_layer(vm, this, layer, d, d.clone(), &at, p[0].clone(), "layer_transform", keep)?;
+    let rv = wrap_layer(
+        vm,
+        this,
+        layer,
+        d,
+        d.clone(),
+        &at,
+        p[0].clone(),
+        "layer_transform",
+        keep,
+    )?;
     let p = py::items(vm, &cl)?;
     let at = py::items(vm, &p[1])?;
-    let rv = wrap_layer(vm, this, layer, d, rv, &at, p[0].clone(), "camera_transform", true)?;
+    let rv = wrap_layer(
+        vm,
+        this,
+        layer,
+        d,
+        rv,
+        &at,
+        p[0].clone(),
+        "camera_transform",
+        true,
+    )?;
     let lt = py::config(vm, "layer_transforms")?;
-    let at = vm.call_method(&lt, "get", vec![layer.clone(), vm.types.new_list(Vec::new())])?;
+    let at = vm.call_method(
+        &lt,
+        "get",
+        vec![layer.clone(), vm.types.new_list(Vec::new())],
+    )?;
     let at = py::items(vm, &at)?;
-    wrap_layer(vm, this, layer, d, rv, &at, Value::Int(0), "config_layer_transform", true)
+    wrap_layer(
+        vm,
+        this,
+        layer,
+        d,
+        rv,
+        &at,
+        Value::Int(0),
+        "config_layer_transform",
+        true,
+    )
 }
 
 fn remove_hide_replaced(vm: &mut Vm, this: &Value, layer: &Value, tag: &Value) -> PyResult<()> {
@@ -869,7 +1050,15 @@ fn remove_hide_replaced(vm: &mut Vm, this: &Value, layer: &Value, tag: &Value) -
                 let a = py::get_or_none(vm, &sle, "animation_time")?;
                 let s = py::f64_of(vm, &s)?;
                 let a = py::f64_of(vm, &a)?;
-                let r = vm.call_method(&d, "_hide", vec![Value::Float(now - s), Value::Float(now - a), py::s(vm, "cancel")])?;
+                let r = vm.call_method(
+                    &d,
+                    "_hide",
+                    vec![
+                        Value::Float(now - s),
+                        Value::Float(now - a),
+                        py::s(vm, "cancel"),
+                    ],
+                )?;
                 if py::is_none(&r) {
                     continue;
                 }
@@ -908,7 +1097,15 @@ fn sl_remove_hidden(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
                     let a = py::get_or_none(vm, &sle, "animation_time")?;
                     let s = py::f64_of(vm, &s)?;
                     let a = py::f64_of(vm, &a)?;
-                    let r = vm.call_method(&d, "_hide", vec![Value::Float(now - s), Value::Float(now - a), py::s(vm, kind)])?;
+                    let r = vm.call_method(
+                        &d,
+                        "_hide",
+                        vec![
+                            Value::Float(now - s),
+                            Value::Float(now - a),
+                            py::s(vm, kind),
+                        ],
+                    )?;
                     if !py::truthy(vm, &r)? {
                         continue;
                     }
@@ -983,24 +1180,53 @@ fn sl_get_image_bounds(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             break;
         }
     }
-    let Some(sle) = found else { return Ok(Value::None) };
+    let Some(sle) = found else {
+        return Ok(Value::None);
+    };
     let now = now(vm)?;
     let s = py::get_or_none(vm, &sle, "show_time")?;
-    let st = if py::is_none(&s) { 0. } else { now - py::f64_of(vm, &s)? };
+    let st = if py::is_none(&s) {
+        0.
+    } else {
+        now - py::f64_of(vm, &s)?
+    };
     let a = py::get_or_none(vm, &sle, "animation_time")?;
-    let at = if py::is_none(&a) { 0. } else { now - py::f64_of(vm, &a)? };
+    let at = if py::is_none(&a) {
+        0.
+    } else {
+        now - py::f64_of(vm, &a)?
+    };
     let d = py::get(vm, &sle, "displayable")?;
     let rfs = py::import_attr(vm, "renpy.display.render", "render_for_size")?;
-    let surf = vm.call(&rfs, vec![d.clone(), Value::Float(w), Value::Float(h), Value::Float(st), Value::Float(at)], Vec::new())?;
+    let surf = vm.call(
+        &rfs,
+        vec![
+            d.clone(),
+            Value::Float(w),
+            Value::Float(h),
+            Value::Float(st),
+            Value::Float(at),
+        ],
+        Vec::new(),
+    )?;
     let (sw, sh) = super::layout::size(&surf);
     let placement = vm.call_method(&d, "get_placement", Vec::new())?;
     let (x, y) = super::core::place(vm, &placement, w, h, sw, sh)?;
-    Ok(vm.types.new_tuple(vec![Value::Float(x), Value::Float(y), Value::Float(sw), Value::Float(sh)]))
+    Ok(vm.types.new_tuple(vec![
+        Value::Float(x),
+        Value::Float(y),
+        Value::Float(sw),
+        Value::Float(sh),
+    ]))
 }
 
 fn sl_get_zorder_list(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let layers = layers_of(vm, &args[0])?;
-    let l = vm.call_method(&layers, "get", vec![args[1].clone(), vm.types.new_list(Vec::new())])?;
+    let l = vm.call_method(
+        &layers,
+        "get",
+        vec![args[1].clone(), vm.types.new_list(Vec::new())],
+    )?;
     let mut rv = Vec::new();
     for sle in py::items(vm, &l)? {
         match tag_str(vm, &sle)? {
@@ -1018,7 +1244,11 @@ fn sl_get_zorder_list(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn sl_change_zorder(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (this, layer, tag, z) = (&args[0], &args[1], &args[2], &args[3]);
     let layers = layers_of(vm, this)?;
-    let sl = vm.call_method(&layers, "get", vec![layer.clone(), vm.types.new_list(Vec::new())])?;
+    let sl = vm.call_method(
+        &layers,
+        "get",
+        vec![layer.clone(), vm.types.new_list(Vec::new())],
+    )?;
     let mut entries = Vec::new();
     for sle in py::items(vm, &sl)? {
         let t = py::get_or_none(vm, &sle, "tag")?;
@@ -1070,7 +1300,14 @@ fn f_scene_lists(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[("init_layers", f_init_layers), ("scene_lists", f_scene_lists)]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("init_layers", f_init_layers),
+            ("scene_lists", f_scene_lists),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     let base = concat(vm, &["layers"])?;
     set(vm, "ordered_layers", vm.types.new_list(base.clone()));
@@ -1079,46 +1316,60 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let s = frozenset(vm, Vec::new())?;
     set(vm, "sticky_layers", s);
     let object = py::import_attr(vm, "renpy.object", "Object")?;
-    let sle = py::class(vm, MODULE, "SceneListEntry", &[object.clone()], &[
-        ("__init__", sle_init),
-        ("__iter__", sle_iter),
-        ("__getitem__", sle_getitem),
-        ("__repr__", sle_repr),
-        ("copy", sle_copy),
-        ("update_time", sle_update_time),
-    ], &[])?;
+    let sle = py::class(
+        vm,
+        MODULE,
+        "SceneListEntry",
+        &[object.clone()],
+        &[
+            ("__init__", sle_init),
+            ("__iter__", sle_iter),
+            ("__getitem__", sle_getitem),
+            ("__repr__", sle_repr),
+            ("copy", sle_copy),
+            ("update_time", sle_update_time),
+        ],
+        &[],
+    )?;
     set(vm, "SceneListEntry", Value::Obj(sle));
-    let sl = py::class(vm, MODULE, "SceneLists", &[object], &[
-        ("__init__", sl_init),
-        ("after_setstate", sl_after_setstate),
-        ("after_upgrade", sl_after_upgrade),
-        ("set_transient_prefix", sl_set_transient_prefix),
-        ("replace_transient", sl_replace_transient),
-        ("transient_is_empty", sl_transient_is_empty),
-        ("transform_state", sl_transform_state),
-        ("find_index", sl_find_index),
-        ("add", sl_add),
-        ("hide_or_replace", sl_hide_or_replace),
-        ("get_all_displayables", sl_get_all_displayables),
-        ("remove_above", sl_remove_above),
-        ("remove", sl_remove),
-        ("clear", sl_clear),
-        ("set_layer_at_list", sl_set_layer_at_list),
-        ("set_times", sl_set_times),
-        ("showing", sl_showing),
-        ("get_showing_tags", sl_get_showing_tags),
-        ("get_sorted_tags", sl_get_sorted_tags),
-        ("make_layer", sl_make_layer),
-        ("transform_layer", sl_transform_layer),
-        ("remove_hide_replaced", sl_remove_hide_replaced),
-        ("remove_hidden", sl_remove_hidden),
-        ("remove_all_hidden", sl_remove_all_hidden),
-        ("get_displayable_by_tag", sl_get_displayable_by_tag),
-        ("get_displayable_by_name", sl_get_displayable_by_name),
-        ("get_image_bounds", sl_get_image_bounds),
-        ("get_zorder_list", sl_get_zorder_list),
-        ("change_zorder", sl_change_zorder),
-    ], &[("__version__", Value::Int(9))])?;
+    let sl = py::class(
+        vm,
+        MODULE,
+        "SceneLists",
+        &[object],
+        &[
+            ("__init__", sl_init),
+            ("after_setstate", sl_after_setstate),
+            ("after_upgrade", sl_after_upgrade),
+            ("set_transient_prefix", sl_set_transient_prefix),
+            ("replace_transient", sl_replace_transient),
+            ("transient_is_empty", sl_transient_is_empty),
+            ("transform_state", sl_transform_state),
+            ("find_index", sl_find_index),
+            ("add", sl_add),
+            ("hide_or_replace", sl_hide_or_replace),
+            ("get_all_displayables", sl_get_all_displayables),
+            ("remove_above", sl_remove_above),
+            ("remove", sl_remove),
+            ("clear", sl_clear),
+            ("set_layer_at_list", sl_set_layer_at_list),
+            ("set_times", sl_set_times),
+            ("showing", sl_showing),
+            ("get_showing_tags", sl_get_showing_tags),
+            ("get_sorted_tags", sl_get_sorted_tags),
+            ("make_layer", sl_make_layer),
+            ("transform_layer", sl_transform_layer),
+            ("remove_hide_replaced", sl_remove_hide_replaced),
+            ("remove_hidden", sl_remove_hidden),
+            ("remove_all_hidden", sl_remove_all_hidden),
+            ("get_displayable_by_tag", sl_get_displayable_by_tag),
+            ("get_displayable_by_name", sl_get_displayable_by_name),
+            ("get_image_bounds", sl_get_image_bounds),
+            ("get_zorder_list", sl_get_zorder_list),
+            ("change_zorder", sl_change_zorder),
+        ],
+        &[("__version__", Value::Int(9))],
+    )?;
     set(vm, "SceneLists", Value::Obj(sl));
     Ok(m)
 }

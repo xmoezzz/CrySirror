@@ -66,7 +66,16 @@ fn focus_class(vm: &mut Vm) -> PyResult<Value> {
     g(vm, "Focus")
 }
 
-fn new_focus(vm: &mut Vm, widget: Value, arg: Value, x: Value, y: Value, w: Value, h: Value, screen: Value) -> PyResult<Value> {
+fn new_focus(
+    vm: &mut Vm,
+    widget: Value,
+    arg: Value,
+    x: Value,
+    y: Value,
+    w: Value,
+    h: Value,
+    screen: Value,
+) -> PyResult<Value> {
     let c = focus_class(vm)?;
     vm.call(&c, vec![widget, arg, x, y, w, h, screen], Vec::new())
 }
@@ -75,14 +84,20 @@ fn new_focus(vm: &mut Vm, widget: Value, arg: Value, x: Value, y: Value, w: Valu
 
 fn fo_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    for (i, n) in ["widget", "arg", "x", "y", "w", "h", "screen"].iter().enumerate() {
+    for (i, n) in ["widget", "arg", "x", "y", "w", "h", "screen"]
+        .iter()
+        .enumerate()
+    {
         py::set(vm, this, n, args.get(i + 1).cloned().unwrap_or(Value::None))?;
     }
     Ok(Value::None)
 }
 
 fn fo_fields(vm: &mut Vm, this: &Value) -> PyResult<Vec<Value>> {
-    ["widget", "arg", "x", "y", "w", "h", "screen"].iter().map(|n| py::get_or_none(vm, this, n)).collect()
+    ["widget", "arg", "x", "y", "w", "h", "screen"]
+        .iter()
+        .map(|n| py::get_or_none(vm, this, n))
+        .collect()
 }
 
 fn fo_copy(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -97,7 +112,10 @@ fn fo_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     for v in &f {
         parts.push(ops::repr(vm, v)?.to_string());
     }
-    Ok(vm.types.new_string(format!("<Focus: {} {} ({}, {}, {}, {}) {}>", parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6])))
+    Ok(vm.types.new_string(format!(
+        "<Focus: {} {} ({}, {}, {}, {}) {}>",
+        parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]
+    )))
 }
 
 fn rect_of(vm: &mut Vm, f: &Value) -> PyResult<Option<[f64; 4]>> {
@@ -115,9 +133,20 @@ fn rect_of(vm: &mut Vm, f: &Value) -> PyResult<Option<[f64; 4]>> {
 
 fn fo_inside(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let rect = super::render::rect4(vm, &arg_or(args, kw, 1, "rect", Value::None))?;
-    let Some([x, y, w, h]) = rect_of(vm, &args[0])? else { return Ok(Value::Bool(false)) };
+    let Some([x, y, w, h]) = rect_of(vm, &args[0])? else {
+        return Ok(Value::Bool(false));
+    };
     let (minx, miny, maxx, maxy) = (rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]);
-    Ok(Value::Bool(minx <= x && x < maxx && miny <= y && y < maxy && minx <= x + w && x + w < maxx && miny <= y + h && y + h < maxy))
+    Ok(Value::Bool(
+        minx <= x
+            && x < maxx
+            && miny <= y
+            && y < maxy
+            && minx <= x + w
+            && x + w < maxx
+            && miny <= y + h
+            && y + h < maxy,
+    ))
 }
 
 fn inset_rect(vm: &mut Vm, f: &Value) -> PyResult<[f64; 4]> {
@@ -137,13 +166,19 @@ fn inset_rect(vm: &mut Vm, f: &Value) -> PyResult<[f64; 4]> {
 
 fn fo_inset_rect(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let r = inset_rect(vm, &args[0])?;
-    Ok(vm.types.new_tuple(r.iter().map(|v| Value::Float(*v)).collect()))
+    Ok(vm
+        .types
+        .new_tuple(r.iter().map(|v| Value::Float(*v)).collect()))
 }
 
 // Render walks ---------------------------------------------------------------
 
 fn screen_render(vm: &Vm) -> Option<RenderRef> {
-    super::render::rs(vm).borrow_mut().screen_render.clone().and_then(|v| render_data(&v))
+    super::render::rs(vm)
+        .borrow_mut()
+        .screen_render
+        .clone()
+        .and_then(|v| render_data(&v))
 }
 
 struct Collected {
@@ -157,8 +192,19 @@ fn transform_point(m: &Mat, x: f64, y: f64) -> (f64, f64) {
     m.transform2(x, y)
 }
 
-fn take(vm: &mut Vm, r: &RenderData, clip: [f64; 4], transform: Mat, screen: Value, out: &mut Vec<Collected>) -> PyResult<()> {
-    let screen = if py::is_none(&r.focus_screen) { screen } else { r.focus_screen.clone() };
+fn take(
+    vm: &mut Vm,
+    r: &RenderData,
+    clip: [f64; 4],
+    transform: Mat,
+    screen: Value,
+    out: &mut Vec<Collected>,
+) -> PyResult<()> {
+    let screen = if py::is_none(&r.focus_screen) {
+        screen
+    } else {
+        r.focus_screen.clone()
+    };
     let [mut cminx, mut cminy, mut cmaxx, mut cmaxy] = clip;
     let modal = r.modal.clone();
     if ops::truthy(vm, &modal)? {
@@ -167,7 +213,16 @@ fn take(vm: &mut Vm, r: &RenderData, clip: [f64; 4], transform: Mat, screen: Val
             let (x2, y2) = transform_point(&transform, r.width, r.height);
             let (minx, maxx, miny, maxy) = (x1.min(x2), x1.max(x2), y1.min(y2), y1.max(y2));
             out.retain(|f| match f.rect {
-                Some([x, y, w, h]) => !(minx <= x && x < maxx && miny <= y && y < maxy && minx <= x + w && x + w < maxx && miny <= y + h && y + h < maxy),
+                Some([x, y, w, h]) => {
+                    !(minx <= x
+                        && x < maxx
+                        && miny <= y
+                        && y < maxy
+                        && minx <= x + w
+                        && x + w < maxx
+                        && miny <= y + h
+                        && y + h < maxy)
+                }
                 None => true,
             });
         } else if !crysirror_python::builtins::is_callable(vm, &modal) {
@@ -176,7 +231,12 @@ fn take(vm: &mut Vm, r: &RenderData, clip: [f64; 4], transform: Mat, screen: Val
     }
     for f in &r.focuses {
         let Some([xo, yo, w, h]) = f.rect else {
-            out.push(Collected { widget: f.d.clone(), arg: f.arg.clone(), rect: None, screen: screen.clone() });
+            out.push(Collected {
+                widget: f.d.clone(),
+                arg: f.arg.clone(),
+                rect: None,
+                screen: screen.clone(),
+            });
             continue;
         };
         let (x1, y1) = transform_point(&transform, xo, yo);
@@ -188,7 +248,12 @@ fn take(vm: &mut Vm, r: &RenderData, clip: [f64; 4], transform: Mat, screen: Val
         if maxx <= minx || maxy <= miny {
             continue;
         }
-        out.push(Collected { widget: f.d.clone(), arg: f.arg.clone(), rect: Some([minx, miny, maxx - minx, maxy - miny]), screen: screen.clone() });
+        out.push(Collected {
+            widget: f.d.clone(),
+            arg: f.arg.clone(),
+            rect: Some([minx, miny, maxx - minx, maxy - miny]),
+            screen: screen.clone(),
+        });
     }
     if r.xclipping || r.yclipping {
         let (x1, y1) = transform_point(&transform, 0., 0.);
@@ -206,7 +271,9 @@ fn take(vm: &mut Vm, r: &RenderData, clip: [f64; 4], transform: Mat, screen: Val
         if !c.focus {
             continue;
         }
-        let Source::Render(child, _) = &c.source else { continue };
+        let Source::Render(child, _) = &c.source else {
+            continue;
+        };
         let mut t = transform;
         if c.x != 0. || c.y != 0. {
             t = t.mul(&Mat::offset(c.x, c.y, 0.));
@@ -215,11 +282,25 @@ fn take(vm: &mut Vm, r: &RenderData, clip: [f64; 4], transform: Mat, screen: Val
             t = t.mul(rev);
         }
         let child = child.borrow();
-        take(vm, &child, [cminx, cminy, cmaxx, cmaxy], t, screen.clone(), out)?;
+        take(
+            vm,
+            &child,
+            [cminx, cminy, cmaxx, cmaxy],
+            t,
+            screen.clone(),
+            out,
+        )?;
     }
     for p in &r.pass_focuses {
         let p = p.borrow();
-        take(vm, &p, [cminx, cminy, cmaxx, cmaxy], transform, screen.clone(), out)?;
+        take(
+            vm,
+            &p,
+            [cminx, cminy, cmaxx, cmaxy],
+            transform,
+            screen.clone(),
+            out,
+        )?;
     }
     Ok(())
 }
@@ -229,12 +310,24 @@ pub fn take_focuses(vm: &mut Vm) -> PyResult<()> {
     let mut collected = Vec::new();
     if let Some(root) = screen_render(vm) {
         let r = root.borrow();
-        take(vm, &r, [0., 0., r.width, r.height], Mat::IDENTITY, Value::None, &mut collected)?;
+        take(
+            vm,
+            &r,
+            [0., 0., r.width, r.height],
+            Mat::IDENTITY,
+            Value::None,
+            &mut collected,
+        )?;
     }
     let mut list = Vec::new();
     for c in collected {
         let (x, y, w, h) = match c.rect {
-            Some([x, y, w, h]) => (Value::Float(x), Value::Float(y), Value::Float(w), Value::Float(h)),
+            Some([x, y, w, h]) => (
+                Value::Float(x),
+                Value::Float(y),
+                Value::Float(w),
+                Value::Float(h),
+            ),
             None => (Value::None, Value::None, Value::None, Value::None),
         };
         list.push(new_focus(vm, c.widget, c.arg, x, y, w, h, c.screen)?);
@@ -254,8 +347,16 @@ pub fn take_focuses(vm: &mut Vm) -> PyResult<()> {
             n
         }
         let mut unfocused = 0;
-        let total = screen_render(vm).map(|r| count(&r.borrow(), 0, &mut unfocused)).unwrap_or(0);
-        super::link::diagnostic(vm, format!("trace: take_focuses focuses={} in_tree={total} under_unfocused_blits={unfocused}", list.len()));
+        let total = screen_render(vm)
+            .map(|r| count(&r.borrow(), 0, &mut unfocused))
+            .unwrap_or(0);
+        super::link::diagnostic(
+            vm,
+            format!(
+                "trace: take_focuses focuses={} in_tree={total} under_unfocused_blits={unfocused}",
+                list.len()
+            ),
+        );
     }
     let l = vm.types.new_list(list.clone());
     sg(vm, "focus_list", l)?;
@@ -283,7 +384,15 @@ pub fn take_focuses(vm: &mut Vm) -> PyResult<()> {
     Ok(())
 }
 
-pub fn check_modal(vm: &mut Vm, modal: &Value, ev: &Value, x: f64, y: f64, w: Option<f64>, h: Option<f64>) -> PyResult<bool> {
+pub fn check_modal(
+    vm: &mut Vm,
+    modal: &Value,
+    ev: &Value,
+    x: f64,
+    y: f64,
+    w: Option<f64>,
+    h: Option<f64>,
+) -> PyResult<bool> {
     if !ops::truthy(vm, modal)? {
         return Ok(false);
     }
@@ -297,7 +406,11 @@ pub fn check_modal(vm: &mut Vm, modal: &Value, ev: &Value, x: f64, y: f64, w: Op
     let hit = if crysirror_python::builtins::is_callable(vm, modal) {
         let wv = w.map_or(Value::None, Value::Float);
         let hv = h.map_or(Value::None, Value::Float);
-        let r = vm.call(modal, vec![ev.clone(), Value::Float(x), Value::Float(y), wv, hv], Vec::new())?;
+        let r = vm.call(
+            modal,
+            vec![ev.clone(), Value::Float(x), Value::Float(y), wv, hv],
+            Vec::new(),
+        )?;
         ops::truthy(vm, &r)?
     } else {
         match (w, h) {
@@ -322,7 +435,11 @@ enum Hit {
 }
 
 fn at_point(vm: &mut Vm, r: &RenderData, x: f64, y: f64, screen: Value) -> PyResult<Hit> {
-    let screen = if py::is_none(&r.focus_screen) { screen } else { r.focus_screen.clone() };
+    let screen = if py::is_none(&r.focus_screen) {
+        screen
+    } else {
+        r.focus_screen.clone()
+    };
     if (r.xclipping && (x < 0. || x >= r.width)) || (r.yclipping && (y < 0. || y >= r.height)) {
         return Ok(Hit::None);
     }
@@ -344,7 +461,9 @@ fn at_point(vm: &mut Vm, r: &RenderData, x: f64, y: f64, screen: Value) -> PyRes
             if !c.focus {
                 continue;
             }
-            let Source::Render(child, _) = &c.source else { continue };
+            let Source::Render(child, _) = &c.source else {
+                continue;
+            };
             let (mut cx, mut cy) = (x - c.x, y - c.y);
             if let Some(f) = &r.forward {
                 (cx, cy) = f.transform2(cx, cy);
@@ -358,8 +477,17 @@ fn at_point(vm: &mut Vm, r: &RenderData, x: f64, y: f64, screen: Value) -> PyRes
     }
     if matches!(rv, Hit::None) {
         for f in r.focuses.iter().rev() {
-            let Some([xo, yo, w, h]) = f.rect else { continue };
-            if f.arg.as_str() == Some("NO_MOUSE_FOCUS") || f.arg.obj().is_some_and(|o| o.class_name() == "Sentinel" && ops::repr(vm, &f.arg).map(|s| s.contains("NO_MOUSE_FOCUS")).unwrap_or(false)) {
+            let Some([xo, yo, w, h]) = f.rect else {
+                continue;
+            };
+            if f.arg.as_str() == Some("NO_MOUSE_FOCUS")
+                || f.arg.obj().is_some_and(|o| {
+                    o.class_name() == "Sentinel"
+                        && ops::repr(vm, &f.arg)
+                            .map(|s| s.contains("NO_MOUSE_FOCUS"))
+                            .unwrap_or(false)
+                })
+            {
                 continue;
             }
             if let Some((mx, my, mask)) = &f.mask {
@@ -379,9 +507,19 @@ fn at_point(vm: &mut Vm, r: &RenderData, x: f64, y: f64, screen: Value) -> PyRes
                         rv = Hit::Focus(f.d.clone(), f.arg.clone(), screen.clone());
                     }
                 } else {
-                    let mut res = vm.call(mask, vec![Value::Float(cx), Value::Float(cy)], Vec::new())?;
+                    let mut res =
+                        vm.call(mask, vec![Value::Float(cx), Value::Float(cy)], Vec::new())?;
                     if crysirror_python::builtins::is_callable(vm, &res) {
-                        res = vm.call(&res, vec![Value::Float(cx), Value::Float(cy), Value::Float(w - mx), Value::Float(w - my)], Vec::new())?;
+                        res = vm.call(
+                            &res,
+                            vec![
+                                Value::Float(cx),
+                                Value::Float(cy),
+                                Value::Float(w - mx),
+                                Value::Float(w - my),
+                            ],
+                            Vec::new(),
+                        )?;
                     }
                     if ops::truthy(vm, &res)? {
                         rv = Hit::Focus(f.d.clone(), f.arg.clone(), screen.clone());
@@ -403,7 +541,11 @@ fn at_point(vm: &mut Vm, r: &RenderData, x: f64, y: f64, screen: Value) -> PyRes
         }
     }
     if matches!(rv, Hit::None) && ops::truthy(vm, &r.modal)? {
-        let (w, h) = if r.modal.as_str() == Some("default") { (None, None) } else { (Some(r.width), Some(r.height)) };
+        let (w, h) = if r.modal.as_str() == Some("default") {
+            (None, None)
+        } else {
+            (Some(r.width), Some(r.height))
+        };
         if check_modal(vm, &r.modal, &Value::None, x, y, w, h)? {
             return Ok(Hit::Modal);
         }
@@ -413,13 +555,24 @@ fn at_point(vm: &mut Vm, r: &RenderData, x: f64, y: f64, screen: Value) -> PyRes
 
 /// `renpy.display.render.focus_at_point(x, y)`.
 pub fn focus_at_point(vm: &mut Vm, x: f64, y: f64) -> PyResult<Value> {
-    let Some(root) = screen_render(vm) else { return Ok(Value::None) };
+    let Some(root) = screen_render(vm) else {
+        return Ok(Value::None);
+    };
     let hit = {
         let r = root.borrow();
         at_point(vm, &r, x, y, Value::None)?
     };
     match hit {
-        Hit::Focus(d, a, screen) => new_focus(vm, d, a, Value::None, Value::None, Value::None, Value::None, screen),
+        Hit::Focus(d, a, screen) => new_focus(
+            vm,
+            d,
+            a,
+            Value::None,
+            Value::None,
+            Value::None,
+            Value::None,
+            screen,
+        ),
         _ => Ok(Value::None),
     }
 }
@@ -438,7 +591,11 @@ fn pop_screen(vm: &mut Vm) -> PyResult<()> {
     Ok(())
 }
 
-fn with_screen<T>(vm: &mut Vm, screen: &Value, f: impl FnOnce(&mut Vm) -> PyResult<T>) -> PyResult<T> {
+fn with_screen<T>(
+    vm: &mut Vm,
+    screen: &Value,
+    f: impl FnOnce(&mut Vm) -> PyResult<T>,
+) -> PyResult<T> {
     push_screen(vm, screen)?;
     let r = f(vm);
     pop_screen(vm)?;
@@ -466,7 +623,11 @@ pub fn set_focused(vm: &mut Vm, widget: Value, arg: Value, screen: Value) -> PyR
     if let Ok(tts) = py::import_attr(vm, "renpy.display.tts", "displayable") {
         vm.call(&tts, vec![widget.clone()], Vec::new())?;
     }
-    let new_tooltip = if py::is_none(&widget) { Value::None } else { vm.call_method(&widget, "_get_tooltip", Vec::new())? };
+    let new_tooltip = if py::is_none(&widget) {
+        Value::None
+    } else {
+        vm.call_method(&widget, "_get_tooltip", Vec::new())?
+    };
     let tooltip = g(vm, "tooltip")?;
     if !ops::eq(vm, &tooltip, &new_tooltip)? {
         sg(vm, "tooltip", new_tooltip.clone())?;
@@ -486,7 +647,11 @@ pub fn change_focus(vm: &mut Vm, newfocus: Value, default: bool) -> PyResult<Val
     if ops::truthy(vm, &grab)? {
         return Ok(Value::None);
     }
-    let widget = if py::is_none(&newfocus) { Value::None } else { py::get(vm, &newfocus, "widget")? };
+    let widget = if py::is_none(&newfocus) {
+        Value::None
+    } else {
+        py::get(vm, &newfocus, "widget")?
+    };
     let current = get_focused(vm)?;
     let argument = g(vm, "argument")?;
     if py::same(&current, &widget) {
@@ -506,7 +671,11 @@ pub fn change_focus(vm: &mut Vm, newfocus: Value, default: bool) -> PyResult<Val
         let screen = g(vm, "screen_of_focused")?;
         with_screen(vm, &screen, |vm| {
             let f = py::get(vm, &current, "unfocus")?;
-            vm.call(&f, Vec::new(), vec![("default".into(), Value::Bool(default))])
+            vm.call(
+                &f,
+                Vec::new(),
+                vec![("default".into(), Value::Bool(default))],
+            )
         })?;
     }
     if py::is_none(&newfocus) {
@@ -521,7 +690,11 @@ pub fn change_focus(vm: &mut Vm, newfocus: Value, default: bool) -> PyResult<Val
         let screen = g(vm, "screen_of_focused")?;
         rv = with_screen(vm, &screen, |vm| {
             let f = py::get(vm, &widget, "focus")?;
-            vm.call(&f, Vec::new(), vec![("default".into(), Value::Bool(default))])
+            vm.call(
+                &f,
+                Vec::new(),
+                vec![("default".into(), Value::Bool(default))],
+            )
         })?;
     }
     Ok(rv)
@@ -546,7 +719,9 @@ fn capture_focus(vm: &mut Vm, name: &str) -> PyResult<()> {
     let key = vm.types.new_str(name);
     match focus_coordinates(vm)? {
         Some(r) => {
-            let t = vm.types.new_tuple(r.iter().map(|v| Value::Float(*v)).collect());
+            let t = vm
+                .types
+                .new_tuple(r.iter().map(|v| Value::Float(*v)).collect());
             ops::setitem(vm, &storage, key, t)?;
         }
         None => {
@@ -608,11 +783,21 @@ fn f_get_mouse(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn f_get_tooltip(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let screen = arg_or(args, kw, 0, "screen", Value::None);
-    let last = match arg(args, kw, 1, "last") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let last = match arg(args, kw, 1, "last") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     if py::is_none(&screen) {
         return g(vm, if last { "last_tooltip" } else { "tooltip" });
     }
-    let names = g(vm, if last { "screen_of_last_focused_names" } else { "screen_of_focused_names" })?;
+    let names = g(
+        vm,
+        if last {
+            "screen_of_last_focused_names"
+        } else {
+            "screen_of_focused_names"
+        },
+    )?;
     if ops::contains(vm, &names, &screen)? {
         return g(vm, if last { "last_tooltip" } else { "tooltip" });
     }
@@ -638,7 +823,9 @@ fn f_take_focuses(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn f_focus_coordinates(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     Ok(match focus_coordinates(vm)? {
-        Some(r) => vm.types.new_tuple(r.iter().map(|v| Value::Float(*v)).collect()),
+        Some(r) => vm
+            .types
+            .new_tuple(r.iter().map(|v| Value::Float(*v)).collect()),
         None => vm.types.new_tuple(vec![Value::None; 4]),
     })
 }
@@ -661,7 +848,11 @@ pub fn before_interact(vm: &mut Vm, roots: &[Value]) -> PyResult<()> {
         let f = py::get(vm, root, "find_focusable")?;
         match vm.call(&f, vec![cb.clone(), Value::None], Vec::new()) {
             Ok(_) => {}
-            Err(crysirror_python::PyErr::Exc(e)) if ignore.as_ref().and_then(|c| c.obj()).is_some_and(|c| ops::isinstance(vm, &Value::Obj(e.clone()), c)) => {}
+            Err(crysirror_python::PyErr::Exc(e))
+                if ignore
+                    .as_ref()
+                    .and_then(|c| c.obj())
+                    .is_some_and(|c| ops::isinstance(vm, &Value::Obj(e.clone()), c)) => {}
             Err(e) => return Err(e),
         }
     }
@@ -699,8 +890,15 @@ pub fn before_interact(vm: &mut Vm, roots: &[Value]) -> PyResult<()> {
         }
     }
     defaults.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let (max_default, max_default_focus, max_default_screen) = defaults.last().cloned().unwrap_or((0., Value::None, Value::None));
-    let max_default_focus_name = if py::is_none(&max_default_focus) { Value::None } else { py::get(vm, &max_default_focus, "full_focus_name")? };
+    let (max_default, max_default_focus, max_default_screen) = defaults
+        .last()
+        .cloned()
+        .unwrap_or((0., Value::None, Value::None));
+    let max_default_focus_name = if py::is_none(&max_default_focus) {
+        Value::None
+    } else {
+        py::get(vm, &max_default_focus, "full_focus_name")?
+    };
     let interface = py::import_attr(vm, "renpy.display", "interface").unwrap_or(Value::None);
     let (input_t, mouse_t, start_interact) = if py::is_none(&interface) {
         (0., 0., true)
@@ -708,18 +906,42 @@ pub fn before_interact(vm: &mut Vm, roots: &[Value]) -> PyResult<()> {
         let a = py::get_or_none(vm, &interface, "input_event_time")?;
         let b = py::get_or_none(vm, &interface, "mouse_event_time")?;
         let s = py::get_or_none(vm, &interface, "start_interact")?;
-        (if py::is_none(&a) { 0. } else { py::f64_of(vm, &a)? }, if py::is_none(&b) { 0. } else { py::f64_of(vm, &b)? }, ops::truthy(vm, &s)?)
+        (
+            if py::is_none(&a) {
+                0.
+            } else {
+                py::f64_of(vm, &a)?
+            },
+            if py::is_none(&b) {
+                0.
+            } else {
+                py::f64_of(vm, &b)?
+            },
+            ops::truthy(vm, &s)?,
+        )
     };
     let should_max_default = input_t > mouse_t + 0.1;
     let mut explicit = false;
     vm.call_method(&replaced_by, "pop", vec![Value::None, Value::None])?;
     let mut current = get_focused(vm)?;
     if !py::is_none(&current) {
-        current = vm.call_method(&replaced_by, "get", vec![Value::Int(current.id()), current.clone()])?;
+        current = vm.call_method(
+            &replaced_by,
+            "get",
+            vec![Value::Int(current.id()), current.clone()],
+        )?;
     }
     let old_current = current.clone();
     let grab = g(vm, "grab")?;
-    let grab = if py::is_none(&grab) { Value::None } else { vm.call_method(&replaced_by, "get", vec![Value::Int(grab.id()), Value::None])? };
+    let grab = if py::is_none(&grab) {
+        Value::None
+    } else {
+        vm.call_method(
+            &replaced_by,
+            "get",
+            vec![Value::Int(grab.id()), Value::None],
+        )?
+    };
     sg(vm, "grab", grab.clone())?;
     let override_ = g(vm, "override")?;
     if !py::is_none(&override_) {
@@ -734,12 +956,21 @@ pub fn before_interact(vm: &mut Vm, roots: &[Value]) -> PyResult<()> {
     sg(vm, "override", Value::None)?;
     let old_max_default = {
         let v = g(vm, "old_max_default")?;
-        if py::is_none(&v) { 0. } else { py::f64_of(vm, &v)? }
+        if py::is_none(&v) {
+            0.
+        } else {
+            py::f64_of(vm, &v)?
+        }
     };
     if !explicit && should_max_default && max_default > old_max_default {
         current = max_default_focus.clone();
         sg(vm, "grab", Value::None)?;
-        set_focused(vm, max_default_focus.clone(), Value::None, max_default_screen.clone())?;
+        set_focused(
+            vm,
+            max_default_focus.clone(),
+            Value::None,
+            max_default_screen.clone(),
+        )?;
         explicit = true;
     }
     sg(vm, "old_max_default", Value::Float(max_default))?;
@@ -768,31 +999,54 @@ pub fn before_interact(vm: &mut Vm, roots: &[Value]) -> PyResult<()> {
         current = grab;
     }
     let old_name = g(vm, "old_max_default_focus_name")?;
-    if should_max_default && max_default > 0. && py::is_none(&current) && (start_interact || !ops::eq(vm, &max_default_focus_name, &old_name)?) {
+    if should_max_default
+        && max_default > 0.
+        && py::is_none(&current)
+        && (start_interact || !ops::eq(vm, &max_default_focus_name, &old_name)?)
+    {
         explicit = true;
         current = max_default_focus.clone();
-        set_focused(vm, max_default_focus.clone(), Value::None, max_default_screen.clone())?;
+        set_focused(
+            vm,
+            max_default_focus.clone(),
+            Value::None,
+            max_default_screen.clone(),
+        )?;
     }
     sg(vm, "old_max_default_focus_name", max_default_focus_name)?;
     if py::is_none(&current) {
         set_focused(vm, Value::None, Value::None, Value::None)?;
     }
-    let always_unfocus = py::config(vm, "always_unfocus").map(|v| ops::truthy(vm, &v)).unwrap_or(Ok(true))?;
+    let always_unfocus = py::config(vm, "always_unfocus")
+        .map(|v| ops::truthy(vm, &v))
+        .unwrap_or(Ok(true))?;
     for (f, screen, _) in &entries {
         if py::same(f, &current) {
             continue;
         }
-        let default = if py::same(f, &old_current) && always_unfocus { false } else { !explicit };
+        let default = if py::same(f, &old_current) && always_unfocus {
+            false
+        } else {
+            !explicit
+        };
         with_screen(vm, screen, |vm| {
             let u = py::get(vm, f, "unfocus")?;
-            vm.call(&u, Vec::new(), vec![("default".into(), Value::Bool(default))])
+            vm.call(
+                &u,
+                Vec::new(),
+                vec![("default".into(), Value::Bool(default))],
+            )
         })?;
     }
     if !py::is_none(&current) && ops::truthy(vm, &current)? {
         let screen = g(vm, "screen_of_focused")?;
         with_screen(vm, &screen, |vm| {
             let fo = py::get(vm, &current, "focus")?;
-            vm.call(&fo, Vec::new(), vec![("default".into(), Value::Bool(!explicit))])
+            vm.call(
+                &fo,
+                Vec::new(),
+                vec![("default".into(), Value::Bool(!explicit))],
+            )
         })?;
     }
     vm.call_method(&replaced_by, "clear", Vec::new())?;
@@ -804,7 +1058,8 @@ fn focus_callback(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let list = args[0].clone();
     let f = args.get(1).cloned().unwrap_or(Value::None);
     let n = args.get(2).cloned().unwrap_or(Value::None);
-    let screen = py::import_attr(vm, "renpy.display.screen", "_current_screen").unwrap_or(Value::None);
+    let screen =
+        py::import_attr(vm, "renpy.display.screen", "_current_screen").unwrap_or(Value::None);
     let generation = g(vm, "modal_generation")?;
     let t = vm.types.new_tuple(vec![f, n, screen, generation]);
     ops::list_append(vm, &list, t)?;
@@ -820,7 +1075,10 @@ fn f_before_interact(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn f_change_focus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let nf = arg_or(args, kw, 0, "newfocus", Value::None);
-    let default = match arg(args, kw, 1, "default") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let default = match arg(args, kw, 1, "default") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     change_focus(vm, nf, default)
 }
 
@@ -850,7 +1108,11 @@ fn f_force_focus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let screen = vm.call(&cs, Vec::new(), Vec::new())?;
     set_focused(vm, d.clone(), a, screen)?;
     let fo = py::get(vm, &d, "focus")?;
-    vm.call(&fo, Vec::new(), vec![("default".into(), Value::Bool(false))])
+    vm.call(
+        &fo,
+        Vec::new(),
+        vec![("default".into(), Value::Bool(false))],
+    )
 }
 
 /// `mouse_handler(ev, x, y, default=False)`.
@@ -878,7 +1140,10 @@ fn f_mouse_handler(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let ev = arg_or(args, kw, 0, "ev", Value::None);
     let x = py::f64_of(vm, &arg_or(args, kw, 1, "x", Value::Int(0)))?;
     let y = py::f64_of(vm, &arg_or(args, kw, 2, "y", Value::Int(0)))?;
-    let default = match arg(args, kw, 3, "default") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let default = match arg(args, kw, 3, "default") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     mouse_handler(vm, &ev, x, y, default)
 }
 
@@ -896,7 +1161,9 @@ fn focus_extreme(vm: &mut Vm, mul: [f64; 4]) -> PyResult<Value> {
         if !keyboard_focus(vm, &f)? {
             continue;
         }
-        let Some([x, y, w, h]) = rect_of(vm, &f)? else { continue };
+        let Some([x, y, w, h]) = rect_of(vm, &f)? else {
+            continue;
+        };
         let score = x * mul[0] + y * mul[1] + w * mul[2] + h * mul[3];
         if best.as_ref().is_none_or(|(s, _)| score > *s) {
             best = Some((score, f));
@@ -927,19 +1194,35 @@ fn points_dist(x0: f64, y0: f64, x1: f64, y1: f64, xf: f64, yf: f64) -> f64 {
 fn horiz_line_dist(p: f64, a: [f64; 4], b: [f64; 4]) -> f64 {
     let [ax0, ay0, ax1, ay1] = a;
     let [bx0, by0, bx1, by1] = b;
-    if (bx0 <= ax0 && ax0 <= ax1 && ax1 <= bx1) || (ax0 <= bx0 && bx0 <= bx1 && bx1 <= ax1) || (ax0 <= bx0 && bx0 <= ax1 && ax1 <= bx1) || (bx0 <= ax0 && ax0 <= bx1 && bx1 <= ax1) {
+    if (bx0 <= ax0 && ax0 <= ax1 && ax1 <= bx1)
+        || (ax0 <= bx0 && bx0 <= bx1 && bx1 <= ax1)
+        || (ax0 <= bx0 && bx0 <= ax1 && ax1 <= bx1)
+        || (bx0 <= ax0 && ax0 <= bx1 && bx1 <= ax1)
+    {
         return (ay0 - by0).powi(2);
     }
-    if ax0 <= ax1 && ax1 <= bx0 && bx0 <= bx1 { points_dist(ax1, ay1, bx0, by0, p, 1.) } else { points_dist(ax0, ay0, bx1, by1, p, 1.) }
+    if ax0 <= ax1 && ax1 <= bx0 && bx0 <= bx1 {
+        points_dist(ax1, ay1, bx0, by0, p, 1.)
+    } else {
+        points_dist(ax0, ay0, bx1, by1, p, 1.)
+    }
 }
 
 fn verti_line_dist(p: f64, a: [f64; 4], b: [f64; 4]) -> f64 {
     let [ax0, ay0, ax1, ay1] = a;
     let [bx0, by0, bx1, by1] = b;
-    if (by0 <= ay0 && ay0 <= ay1 && ay1 <= by1) || (ay0 <= by0 && by0 <= by1 && by1 <= ay1) || (ay0 <= by0 && by0 <= ay1 && ay1 <= by1) || (by0 <= ay0 && ay0 <= by1 && by1 <= ay1) {
+    if (by0 <= ay0 && ay0 <= ay1 && ay1 <= by1)
+        || (ay0 <= by0 && by0 <= by1 && by1 <= ay1)
+        || (ay0 <= by0 && by0 <= ay1 && ay1 <= by1)
+        || (by0 <= ay0 && ay0 <= by1 && by1 <= ay1)
+    {
         return (ax0 - bx0).powi(2);
     }
-    if ay0 <= ay1 && ay1 <= by0 && by0 <= by1 { points_dist(ax1, ay1, bx0, by0, 1., p) } else { points_dist(ax0, ay0, bx1, by1, 1., p) }
+    if ay0 <= ay1 && ay1 <= by0 && by0 <= by1 {
+        points_dist(ax1, ay1, bx0, by0, 1., p)
+    } else {
+        points_dist(ax0, ay0, bx1, by1, 1., p)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -952,10 +1235,30 @@ enum Dir {
 
 fn focus_nearest(vm: &mut Vm, dir: Dir) -> PyResult<Value> {
     let (from, to, vertical, mul): ([f64; 4], [f64; 4], bool, [f64; 4]) = match dir {
-        Dir::Right => ([0.9, 0.1, 0.9, 0.9], [0.1, 0.1, 0.1, 0.9], true, [-1., 0., 0., 0.]),
-        Dir::Left => ([0.1, 0.1, 0.1, 0.9], [0.9, 0.1, 0.9, 0.9], true, [1., 0., 1., 0.]),
-        Dir::Up => ([0.1, 0.1, 0.9, 0.1], [0.1, 0.9, 0.9, 0.9], false, [0., 1., 0., 1.]),
-        Dir::Down => ([0.1, 0.9, 0.9, 0.9], [0.1, 0.1, 0.9, 0.1], false, [0., -1., 0., 0.]),
+        Dir::Right => (
+            [0.9, 0.1, 0.9, 0.9],
+            [0.1, 0.1, 0.1, 0.9],
+            true,
+            [-1., 0., 0., 0.],
+        ),
+        Dir::Left => (
+            [0.1, 0.1, 0.1, 0.9],
+            [0.9, 0.1, 0.9, 0.9],
+            true,
+            [1., 0., 1., 0.],
+        ),
+        Dir::Up => (
+            [0.1, 0.1, 0.9, 0.1],
+            [0.1, 0.9, 0.9, 0.9],
+            false,
+            [0., 1., 0., 1.],
+        ),
+        Dir::Down => (
+            [0.1, 0.9, 0.9, 0.9],
+            [0.1, 0.1, 0.9, 0.1],
+            false,
+            [0., -1., 0., 0.],
+        ),
     };
     let k = vm.types.new_str("keyboard");
     sg(vm, "pending_focus_type", k)?;
@@ -998,7 +1301,12 @@ fn focus_nearest(vm: &mut Vm, dir: Dir) -> PyResult<Value> {
         return focus_extreme(vm, mul);
     }
     let fr = inset_rect(vm, &from_focus)?;
-    let fl = [fr[0] + fr[2] * from[0], fr[1] + fr[3] * from[1], fr[0] + fr[2] * from[2], fr[1] + fr[3] * from[3]];
+    let fl = [
+        fr[0] + fr[2] * from[0],
+        fr[1] + fr[3] * from[1],
+        fr[0] + fr[2] * from[2],
+        fr[1] + fr[3] * from[3],
+    ];
     let penalty = py::config_f64(vm, "focus_crossrange_penalty").unwrap_or(1024.);
     let mut placeless = None;
     let mut best: Option<Value> = None;
@@ -1025,8 +1333,17 @@ fn focus_nearest(vm: &mut Vm, dir: Dir) -> PyResult<Value> {
         if !ok {
             continue;
         }
-        let tl = [tr[0] + tr[2] * to[0], tr[1] + tr[3] * to[1], tr[0] + tr[2] * to[2], tr[1] + tr[3] * to[3]];
-        let d = if vertical { verti_line_dist(penalty, fl, tl) } else { horiz_line_dist(penalty, fl, tl) };
+        let tl = [
+            tr[0] + tr[2] * to[0],
+            tr[1] + tr[3] * to[1],
+            tr[0] + tr[2] * to[2],
+            tr[1] + tr[3] * to[3],
+        ];
+        let d = if vertical {
+            verti_line_dist(penalty, fl, tl)
+        } else {
+            horiz_line_dist(penalty, fl, tl)
+        };
         if d < best_dist {
             best = Some(f.clone());
             best_dist = d;
@@ -1099,7 +1416,12 @@ fn f_key_handler(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             return focus_ordered(vm, -1);
         }
     } else {
-        for (name, dir) in [("focus_right", Dir::Right), ("focus_left", Dir::Left), ("focus_up", Dir::Up), ("focus_down", Dir::Down)] {
+        for (name, dir) in [
+            ("focus_right", Dir::Right),
+            ("focus_left", Dir::Left),
+            ("focus_up", Dir::Up),
+            ("focus_down", Dir::Down),
+        ] {
             if m(vm, name)? {
                 return focus_nearest(vm, dir);
             }
@@ -1127,40 +1449,61 @@ fn f_check_keyboard_focus(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("capture_focus", f_capture_focus),
-        ("clear_capture_focus", f_clear_capture_focus),
-        ("get_focus_rect", f_get_focus_rect),
-        ("set_focused", f_set_focused),
-        ("get_focused", f_get_focused),
-        ("get_mouse", f_get_mouse),
-        ("get_tooltip", f_get_tooltip),
-        ("set_grab", f_set_grab),
-        ("get_grab", f_get_grab),
-        ("take_focuses", f_take_focuses),
-        ("focus_coordinates", f_focus_coordinates),
-        ("mark_modal", f_mark_modal),
-        ("before_interact", f_before_interact),
-        ("change_focus", f_change_focus),
-        ("clear_focus", f_clear_focus),
-        ("force_focus", f_force_focus),
-        ("mouse_handler", f_mouse_handler),
-        ("focus_extreme", f_focus_extreme),
-        ("check_keyboard_focus", f_check_keyboard_focus),
-        ("focus_ordered", f_focus_ordered),
-        ("key_handler", f_key_handler),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("capture_focus", f_capture_focus),
+            ("clear_capture_focus", f_clear_capture_focus),
+            ("get_focus_rect", f_get_focus_rect),
+            ("set_focused", f_set_focused),
+            ("get_focused", f_get_focused),
+            ("get_mouse", f_get_mouse),
+            ("get_tooltip", f_get_tooltip),
+            ("set_grab", f_set_grab),
+            ("get_grab", f_get_grab),
+            ("take_focuses", f_take_focuses),
+            ("focus_coordinates", f_focus_coordinates),
+            ("mark_modal", f_mark_modal),
+            ("before_interact", f_before_interact),
+            ("change_focus", f_change_focus),
+            ("clear_focus", f_clear_focus),
+            ("force_focus", f_force_focus),
+            ("mouse_handler", f_mouse_handler),
+            ("focus_extreme", f_focus_extreme),
+            ("check_keyboard_focus", f_check_keyboard_focus),
+            ("focus_ordered", f_focus_ordered),
+            ("key_handler", f_key_handler),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
-    let fc = py::class(vm, MODULE, "Focus", &[], &[
-        ("__init__", fo_init),
-        ("copy", fo_copy),
-        ("__repr__", fo_repr),
-        ("inside", fo_inside),
-        ("inset_rect", fo_inset_rect),
-    ], &[])?;
+    let fc = py::class(
+        vm,
+        MODULE,
+        "Focus",
+        &[],
+        &[
+            ("__init__", fo_init),
+            ("copy", fo_copy),
+            ("__repr__", fo_repr),
+            ("inside", fo_inside),
+            ("inset_rect", fo_inset_rect),
+        ],
+        &[],
+    )?;
     set(vm, "Focus", Value::Obj(fc));
     set(vm, "focus_storage", vm.types.new_dict());
-    for n in ["argument", "screen_of_focused", "grab", "global_focus", "tooltip", "last_tooltip", "override", "old_max_default_focus_name", "_focused"] {
+    for n in [
+        "argument",
+        "screen_of_focused",
+        "grab",
+        "global_focus",
+        "tooltip",
+        "last_tooltip",
+        "override",
+        "old_max_default_focus_name",
+        "_focused",
+    ] {
         set(vm, n, Value::None);
     }
     let empty_set = vm.call(&Value::Obj(vm.types.set.clone()), Vec::new(), Vec::new())?;

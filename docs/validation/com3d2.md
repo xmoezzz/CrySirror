@@ -725,11 +725,27 @@ the title. Guest calls `SaveAndLoadMgr.OpenLoadPanelKasiduki`, a distinct
 load mode which still lacks standalone title dispatch.
 
 The original `ConfigCtrl.Init` registers 32 callbacks, counting the two
-directions of a toggle separately. The title adapter wires eight of these:
-OK, master/BGM/system/voice/SE/environment volume, and message background
-transparency. Changes affect the current session. The other 24 bindings
-include screen settings, text and auto speeds, the dance channel and
-spatial-audio options. Native settings persistence remains open.
+directions of each switch separately. All 32 have bindings in the standalone
+panel. The panel sends physical resolution and fullscreen requests through
+shared UI commands, sets the shared presentation capture scale to 1×, 2× or
+4×, and displays the host's measured presentation rate through shared text.
+The settings panel is available from Title, the system gear and the ADV
+message window.
+
+| Installed callback family | CrySirror consumer |
+| --- | --- |
+| Resolution, fullscreen, capture magnification, FPS | Shared UI state and desktop presentation. Resolution choices use the native preset sizes, reported display size and current client size. The desktop uses borderless fullscreen. |
+| Anti-aliasing, shadow quality, texture quality, bloom | Shared PBR environment and raster quality. Sample counts fall back to the highest supported count at or below the selection. Shadow tiers select the cascade map size or disable sun shadows. Texture tiers control sampler anisotropy, and bloom scales the CrySirror postprocess. |
+| Player model and message transparency | Shared character materials and message window layers. |
+| System button visibility, text speed, auto speed, sequential voice | The shortcut follows the visibility preference. ADV reveals text at the native grapheme interval, completes the current line on the first click, waits at the native auto interval, and queries or stops the shared voice channel according to the sequential-voice switch. |
+| Category volumes, dance volume, four 3D toggles, special SE switch | Shared channel gains, the independent dance mix group and spatial processing on playing and newly prepared sources. The native special SE predicate runs before scheduling `SE016.ogg`. |
+
+These bindings follow the installed `ConfigCtrl`, `CMSystem`, `SoundMgr`,
+`AudioSourceMgr`, `MessageClass`, `ADVKagManager` and `SystemShortcut`.
+The dance slider updates the shared mix group. See the later
+[DanceMain playback record](#free-mode-and-dancemain-2026-11-26) for
+the dance scene's use of that group.
+Settings live for the current session. Native settings persistence remains open.
 
 For a wider static count, enumerate the 5,824 indexed `.ks` filenames in
 the installed base `GameData/script.arc`. Inspect line-command and bracket
@@ -760,11 +776,22 @@ After clicking the master slider and native OK, frame 852 showed SceneTitle
 with Config closed (13 widgets) and focus on Config. Both runs used isolated
 writable data and the installed 1.0.4 game files.
 
+The 2026-11-26 release regression passed all 92 tests, including the
+installed `installed_title_config_remaining_controls_publish_engine_state`
+and `installed_config_text_speed_drives_reveal_and_auto` fixtures. The first
+clicks all 24 newly bound controls and checks shared window requests, scene
+quality, the FPS layer and the dance gain group. The second uses the
+installed opening KAG script to check reveal completion, click consumption and
+the auto deadline. The shared PCM test
+`channel_spatial_control_updates_pcm_without_reopening_transport` checks
+the active voice's stereo output and retained playback position.
+
 ### Standalone management menu coverage, 16 direct destinations
 
 The standalone adapter now dispatches the four remaining destinations in
-`DaytimeMain.ks` and `NightMain.ks`. The denominator counts distinct
-destinations directly requested by these two management menus. Each fixture
+`DaytimeMain.ks` and `NightMain.ks`. Rechecking the installed script archive
+against both dispatch tables gives **16 of 16** distinct literal scene names
+in those two scripts and **21 of 29** across the archive. Each fixture
 starts at the installed day or night menu label and clicks the serialized
 management button with a temporary player state.
 
@@ -780,3 +807,372 @@ objects and custom panel materials in room saves, additional competitive-show
 award combinations, and the separate blackjack, slot and casino shop scenes.
 The room loader rejects unsupported object or material data before applying
 it. Physical input and desktop pixels were outside this fixture run.
+
+All 84 release library tests passed with installed data, including all four
+new fixtures, with zero failures or ignored tests. Each fixture returned to
+its calling management menu. The competitive-show fixture advances the
+installed result dialogue by clicking at its KAG input waits. The standard
+release desktop player linked and `play --detect-only` identified the
+installation as `COM3D2`.
+
+The eight literal targets still rejected by the standalone dispatcher are
+`SceneBlackJack`, `SceneCasinoSlot` and `SceneCasinoShop` from the casino;
+`SceneFreeModeSelect`, `SceneKasizukiMainMenu` and `SceneToTitle`; and
+`SceneYotogi` and `SceneYotogiOld`. The older CM3D2 profile's
+`SceneToTitle` and `SceneYotogi` handlers are separate dispatch paths.
+
+### Standalone opening story, entrance and office
+
+The installed `BaseKagManager.Initialize` registers 131 literal callback
+names and `ADVKagManager.Initialize` adds eleven, for 142 distinct names.
+At least 50 have no corresponding name in the standalone ADV dispatch or
+the shared KAG parser, including 26 `vr*` names. For this lower bound,
+even a string literal elsewhere in the dispatch code was counted as a match.
+Scanning line and bracket commands in the 5,824 base `script.arc` scenarios
+finds 14 of the 50 used directly. Examples include `faceblend2` (748 files),
+`motionnextabs` (90) and `calldialog` (34). Neither `OP_0001a.ks` nor
+`OP_0002.ks` directly invokes one of those 50. Dynamic calls, transitive
+motion scripts, UI callbacks and native branches within a recognized command
+are outside this count.
+
+`OP_0001a.ks` loads `EmpireClub_Entrance` at line 57 and sets the main light at
+line 63. It loads `ShinShitsumu` at line 180 and changes the light's rotation at
+line 190. Both commands use intensity 0.95. The office prefab has ten distinct
+materials. Its monitor uses Unity's `Unlit/Texture` and its light overlay uses
+`Unlit/Transparent`. Both shaders have an empty outer asset name in this
+installation. Their serialized ShaderLab names and fragment programs identify
+the texture-only paths. The importer now preserves unlit rendering and the
+overlay's alpha blend. The entrance material `EmpireClub_Entrance_001` also
+binds a separate `_LightMap` sampled with a second UV set. See the hall
+lighting verification below for the later importer change.
+
+The installed story body label has a 785 × 82 rectangle with a 25-pixel font,
+ClampContent and a maximum of three lines. The speaker label has its own
+252 × 36 rectangle. The standalone label renderer now applies the authored
+clamp and vertical spacing and rebuilds cached layers when the widget moves,
+resizes or changes tint. `installed_story_room_and_dialogue_layout` loads
+the original office and message widgets, checks the monitor, overlay and an
+opaque wall, presents four explicit lines, and checks that only three draw.
+Reducing the body to one line also removes the previous lines and moves and
+recolors the first. The release library suite passed all 85 tests with the
+installed data and zero ignored.
+
+The rebuilt desktop player ran the original opening in silent headless mode
+on M4 Max Metal with separate writable directories. At frame 2860 the entrance
+showed the speaker above one line of dialogue (`OP_0001a:111`). At frame 4507
+the office showed the uncle speaking three lines (`OP_0001a:363`). The three
+text-layer origins were 958.18, 983.18 and 1008.18 on the 1080-pixel canvas.
+The final office frame and the pre-change frame with identical inputs were
+pixel-identical. Neither capture reproduced overlapping glyphs. The long-label
+fixture exercises the overflow case separately. Local captures are
+`target/com3d2-validation/story-entrance-final.png` and
+`target/com3d2-validation/story-office-final.png`.
+
+Three separate installed release tests also passed:
+`com3d2_user_editor_from_title`, `com3d2_stock_editor_controls` and
+`com3d2_stock_editor_portraits`. They exercise the player editor return
+to the opening dialogue, the recruited character's edit and cancel actions,
+and confirmation including three scoped portrait images and the script return.
+
+### Standalone hall wall lights
+
+The installed hall has 124 `EE_Light_alpha*` meshes. Their material uses
+`Particles/Additive (Soft)` and a texture with an alpha channel. The
+serialized blend factors are OneMinusDstColor and One. The fragment program
+premultiplies RGB by alpha. The shared renderer now uses that blend equation
+and draws these meshes with depth testing and without depth writes.
+`EmpireClub_Entrance_001` now binds the original RGB lightmap and its
+secondary UV stream. The material multiplies base color by baked lighting
+and uses the shared sun's shadow visibility for the native shadow tint.
+
+The standard desktop release player reached the same original script position
+(`OP_0001a:111 *L11`, frame 2860) with the same input track as the baseline.
+The 1920 × 1080 offscreen Metal capture shows soft lamp halos and the warm
+wall lighting. The earlier capture shows opaque rectangles around the
+lamps. Both runs used isolated writable directories. The comparison uses
+`target/com3d2-validation/story-entrance-final.png` and
+`target/com3d2-validation/story-entrance-lighting.png`. Windows pixel parity,
+the shader's depth-faded particle variant and the reflective water material
+remain outside this verification.
+
+All 86 release library tests passed with the installed data, including
+`installed_story_entrance_lighting` and the shop's day and night entry
+fixtures. The importer binds RGB maps only where the material supplies
+the map and the mesh supplies UV1. The shop curtain without UV1 keeps its
+previous material path.
+
+### Standalone return to title and casino destinations, 2026-11-26
+
+Three more literal destinations now have installed-script scenarios, bringing
+the base archive's dispatcher coverage to 24 of 29 distinct names.
+
+| Destination | Exercised path |
+| --- | --- |
+| `SceneToTitle` (level 17) | At the native `AllMain.ks` title call, capture the scoped session checkpoint. Modify player money and execute the original credits-return label. The new parser restores the amount and reaches the original title call and its Start label. The checkpoint stays in memory while the standalone native v1040 slot writer remains open. |
+| `SceneCasinoShop` (level 58) | Build and enter a casino through the original night menu, click ItemExchange, select the facility materials category, cancel a confirmation, then purchase the first material. Verify the coin debit, acquired material ID 30 and sold-out listing for item 1000. OK resumes the casino menu. |
+| `SceneBlackJack` (level 55) | At an established same-day table, click the original casino button, open the installed bet panel, place the minimum bet, settle a hand and confirm the return to the casino. The rule fixture also checks native natural and split/double settlement. |
+
+The casino menu now strips its full path prefix before matching the native
+button names in `casinomenu_data.nei`. The blackjack controls show the hands
+in the score labels. Native card and chip animation and the dealer's
+scripted voice and motion presentation remain unverified. The shop records
+ownership during the session and uses the original costume menu data for
+fitting. The current installed purchase fixture covers a facility material.
+
+The 90 release library tests passed with the installed 1.0.4 data, including
+all three new routes and the prior day/night, portrait-layout, and lighting
+fixtures. The suite was built with a temporary copy of the workspace files
+and an independent target directory. The originals and writable game slots
+were separate.
+The standard desktop release build linked in the original checkout. Its
+muted headless startup reached `AllMain.ks:11 *title` at frame 795 with
+Continue focused.
+
+The five remaining literal destinations are `SceneCasinoSlot`,
+`SceneFreeModeSelect`, `SceneKasizukiMainMenu`, `SceneYotogi` and
+`SceneYotogiOld`. Level 56's `SlotManager` and `Reel` use the original
+`casino_slot_haitou.nei` and `casino_slot_byou.nei` data and separate
+stop arbitration, chance mode and bonus state. Level 24 directs the new
+and legacy recollection inventories and temporarily saves player-selected
+character state. Level 60 has its own guest and save flow. Levels 14 and 70
+consume distinct skill and stage data.
+
+
+### Five additional standalone dispatch entries, 2026-11-26
+
+| Literal entry | Source implementation and outstanding behavior |
+| --- | --- |
+| `SceneCasinoSlot` | Level 56's original cabinet hierarchy, button sprites, tutorial/help, and exchange/return controls. Reel stops follow the authored strips, first-stop weighted draw, forced BAR, cherry slip and sequential reach rejection. The scene publishes per-cell reel highlights, lever motion, additive lamp fades, credit/payout digits, jackpot and chance-mode sequences, and total-coin trophy accounting. |
+| `SceneFreeModeSelect` | Level 24's category and recollection controls, current and linked predecessor catalogues, VIP work details, replay labels and flag/relation restoration. |
+| `SceneKasizukiMainMenu` | Level 60's main menu, man and room selection, room-specific roster and scenario filtering, and authored room/man/scenario replay lists, descriptions and KAG return labels. The guest slot format, character detail and man-model refresh remain open. |
+| `SceneYotogi` | Level 14's stage previews and selection, supporting-character picker, active roster assignment, and the `@yotogicall` stage, supporting-character, free skill and Null routes. |
+| `SceneYotogiOld` | Level 70's separate stage-unit and free-skill prefabs use `linked_cm3d2` to load the original legacy tables and previews through client storage. Stage-list suffixes and prefab overrides come from `YotogiOld.CreateData`. The supporting-character picker uses the legacy manager's transfer and rental rules. |
+
+Native references for the current update are `SceneCasinoSlot`,
+`SlotManager`, `Reel`, `CasinoDataMgr.AddTotalCoin`,
+`KasizukiMainMenu.SetUpPlayInfo`, `RoomData.Data`, `PlayData.Data`,
+`YotogiStageSelectManager` and `YotogiStageUnit` from the installed 1.0.4
+assembly, plus the serialized controls in levels 56 and 60. Verification
+was static. Compilation, tests and gameplay runs were skipped at the
+owner's request.
+
+**Slot-machine evidence.** In level 56, the serialized controller points to
+the `Slot_Machine` cabinet mesh. The machine transform is its parent,
+`SlotMachine`, which also owns the lever and reels. The original controller
+references three masked reel meshes and 36 other lamps. The installed
+`Particles/AdditiveMaskUV` pixel shader rejects a fragment when its
+scrolling V coordinate lies outside all three authored intervals. The
+adapter translates those intervals and the native tint to the shared
+surface hook. The other lamps use material opacity updates or the visibility
+of the original unlit renderer. The unit fixtures assert third-reel reach
+rejection and the separate bank and display events during payout.
+
+### Guest selection and status, 2026-11-26
+
+Level 60's `KasizukiManSelectCtrl.OnClickManListButton` changes the
+selection, refreshes the two profile labels and updates the model.
+`KasizukiManager.SetManModel` uses the character preset key from
+`kasizuki_man_list.nei` for an NPC and restores the player's appearance
+for the protagonist. The adapter uses the existing character assembler
+and animation service for the original `man_porse01.anm` pose. Closing
+the picker preserves the selected man. Leaving the scene releases the
+preview and restores the previous player identity and actor slot.
+
+`MaidMiniStatusCtrl` populates the installed labels for the selected
+character. The work-count and affinity locks use the original hit boxes
+and govern the existing result counters. The native guest comment input
+uses the shared text broker and its 70 UTF-16-unit limit from level 60.
+Comments are held by character GUID for the session, pending native
+guest-slot persistence.
+
+The installed release fixture `installed_guest_man_profile_and_model`
+clicked the original man picker, switched to an enabled NPC and back
+to the protagonist, checked both original description labels and the
+assembled actor, opened the character status, toggled the work-count
+lock and entered Japanese text through the shared broker. The full
+library suite passed 95 tests with the installed data. No game process
+or graphics window was started.
+
+### Blackjack dealer idle, 2026-11-26
+
+Level 55's serialized `BjMotionControl` uses `*待機` from
+`work_002.ks` for Normal.WaitStartLabel. The dealer now starts there
+and publishes the assembled actor through the shared world. The
+installed blackjack fixture checks a visible animated actor in that
+world and drives the controls through betting, settlement and return.
+The final installed release library run passed all 95 tests, and the
+standard arm64 desktop release build linked.
+
+### Standalone native slot codec, 2026-11-26
+
+The v1040 reader and writer follow `GameMain.Serialize` in the installed
+1.0.4 assembly. They preserve the two CSV path lists and the transferred
+character flag, then read both stock lists through the last character.
+Employee status includes current and legacy class and skill records,
+experience, work counters, flags, selected classes and the end marker.
+The record order follows `CharacterMgr.Serialize`, `Maid.SerializeMisc`,
+`Maid.SerializeBody` and `MaidStatus.Status.Serialize`.
+
+The remainder includes `ScriptManager` and its `BaseKagManager` envelope,
+desk placement transforms, scenario state 1.3, facility layout 5, guest
+slots version 5 and casino state 1.1. Both bookmark distances are written
+relative to the end of their own 64-bit fields. Each bookmarked section
+is bounded on read. Casino dealers have no on-disk presence flag. The
+reader uses the following native tag to distinguish an omitted record
+from the two character indices. The native game determines presence from
+the installed casino facility types.
+
+Checked behavior:
+
+- `employee_status_matches_installed_serialize` matches the installed
+  `MaidStatus.Status.Serialize` output byte for byte on synthetic fields.
+  It checks independent and shared legacy entries, high unsigned
+  counters, optional legacy status and invalid end markers.
+- `native_stock_roster_round_trips_two_employees_to_the_script_boundary`
+  uses a native MaidProp reference with two sub-properties and a bone
+  adjustment. It checks an empty roster, multiple employees, the exact
+  KAG boundary and truncation at every byte of the stock fixture.
+- `native_slot_round_trips_all_sections_and_relocates_bookmarks` checks
+  byte equality for a synthetic complete container, using guest bytes
+  generated by the installed `SaveData.Serialize` and
+  `FacilityFlag.DataArray.Serialize`. After length-changing edits it
+  reads the new bookmarks and verifies the updated guest and casino
+  state. It also rejects shortened management, guest and casino data.
+- The installed daily slot fixture confirms the reader through the
+  actual Load confirmation control in scoped temporary storage.
+
+The release library suite passed 97 tests, including all installed-data
+fixtures. The run is recorded in `/tmp/crysirror-com3d2-slot-1040-final.log`.
+
+This codec pass preserved KagScript checkpoint bytes. Its fixtures did not
+contain a player save from the original game.
+
+### Standalone native save and load menu, 2026-11-26
+
+The daily Save confirmation captures the running standalone 1.0.4 state
+and calls the scoped atomic writer. Title Continue and daily Load stage the
+slot against the mounted data, reconstruct the roster and KAG parser, then
+run the original script from its saved label. Read-label history bytes from
+an imported checkpoint are retained. The checkpoint loader decodes TJS
+literal values directly and checks saved KAG macro bodies against the
+registered definitions.
+
+`installed_native_slot_saves_and_restores_the_daily_menu` uses the actual
+Save confirmation and the title's Load panel with an isolated save mount.
+It opens the installed daytime KAG entry, creates a slot, changes the live
+funds and removes the staff, then loads the slot from the title. It asserts
+the original day, player funds, casino coins and shop sale flags, work
+roster, employee identity, rebuilt model, and stored portrait pixels. The
+loaded script reaches the same daytime menu. A truncated copy is rejected
+before the live session is replaced.
+
+`native_management_state_round_trip_retains_both_schedule_banks` covers
+both native schedule backup banks and an unchanged player when dimensions
+are invalid. `checkpoint_accepts_native_literals_and_rejects_tjs_execution`
+covers nested literals and rejects function calls or assignments in slot data.
+
+The release library suite passed all 100 tests, including the installed
+fixtures. The local log is `/tmp/crysirror-com3d2-live-test-final.log`.
+
+These fixtures use installed resources and temporary files. A player save
+produced by the original executable and loading a CrySirror-written slot
+in that executable remain unverified. Linked predecessor saves with
+transferred staff use a different profile. Guest child-slot data is carried
+through the standalone slot; this fixture exercises the standard Continue
+selection.
+
+### Title Guest and club slots, 2026-11-26
+
+`TitleCtrl.OnGuestMode` and `SaveAndLoadCtrl.LoadDataOnKasizuli` select a
+campaign slot before the guest sub-slot. The new-customer row starts
+with the protagonist and an empty guest state. The selected guest or
+new customer sets the campaign's guest-mode flag before executing the
+saved KAG label. The installed daytime and night scripts then jump to
+the guest script as authored. Cancelling the title's guest sub-slot
+panel returns to the campaign list.
+
+The guest club uses its serialized `SaveAndLoadPanel`, data unit and
+page sprites. Save writes the native v5 guest record with the selected
+customer, total play count, per-character flags and notes. Load reapplies
+that record and refreshes the selected customer model. Guest writes use
+the two v1040 bookmarks to replace the guest section and its end offset.
+The campaign data and casino suffix are copied verbatim.
+
+The fixture `installed_title_guest_and_club_slots_round_trip` uses the
+installed title button and the original guest script with disposable
+campaign slots. It checks title paging and cancel, new guest creation,
+in-club Save and Load, and a second title load using the saved guest
+record. It checks that the guest comment and work-count lock return,
+that a second campaign slot is untouched and that removing the test
+guest record reconstructs the original campaign slot bytes. It does
+not launch the player or use the owner's saves.
+
+All 101 release library tests passed, including the installed-data
+fixtures. The log is `/tmp/cry-guest-live-final.log`.
+
+### Standalone free-skill selectors, 2026-11-26
+
+`FreeSkillSelect` handles both the scene's initial screen and the
+`@YotogiCall` callback. Level 14 embeds the panel. Level 70 instantiates
+`SceneFreeModeSelect/Prefab/FreeSkillSelect` under the authored parent
+and reads its skills and stages from the linked CM3D2 namespace.
+The two manager variants filter their respective owned-skill catalogues
+by the original cast and character conditions. The widgets use the
+authored tab and stage templates and grid bounds. The selector records
+one base skill, level and stage in manager state. Confirm and Cancel
+resume their own ADV labels through the Null screen contract.
+
+`installed_free_skill_callbacks_and_layouts` executes the actual
+`freemodemain.ks` callback and clicks the authored controls. It
+verifies the initially selected skill, level change, cancel and
+confirm cursor positions, and the selection retained on re-entry.
+The fixture also loads the original level 70 controls and legacy
+panel grids. `free_skill_profiles_keep_level_and_reject_disabled_stage`
+checks both profile variants with a bounded catalogue, including
+retention, a disabled stage and the category restriction.
+The linked predecessor catalogue and transferred-character route
+require a separate installation to verify. Verification stops at the
+ADV return label, before the downstream Play and Result controllers.
+All 103 release library tests passed with the installed-data fixtures.
+The desktop release binary was relinked at 20:49 JST. The test and
+build logs are `/tmp/cry-yotogi-skill-final.log` and
+`/tmp/cry-yotogi-skill-desktop.log`.
+
+### Free mode and DanceMain, 2026-11-26
+
+The everyday recollection catalogue uses the campaign's `2.0モード`
+flag. Legacy rows read the linked NEI namespace, use its base and
+suffix enable tables and apply the local legacy exclusion list.
+The original `Old_FreeModeMain.ks` runs `SetCompatibilityMode(true)`
+immediately before calling the selected file. The existing ADV
+call-depth boundary restores the normal resource namespace on return.
+The standalone installation used here has no complete predecessor
+archive set to exercise that call in a transferred campaign.
+
+The VIP panel uses the installed `ScheduleTaskViewer`, category button,
+night-work card and condition-row prefabs. Menu selection uses the
+work category and finished history. Pointer hover shows the work
+description and conditions. Confirm passes the personality-resolved
+filename to the original ADV label. The installed fixture supplies
+temporary finished work entries, checks the description and cancels
+through the serialized control.
+
+`DanceMain` reads the chosen scene's master audio track, character
+animation starts, camera action cache, camera properties and key
+events from the Unity take. The shared mixer positions the camera,
+explicitly sampled character ANMs, facial cues and 30 Hz mouth
+patterns. The master directional light and camera fades also follow
+this clock. The sound uses the configured dance mix group. The
+take-end callback stops the sound and returns to the original KAG label.
+Separate effect-object tracks, Unity Animator triggers and rhythm-game
+scoring retain their own implementation requirements.
+
+The fixture reads the three installed takes in levels 4, 20 and 44.
+It follows the original `NightMain.ks` dynamic SceneCall into the
+Entrance to You scene, resolves the stage and the dancer's ANM,
+advances decoded audio through the shared mixer, and checks equal
+audio and animation positions. A shortened fixture duration exercises
+the return to `NightMain.ks:143` and retirement of the audio channel.
+All 105 release library tests passed. The desktop release binary was
+relinked at 21:28 JST. The test and build logs are
+`/tmp/cry-dance-final-adv.log` and `/tmp/cry-dance-desktop.log`.

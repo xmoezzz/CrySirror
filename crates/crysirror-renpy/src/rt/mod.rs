@@ -4,34 +4,46 @@
 //! module names. Script-visible classes are ordinary Python classes whose
 //! methods are natives; the small Python shells in `py/renpy` only declare
 //! module layout.
+pub mod aliases;
 pub mod anim;
 pub mod astexec;
+pub mod astsupport;
+pub mod atlclasses;
 pub mod atlrt;
 pub mod audio;
 pub mod backend;
+pub mod basedir;
 pub mod behavior;
 pub mod behavior2;
 pub mod boot;
 pub mod character;
 pub mod color;
 pub mod core;
+pub mod devtools;
 pub mod dragdrop;
 pub mod easy;
+pub mod encryption;
 pub mod error;
+pub mod error84;
 pub mod events;
 pub mod execution;
 pub mod exports;
 pub mod focus;
 pub mod font;
 pub mod game;
+pub mod gl;
+pub mod gl_api;
 pub mod im;
 pub mod image;
 pub mod imagelike;
 pub mod imagemap;
+#[rustfmt::skip]
+pub mod import_aliases;
 pub mod input;
 pub mod interface;
 pub mod layout;
 pub mod lexer;
+pub mod lexersupport;
 pub mod link;
 pub mod loader;
 pub mod loadsave;
@@ -49,7 +61,15 @@ pub mod persistent;
 pub mod predict;
 pub mod preference_tables;
 pub mod py;
+pub mod pygame;
+pub mod pygame_events;
+pub mod pygame_io;
+pub mod pygame_surface;
+#[rustfmt::skip]
+pub mod pygame_tables;
 pub mod python;
+pub mod quaternion;
+pub mod release;
 pub mod render;
 pub mod resloader;
 pub mod revertable;
@@ -59,10 +79,15 @@ pub mod savetoken;
 pub mod scenelists;
 pub mod screen;
 pub mod scriptedit;
+pub mod shadercache;
 pub mod slast;
+pub mod softrender;
+pub mod slast_nodes;
 pub mod sldisplayables;
 pub mod slparser;
 pub mod slproperty_names;
+#[rustfmt::skip]
+pub mod sl_tables;
 pub mod state;
 pub mod statements;
 pub mod style;
@@ -70,7 +95,13 @@ pub mod substitutions;
 pub mod support;
 pub mod testing;
 pub mod text;
+pub mod textclasses;
 pub mod textshader;
+pub mod textsupport;
+pub mod texwrap;
+pub mod textunicode;
+pub mod fontobj;
+pub mod tlgen;
 pub mod transform;
 pub mod transition;
 pub mod translation;
@@ -117,7 +148,9 @@ impl Default for Host {
 }
 
 pub fn host(vm: &Vm) -> Rc<RefCell<Host>> {
-    vm.ext_get::<Rc<RefCell<Host>>>().expect("Ren'Py host services").clone()
+    vm.ext_get::<Rc<RefCell<Host>>>()
+        .expect("Ren'Py host services")
+        .clone()
 }
 
 pub fn clipboard_text(vm: &Vm) -> String {
@@ -137,13 +170,24 @@ pub fn asset_path(vm: &Vm, name: &str) -> Option<String> {
     f(name)
 }
 
+/// The actual name of a game file as `renpy.loader.load` finds it
+/// (translation directory, `config.search_prefixes`); `name` if missing.
+pub fn find_file(vm: &mut Vm, name: &str) -> String {
+    match resloader::find(vm, name, None) {
+        Ok(Some((actual, _))) => actual,
+        _ => name.to_owned(),
+    }
+}
+
 /// Registers every native module. Called once per VM before `import renpy`.
 pub fn install(vm: &mut Vm) -> PyResult<()> {
     vm.ext_set(Rc::new(RefCell::new(Host::default())));
+    aliases::install(vm);
     render::install(vm);
     focus::install(vm);
     style::install(vm);
     events::install(vm);
+    pygame::install(vm);
     image::install(vm);
     image::install_module(vm);
     core::install(vm);
@@ -180,13 +224,22 @@ pub fn install(vm: &mut Vm) -> PyResult<()> {
     rollback::install(vm);
     execution::install(vm);
     astexec::install(vm);
+    astsupport::install(vm);
     nodes::install(vm);
     sldisplayables::install(vm);
     lexer::install(vm);
+    lexersupport::install(vm);
+    devtools::install(vm);
+    softrender::install(vm);
+    encryption::install(vm);
+    quaternion::install(vm);
     parameter::install(vm);
     parser::install(vm);
     statements::install(vm);
     support::install(vm);
+    shadercache::install(vm);
+    gl::install(vm);
+    tlgen::install(vm);
     character::install(vm);
     substitutions::install(vm);
     resloader::install(vm);
@@ -205,4 +258,3 @@ pub fn install(vm: &mut Vm) -> PyResult<()> {
     input::install(vm);
     Ok(())
 }
-

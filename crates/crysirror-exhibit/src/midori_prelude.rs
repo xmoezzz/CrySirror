@@ -26,12 +26,12 @@ impl DebugDefinition {
             .collect::<Result<Vec<_>>>()?;
         ensure!(
             words.len() == 22,
-            "unsupported Midori debug definition size"
+            "unsupported ExHibit debug definition size"
         );
         let mode = words[0] as u32 & 0x0fff_ffff;
         ensure!(
             mode == 0 && words[1..6] == [-1, 0, 0, 0, 0],
-            "unsupported Midori debug overlay"
+            "unsupported ExHibit debug overlay"
         );
         let pairs = std::array::from_fn(|i| [words[6 + i * 2], words[7 + i * 2]]);
         Ok(Self { mode, pairs })

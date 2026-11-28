@@ -105,6 +105,13 @@ impl GlbBuilder {
             }
             let mut remap: HashMap<u16, u32> = HashMap::new();
             let mut p = glb::Primitive { material: materials.get(s).or(materials.last()).copied(), ..Default::default() };
+            let uses_lightmap = p.material.is_some_and(|id| {
+                self.doc.materials[id].engine.as_ref().is_some_and(|material| {
+                    matches!(material.effect, Some(crysirror_asset::pbr::ShaderEffect::RgbLightmap { .. }))
+                })
+            });
+            ensure!(!uses_lightmap || mesh.uv1.len() == mesh.positions.len(),
+                "RGB lightmap mesh {} requires secondary UVs", mesh.name);
             for &i in indices {
                 if remap.contains_key(&i) {
                     continue;
@@ -117,6 +124,10 @@ impl GlbBuilder {
                 }
                 if let Some(uv) = mesh.uv0.get(v) {
                     p.uvs.push([uv[0], 1. - uv[1]]);
+                }
+                if uses_lightmap {
+                    let [u, v] = mesh.uv1[v];
+                    p.aux.push([u, 1. - v, 0., 0.]);
                 }
             }
             if p.normals.len() != p.positions.len() {

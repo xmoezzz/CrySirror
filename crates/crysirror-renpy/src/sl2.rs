@@ -3,8 +3,8 @@
 //! `slparser.py`). Displayable statements come from `sldisplayables.py`;
 //! creator-defined screen statements are added through `register`.
 
-use crate::atl::{self, ParseContext, RawBlock};
 use crate::ast::{ArgumentInfo, Signature};
+use crate::atl::{self, ParseContext, RawBlock};
 use crate::lexer::{Lexer, PResult, PyExpr};
 use std::rc::Rc;
 
@@ -59,82 +59,239 @@ fn spec(name: &str, disp: &str, style: Option<&str>, n: NChildren, pos: &[&str])
 pub fn builtin_statements() -> Vec<StatementSpec> {
     use NChildren::*;
     let mut v = Vec::new();
-    v.push(spec("null", "renpy.display.layout.Null", Some("default"), Zero, &[]));
-    let mut t = spec("text", "renpy.text.text.Text", Some("text"), Zero, &["text"]);
+    v.push(spec(
+        "null",
+        "renpy.display.layout.Null",
+        Some("default"),
+        Zero,
+        &[],
+    ));
+    let mut t = spec(
+        "text",
+        "renpy.text.text.Text",
+        Some("text"),
+        Zero,
+        &["text"],
+    );
     t.scope = true;
     t.replaces = true;
     v.push(t);
-    for (n, layout) in [("hbox", "horizontal"), ("vbox", "vertical"), ("fixed", "fixed")] {
+    for (n, layout) in [
+        ("hbox", "horizontal"),
+        ("vbox", "vertical"),
+        ("fixed", "fixed"),
+    ] {
         let mut s = spec(n, "renpy.display.layout.MultiBox", Some(n), Many, &[]);
         s.default_keywords = vec![("layout".into(), format!("'{layout}'"))];
         v.push(s);
     }
-    v.push(spec("grid", "renpy.display.layout.Grid", Some("grid"), Many, &["cols", "rows"]));
-    v.push(spec("side", "renpy.display.layout.Side", Some("side"), Many, &["positions"]));
-    v.push(spec("_ime_candidates_placer", "renpy.display.ime.IMECandidatesPlacer", Some("default"), One, &[]));
-    v.push(spec("window", "renpy.display.layout.Window", Some("window"), One, &[]));
-    v.push(spec("frame", "renpy.display.layout.Window", Some("frame"), One, &[]));
+    v.push(spec(
+        "grid",
+        "renpy.display.layout.Grid",
+        Some("grid"),
+        Many,
+        &["cols", "rows"],
+    ));
+    v.push(spec(
+        "side",
+        "renpy.display.layout.Side",
+        Some("side"),
+        Many,
+        &["positions"],
+    ));
+    v.push(spec(
+        "_ime_candidates_placer",
+        "renpy.display.ime.IMECandidatesPlacer",
+        Some("default"),
+        One,
+        &[],
+    ));
+    v.push(spec(
+        "window",
+        "renpy.display.layout.Window",
+        Some("window"),
+        One,
+        &[],
+    ));
+    v.push(spec(
+        "frame",
+        "renpy.display.layout.Window",
+        Some("frame"),
+        One,
+        &[],
+    ));
     v.push(spec("key", "renpy.ui._key", None, Zero, &["key"]));
-    let mut s = spec("timer", "renpy.display.behavior.Timer", Some("default"), Zero, &["delay"]);
+    let mut s = spec(
+        "timer",
+        "renpy.display.behavior.Timer",
+        Some("default"),
+        Zero,
+        &["delay"],
+    );
     s.replaces = true;
     v.push(s);
-    let mut s = spec("input", "renpy.display.behavior.Input", Some("input"), Zero, &[]);
+    let mut s = spec(
+        "input",
+        "renpy.display.behavior.Input",
+        Some("input"),
+        Zero,
+        &[],
+    );
     s.replaces = true;
     v.push(s);
-    v.push(spec("button", "renpy.display.behavior.Button", Some("button"), One, &[]));
-    v.push(spec("imagebutton", "renpy.ui._imagebutton", Some("image_button"), Zero, &[]));
-    let mut s = spec("textbutton", "renpy.ui._textbutton", Some("button"), Zero, &["label"]);
+    v.push(spec(
+        "button",
+        "renpy.display.behavior.Button",
+        Some("button"),
+        One,
+        &[],
+    ));
+    v.push(spec(
+        "imagebutton",
+        "renpy.ui._imagebutton",
+        Some("image_button"),
+        Zero,
+        &[],
+    ));
+    let mut s = spec(
+        "textbutton",
+        "renpy.ui._textbutton",
+        Some("button"),
+        Zero,
+        &["label"],
+    );
     s.scope = true;
     v.push(s);
     let mut s = spec("label", "renpy.ui._label", Some("label"), Zero, &["label"]);
     s.scope = true;
     v.push(s);
-    for (n, d) in [("bar", "renpy.sl2.sldisplayables.sl2bar"), ("vbar", "renpy.sl2.sldisplayables.sl2vbar")] {
+    for (n, d) in [
+        ("bar", "renpy.sl2.sldisplayables.sl2bar"),
+        ("vbar", "renpy.sl2.sldisplayables.sl2vbar"),
+    ] {
         let mut s = spec(n, d, None, Zero, &[]);
         s.replaces = true;
         s.pass_context = true;
         v.push(s);
     }
-    let mut s = spec("viewport", "renpy.sl2.sldisplayables.sl2viewport", Some("viewport"), One, &[]);
+    let mut s = spec(
+        "viewport",
+        "renpy.sl2.sldisplayables.sl2viewport",
+        Some("viewport"),
+        One,
+        &[],
+    );
     s.replaces = true;
     s.pass_context = true;
     v.push(s);
-    let mut s = spec("vpgrid", "renpy.sl2.sldisplayables.sl2vpgrid", Some("vpgrid"), Many, &[]);
+    let mut s = spec(
+        "vpgrid",
+        "renpy.sl2.sldisplayables.sl2vpgrid",
+        Some("vpgrid"),
+        Many,
+        &[],
+    );
     s.replaces = true;
     s.pass_context = true;
     v.push(s);
-    let mut s = spec("imagemap", "renpy.ui._imagemap", Some("imagemap"), Many, &[]);
+    let mut s = spec(
+        "imagemap",
+        "renpy.ui._imagemap",
+        Some("imagemap"),
+        Many,
+        &[],
+    );
     s.imagemap = true;
     v.push(s);
-    let mut s = spec("hotspot", "renpy.ui._hotspot", Some("hotspot"), One, &["spot"]);
+    let mut s = spec(
+        "hotspot",
+        "renpy.ui._hotspot",
+        Some("hotspot"),
+        One,
+        &["spot"],
+    );
     s.hotspot = true;
     v.push(s);
-    let mut s = spec("hotbar", "renpy.ui._hotbar", Some("hotbar"), Zero, &["spot"]);
+    let mut s = spec(
+        "hotbar",
+        "renpy.ui._hotbar",
+        Some("hotbar"),
+        Zero,
+        &["spot"],
+    );
     s.hotspot = true;
     s.replaces = true;
     v.push(s);
-    v.push(spec("transform", "renpy.display.motion.Transform", Some("transform"), One, &[]));
+    v.push(spec(
+        "transform",
+        "renpy.display.motion.Transform",
+        Some("transform"),
+        One,
+        &[],
+    ));
     for n in ["add", "image"] {
         let mut s = spec(n, "renpy.sl2.sldisplayables.sl2add", None, Zero, &["im"]);
         s.replaces = true;
         s.scope = true;
         v.push(s);
     }
-    let mut s = spec("drag", "renpy.display.dragdrop.Drag", Some("drag"), One, &[]);
+    let mut s = spec(
+        "drag",
+        "renpy.display.dragdrop.Drag",
+        Some("drag"),
+        One,
+        &[],
+    );
     s.replaces = true;
     v.push(s);
-    let mut s = spec("draggroup", "renpy.display.dragdrop.DragGroup", None, Many, &[]);
+    let mut s = spec(
+        "draggroup",
+        "renpy.display.dragdrop.DragGroup",
+        None,
+        Many,
+        &[],
+    );
     s.replaces = true;
     v.push(s);
-    let mut s = spec("mousearea", "renpy.display.behavior.MouseArea", None, Zero, &[]);
+    let mut s = spec(
+        "mousearea",
+        "renpy.display.behavior.MouseArea",
+        None,
+        Zero,
+        &[],
+    );
     s.replaces = true;
     v.push(s);
-    v.push(spec("on", "renpy.display.behavior.OnEvent", None, Zero, &["event"]));
-    let mut s = spec("nearrect", "renpy.display.layout.NearRect", Some("default"), One, &[]);
+    v.push(spec(
+        "on",
+        "renpy.display.behavior.OnEvent",
+        None,
+        Zero,
+        &["event"],
+    ));
+    let mut s = spec(
+        "nearrect",
+        "renpy.display.layout.NearRect",
+        Some("default"),
+        One,
+        &[],
+    );
     s.replaces = true;
     v.push(s);
-    v.push(spec("dismiss", "renpy.display.behavior.DismissBehavior", Some("default"), Zero, &[]));
-    v.push(spec("areapicker", "renpy.display.behavior.AreaPicker", Some("default"), One, &[]));
+    v.push(spec(
+        "dismiss",
+        "renpy.display.behavior.DismissBehavior",
+        Some("default"),
+        Zero,
+        &[],
+    ));
+    v.push(spec(
+        "areapicker",
+        "renpy.display.behavior.AreaPicker",
+        Some("default"),
+        One,
+        &[],
+    ));
     v
 }
 
@@ -157,17 +314,58 @@ pub struct Displayable {
 #[derive(Clone, Debug)]
 pub enum SlNode {
     Displayable(Box<Displayable>),
-    If { loc: Loc, entries: Vec<(Option<PyExpr>, Block)> },
-    ShowIf { loc: Loc, entries: Vec<(Option<PyExpr>, Block)> },
-    For { loc: Loc, variable: String, expression: PyExpr, index_expression: Option<PyExpr>, block: Block },
-    Python { loc: Loc, code: PyExpr },
-    Pass { loc: Loc },
-    Default { loc: Loc, variable: String, expression: PyExpr },
-    Use { loc: Loc, target: String, expression: bool, args: Option<ArgumentInfo>, id: Option<PyExpr>, block: Option<Block>, variable: Option<String> },
-    Transclude { loc: Loc },
-    CustomUse { loc: Loc, target: String, positional: Vec<PyExpr>, block: Block, variable: Option<String> },
-    Break { loc: Loc },
-    Continue { loc: Loc },
+    If {
+        loc: Loc,
+        entries: Vec<(Option<PyExpr>, Block)>,
+    },
+    ShowIf {
+        loc: Loc,
+        entries: Vec<(Option<PyExpr>, Block)>,
+    },
+    For {
+        loc: Loc,
+        variable: String,
+        expression: PyExpr,
+        index_expression: Option<PyExpr>,
+        block: Block,
+    },
+    Python {
+        loc: Loc,
+        code: PyExpr,
+    },
+    Pass {
+        loc: Loc,
+    },
+    Default {
+        loc: Loc,
+        variable: String,
+        expression: PyExpr,
+    },
+    Use {
+        loc: Loc,
+        target: String,
+        expression: bool,
+        args: Option<ArgumentInfo>,
+        id: Option<PyExpr>,
+        block: Option<Block>,
+        variable: Option<String>,
+    },
+    Transclude {
+        loc: Loc,
+    },
+    CustomUse {
+        loc: Loc,
+        target: String,
+        positional: Vec<PyExpr>,
+        block: Block,
+        variable: Option<String>,
+    },
+    Break {
+        loc: Loc,
+    },
+    Continue {
+        loc: Loc,
+    },
 }
 
 impl SlNode {
@@ -175,7 +373,9 @@ impl SlNode {
         match self {
             SlNode::Python { .. } => true,
             SlNode::Displayable(d) => d.block.children.iter().any(|c| c.has_python()),
-            SlNode::If { entries, .. } | SlNode::ShowIf { entries, .. } => entries.iter().any(|(_, b)| b.children.iter().any(|c| c.has_python())),
+            SlNode::If { entries, .. } | SlNode::ShowIf { entries, .. } => entries
+                .iter()
+                .any(|(_, b)| b.children.iter().any(|c| c.has_python())),
             SlNode::For { block, .. } => block.children.iter().any(|c| c.has_python()),
             _ => false,
         }
@@ -210,11 +410,23 @@ pub struct Registry {
 
 impl Default for Registry {
     fn default() -> Self {
-        Registry { statements: builtin_statements() }
+        Registry {
+            statements: builtin_statements(),
+        }
     }
 }
 
-const CONTROL: &[&str] = &["if", "showif", "for", "$", "python", "pass", "default", "use", "transclude"];
+const CONTROL: &[&str] = &[
+    "if",
+    "showif",
+    "for",
+    "$",
+    "python",
+    "pass",
+    "default",
+    "use",
+    "transclude",
+];
 
 impl Registry {
     pub fn get(&self, name: &str) -> Option<&StatementSpec> {
@@ -225,15 +437,43 @@ impl Registry {
         CONTROL.contains(&name) || self.get(name).is_some()
     }
 
-    pub fn parse_screen(&self, l: &mut Lexer, loc: &Loc, cx: &dyn ParseContext, parse_args: &mut dyn FnMut(&mut Lexer) -> PResult<Option<Signature>>) -> PResult<Screen> {
+    pub fn parse_screen(
+        &self,
+        l: &mut Lexer,
+        loc: &Loc,
+        cx: &dyn ParseContext,
+        parse_args: &mut dyn FnMut(&mut Lexer) -> PResult<Option<Signature>>,
+    ) -> PResult<Screen> {
         l.expect_block("screen statement")?;
-        let name = l.word().map_or_else(|| l.error("expected 'word' not found."), Ok)?;
+        let name = l
+            .word()
+            .map_or_else(|| l.error("expected 'word' not found."), Ok)?;
         let parameters = parse_args(l)?;
         let mut block = Block::default();
         let mut tag = None;
         let mut doc = None;
-        self.parse_contents(l, &mut block, cx, Contents { can_tag: true, docstring: true, ..Contents::default() }, Some(&mut tag), Some(&mut doc), "screen", true)?;
-        let kw = |k: &str, d: &str| block.keyword.iter().find(|(n, _)| n == k).map(|(_, e)| e.text.to_string()).unwrap_or_else(|| d.to_string());
+        self.parse_contents(
+            l,
+            &mut block,
+            cx,
+            Contents {
+                can_tag: true,
+                docstring: true,
+                ..Contents::default()
+            },
+            Some(&mut tag),
+            Some(&mut doc),
+            "screen",
+            true,
+        )?;
+        let kw = |k: &str, d: &str| {
+            block
+                .keyword
+                .iter()
+                .find(|(n, _)| n == k)
+                .map(|(_, e)| e.text.to_string())
+                .unwrap_or_else(|| d.to_string())
+        };
         Ok(Screen {
             loc: loc.clone(),
             name,
@@ -251,7 +491,14 @@ impl Registry {
         })
     }
 
-    fn parse_child(&self, l: &mut Lexer, cx: &dyn ParseContext, layout: bool, keyword: bool, in_for: bool) -> PResult<Option<SlNode>> {
+    fn parse_child(
+        &self,
+        l: &mut Lexer,
+        cx: &dyn ParseContext,
+        layout: bool,
+        keyword: bool,
+        in_for: bool,
+    ) -> PResult<Option<SlNode>> {
         let loc = l.location();
         let old = l.pos;
         let Some(word) = l.word().or_else(|| l.match_re(r"\$")) else {
@@ -264,7 +511,21 @@ impl Registry {
                 let cond = l.python_expression()?;
                 l.require_re(":", ":")?;
                 let mut b = Block::default();
-                self.parse_contents(l, &mut b, cx, Contents { block_only: true, in_for, keyword, ..Default::default() }, None, None, &word, keyword)?;
+                self.parse_contents(
+                    l,
+                    &mut b,
+                    cx,
+                    Contents {
+                        block_only: true,
+                        in_for,
+                        keyword,
+                        ..Default::default()
+                    },
+                    None,
+                    None,
+                    &word,
+                    keyword,
+                )?;
                 entries.push((Some(cond), b));
                 let mut state = l.checkpoint();
                 while l.advance() {
@@ -272,13 +533,41 @@ impl Registry {
                         let cond = l.python_expression()?;
                         l.require_re(":", ":")?;
                         let mut b = Block::default();
-                        self.parse_contents(l, &mut b, cx, Contents { block_only: true, in_for, keyword, ..Default::default() }, None, None, &word, keyword)?;
+                        self.parse_contents(
+                            l,
+                            &mut b,
+                            cx,
+                            Contents {
+                                block_only: true,
+                                in_for,
+                                keyword,
+                                ..Default::default()
+                            },
+                            None,
+                            None,
+                            &word,
+                            keyword,
+                        )?;
                         entries.push((Some(cond), b));
                         state = l.checkpoint();
                     } else if l.keyword("else") {
                         l.require_re(":", ":")?;
                         let mut b = Block::default();
-                        self.parse_contents(l, &mut b, cx, Contents { block_only: true, in_for, keyword, ..Default::default() }, None, None, &word, keyword)?;
+                        self.parse_contents(
+                            l,
+                            &mut b,
+                            cx,
+                            Contents {
+                                block_only: true,
+                                in_for,
+                                keyword,
+                                ..Default::default()
+                            },
+                            None,
+                            None,
+                            &word,
+                            keyword,
+                        )?;
                         entries.push((None, b));
                         state = l.checkpoint();
                         break;
@@ -290,7 +579,11 @@ impl Registry {
                 if !l.eob && l.line >= 0 && entries.len() > 1 {
                     // `revert` above left us on the last consumed line.
                 }
-                if word == "if" { SlNode::If { loc, entries } } else { SlNode::ShowIf { loc, entries } }
+                if word == "if" {
+                    SlNode::If { loc, entries }
+                } else {
+                    SlNode::ShowIf { loc, entries }
+                }
             }
             "for" => {
                 l.skip_whitespace();
@@ -301,23 +594,60 @@ impl Registry {
                     Some(n) => n,
                     None => {
                         let pattern: String = l.text[tuple_start..l.pos].iter().collect();
-                        pre.push(SlNode::Python { loc: loc.clone(), code: l.expr(format!("{pattern} = _sl2_i")) });
+                        pre.push(SlNode::Python {
+                            loc: loc.clone(),
+                            code: l.expr(format!("{pattern} = _sl2_i")),
+                        });
                         "_sl2_i".into()
                     }
                 };
-                let index_expression = if l.match_re("index").is_some() { Some(l.say_expression()?.map_or_else(|| l.error("expected 'say_expression' not found."), Ok)?) } else { None };
+                let index_expression = if l.match_re("index").is_some() {
+                    Some(
+                        l.say_expression()?
+                            .map_or_else(|| l.error("expected 'say_expression' not found."), Ok)?,
+                    )
+                } else {
+                    None
+                };
                 l.require_re("in", "in")?;
                 let expression = l.python_expression()?;
                 l.require_re(":", ":")?;
                 l.expect_eol()?;
-                let mut b = Block { children: pre, ..Default::default() };
-                self.parse_contents(l, &mut b, cx, Contents { block_only: true, in_for: true, keyword: true, ..Default::default() }, None, None, "for", true)?;
-                SlNode::For { loc, variable, expression, index_expression, block: b }
+                let mut b = Block {
+                    children: pre,
+                    ..Default::default()
+                };
+                self.parse_contents(
+                    l,
+                    &mut b,
+                    cx,
+                    Contents {
+                        block_only: true,
+                        in_for: true,
+                        keyword: true,
+                        ..Default::default()
+                    },
+                    None,
+                    None,
+                    "for",
+                    true,
+                )?;
+                SlNode::For {
+                    loc,
+                    variable,
+                    expression,
+                    index_expression,
+                    block: b,
+                }
             }
             "break" | "continue" if in_for => {
                 l.expect_eol()?;
                 l.expect_noblock(&format!("{word} statement"))?;
-                if word == "break" { SlNode::Break { loc } } else { SlNode::Continue { loc } }
+                if word == "break" {
+                    SlNode::Break { loc }
+                } else {
+                    SlNode::Continue { loc }
+                }
             }
             "$" => {
                 let loc = l.location();
@@ -335,7 +665,10 @@ impl Registry {
                 l.expect_eol()?;
                 l.expect_block("python block")?;
                 let src = l.python_block();
-                SlNode::Python { loc: loc.clone(), code: PyExpr::new(src, loc.0.clone(), loc.1 + 1) }
+                SlNode::Python {
+                    loc: loc.clone(),
+                    code: PyExpr::new(src, loc.0.clone(), loc.1 + 1),
+                }
             }
             "pass" => {
                 l.expect_eol()?;
@@ -343,12 +676,18 @@ impl Registry {
                 SlNode::Pass { loc }
             }
             "default" => {
-                let n = l.word().map_or_else(|| l.error("expected 'word' not found."), Ok)?;
+                let n = l
+                    .word()
+                    .map_or_else(|| l.error("expected 'word' not found."), Ok)?;
                 l.require_re("=", "=")?;
                 let rest = l.rest();
                 l.expect_eol()?;
                 l.expect_noblock("default statement")?;
-                SlNode::Default { loc, variable: n, expression: rest }
+                SlNode::Default {
+                    loc,
+                    variable: n,
+                    expression: rest,
+                }
             }
             "use" => {
                 let (target, expression) = if l.keyword("expression") {
@@ -356,7 +695,11 @@ impl Registry {
                     l.keyword("pass");
                     (t.text.to_string(), true)
                 } else {
-                    (l.word().map_or_else(|| l.error("expected 'word' not found."), Ok)?, false)
+                    (
+                        l.word()
+                            .map_or_else(|| l.error("expected 'word' not found."), Ok)?,
+                        false,
+                    )
                 };
                 let args = parse_arguments(l)?;
                 let mut id = None;
@@ -365,7 +708,10 @@ impl Registry {
                     if l.keyword("id") {
                         id = l.simple_expression()?;
                     } else if l.keyword("as") {
-                        variable = Some(l.word().map_or_else(|| l.error("expected 'word' not found."), Ok)?);
+                        variable = Some(
+                            l.word()
+                                .map_or_else(|| l.error("expected 'word' not found."), Ok)?,
+                        );
                     } else {
                         break;
                     }
@@ -374,14 +720,36 @@ impl Registry {
                     l.expect_eol()?;
                     l.expect_block("use statement")?;
                     let mut b = Block::default();
-                    self.parse_contents(l, &mut b, cx, Contents { can_has: true, block_only: true, keyword: true, ..Default::default() }, None, None, "use", true)?;
+                    self.parse_contents(
+                        l,
+                        &mut b,
+                        cx,
+                        Contents {
+                            can_has: true,
+                            block_only: true,
+                            keyword: true,
+                            ..Default::default()
+                        },
+                        None,
+                        None,
+                        "use",
+                        true,
+                    )?;
                     Some(b)
                 } else {
                     l.expect_eol()?;
                     l.expect_noblock("use statement")?;
                     None
                 };
-                SlNode::Use { loc, target, expression, args, id, block, variable }
+                SlNode::Use {
+                    loc,
+                    target,
+                    expression,
+                    args,
+                    id,
+                    block,
+                    variable,
+                }
             }
             "transclude" => {
                 l.expect_eol()?;
@@ -401,48 +769,97 @@ impl Registry {
                     }
                 }
                 let mut b = Block::default();
-                let contents = Contents { layout, can_has: s.nchildren == NChildren::One, keyword, ..Default::default() };
+                let contents = Contents {
+                    layout,
+                    can_has: s.nchildren == NChildren::One,
+                    keyword,
+                    ..Default::default()
+                };
                 self.parse_contents(l, &mut b, cx, contents, None, None, &s.name, keyword)?;
-                if positional.len() != s.positional.len() && !b.keyword.iter().any(|(k, _)| k == "arguments") {
-                    return l.error(format!("{} statement expects {} positional arguments, got {}.", s.name, s.positional.len(), positional.len()));
+                if positional.len() != s.positional.len()
+                    && !b.keyword.iter().any(|(k, _)| k == "arguments")
+                {
+                    return l.error(format!(
+                        "{} statement expects {} positional arguments, got {}.",
+                        s.name,
+                        s.positional.len(),
+                        positional.len()
+                    ));
                 }
                 match &s.custom_screen {
                     Some(scr) => {
                         let variable = b.variable.take();
-                        SlNode::CustomUse { loc, target: scr.clone(), positional, block: b, variable }
+                        SlNode::CustomUse {
+                            loc,
+                            target: scr.clone(),
+                            positional,
+                            block: b,
+                            variable,
+                        }
                     }
-                    None => SlNode::Displayable(Box::new(Displayable { loc, statement: s.name.clone(), positional, block: b })),
+                    None => SlNode::Displayable(Box::new(Displayable {
+                        loc,
+                        statement: s.name.clone(),
+                        positional,
+                        block: b,
+                    })),
                 }
             }
         };
         Ok(Some(node))
     }
 
-    fn parse_contents(&self, l: &mut Lexer, target: &mut Block, cx: &dyn ParseContext, c: Contents, mut tag: Option<&mut Option<String>>, mut doc: Option<&mut Option<String>>, stmt: &str, keyword: bool) -> PResult<()> {
+    fn parse_contents(
+        &self,
+        l: &mut Lexer,
+        target: &mut Block,
+        cx: &dyn ParseContext,
+        c: Contents,
+        mut tag: Option<&mut Option<String>>,
+        mut doc: Option<&mut Option<String>>,
+        stmt: &str,
+        keyword: bool,
+    ) -> PResult<()> {
         let mut seen: Vec<String> = Vec::new();
         let mut keyword_ok = keyword;
         let variable_ok = self.get(stmt).is_some();
-        let mut parse_kw = |l: &mut Lexer, target: &mut Block, first_line: bool, tag: &mut Option<&mut Option<String>>| -> PResult<()> {
-            let Some(name) = l.word() else { return l.error("expected a keyword argument, colon, or end of line.") };
+        let mut parse_kw = |l: &mut Lexer,
+                            target: &mut Block,
+                            first_line: bool,
+                            tag: &mut Option<&mut Option<String>>|
+         -> PResult<()> {
+            let Some(name) = l.word() else {
+                return l.error("expected a keyword argument, colon, or end of line.");
+            };
             if c.can_tag && name == "tag" {
                 if let Some(t) = tag.as_deref_mut() {
-                    *t = Some(l.word().map_or_else(|| l.error("expected 'word' not found."), Ok)?);
+                    *t = Some(
+                        l.word()
+                            .map_or_else(|| l.error("expected 'word' not found."), Ok)?,
+                    );
                 }
                 l.expect_noblock(&name)?;
                 return Ok(());
             }
             if variable_ok && name == "as" {
                 if target.variable.is_some() {
-                    return l.error(format!("an as clause may only appear once in a {stmt} statement."));
+                    return l.error(format!(
+                        "an as clause may only appear once in a {stmt} statement."
+                    ));
                 }
-                target.variable = Some(l.word().map_or_else(|| l.error("expected 'word' not found."), Ok)?);
+                target.variable = Some(
+                    l.word()
+                        .map_or_else(|| l.error("expected 'word' not found."), Ok)?,
+                );
                 return Ok(());
             }
             if name == "continue" || name == "break" {
                 return l.error(format!("The {name} statement may only appear inside a for statement, or an if statement inside a for statement."));
             }
             if self.is_statement(&name) && name != "at" && name != "default" && name != "text" {
-                return l.error(format!("The {name} statement is not a valid child of the {stmt} statement."));
+                return l.error(format!(
+                    "The {name} statement is not a valid child of the {stmt} statement."
+                ));
             }
             if name == "at" {
                 let cp = l.checkpoint();
@@ -456,11 +873,15 @@ impl Registry {
                 l.revert(&cp);
             }
             if seen.contains(&name) {
-                return l.error(format!("keyword argument {name:?} appears more than once in a {stmt} statement."));
+                return l.error(format!(
+                    "keyword argument {name:?} appears more than once in a {stmt} statement."
+                ));
             }
             seen.push(name.clone());
             let Some(e) = l.comma_expression()? else {
-                return l.error(format!("the {name} keyword argument was not given a value."));
+                return l.error(format!(
+                    "the {name} keyword argument was not given a value."
+                ));
             };
             target.keyword.push((name.clone(), e));
             if !first_line {
@@ -491,7 +912,11 @@ impl Registry {
                 parse_kw(l, target, true, &mut tag)?;
             }
         }
-        let mut sub = if block { Some(l.subblock_lexer(false)) } else { None };
+        let mut sub = if block {
+            Some(l.subblock_lexer(false))
+        } else {
+            None
+        };
         let mut run = |ll: &mut Lexer, target: &mut Block| -> PResult<()> {
             while ll.advance() {
                 let state = ll.checkpoint();
@@ -512,7 +937,9 @@ impl Registry {
                         return ll.error("The has statement is not allowed here.");
                     }
                     if target.children.iter().any(|ch| !ch.is_condition()) {
-                        return ll.error("The has statement may not be given after a child has been supplied.");
+                        return ll.error(
+                            "The has statement may not be given after a child has been supplied.",
+                        );
                     }
                     let Some(ch) = self.parse_child(ll, cx, true, keyword_ok, c.in_for)? else {
                         return ll.error("Has expects a child statement.");
@@ -605,7 +1032,13 @@ fn parse_arguments(l: &mut Lexer) -> PResult<Option<ArgumentInfo>> {
         fn user_statement_names(&self) -> Vec<Vec<String>> {
             Vec::new()
         }
-        fn parse_user_statement(&self, _: &mut crate::ast::Arena, _: &[String], l: &mut Lexer, _: &(Rc<str>, u32)) -> PResult<Vec<usize>> {
+        fn parse_user_statement(
+            &self,
+            _: &mut crate::ast::Arena,
+            _: &[String],
+            l: &mut Lexer,
+            _: &(Rc<str>, u32),
+        ) -> PResult<Vec<usize>> {
             l.error("unexpected statement")
         }
         fn sl2_registry(&self) -> &Registry {

@@ -36,7 +36,11 @@ fn mset(vm: &mut Vm, n: &str, v: Value) -> PyResult<()> {
 
 fn py_eval(vm: &mut Vm, code: &Value, locals: &Value) -> PyResult<Value> {
     let f = py::import_attr(vm, "renpy.python", "py_eval")?;
-    vm.call(&f, vec![code.clone()], vec![("locals".into(), locals.clone())])
+    vm.call(
+        &f,
+        vec![code.clone()],
+        vec![("locals".into(), locals.clone())],
+    )
 }
 
 /// Splits a screen name into its tuple form.
@@ -61,7 +65,9 @@ fn first(vm: &mut Vm, name: &Value) -> PyResult<Value> {
 }
 
 fn take(kw: &mut Vec<(Rc<str>, Value)>, n: &str) -> Option<Value> {
-    kw.iter().position(|(k, _)| &**k == n).map(|i| kw.remove(i).1)
+    kw.iter()
+        .position(|(k, _)| &**k == n)
+        .map(|i| kw.remove(i).1)
 }
 
 fn container_method(vm: &mut Vm, name: &str, args: Vec<Value>) -> PyResult<Value> {
@@ -74,13 +80,22 @@ fn container_method(vm: &mut Vm, name: &str, args: Vec<Value>) -> PyResult<Value
 
 fn profile_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    for (i, n) in ["predict", "show", "update", "request", "time", "debug", "const"].iter().enumerate() {
+    for (i, n) in [
+        "predict", "show", "update", "request", "time", "debug", "const",
+    ]
+    .iter()
+    .enumerate()
+    {
         let v = arg_or(args, kw, i + 2, n, Value::Bool(false));
         py::set(vm, this, n, v)?;
     }
     let name = arg_or(args, kw, 1, "name", Value::None);
     if !py::is_none(&name) {
-        let name = if name.as_str().is_some() { name_tuple(vm, &name)? } else { name };
+        let name = if name.as_str().is_some() {
+            name_tuple(vm, &name)?
+        } else {
+            name
+        };
         let profile = mget(vm, "profile")?;
         ops::setitem(vm, &profile, name, this.clone())?;
     }
@@ -88,7 +103,11 @@ fn profile_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 fn f_get_profile(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let name = if args[0].as_str().is_some() { name_tuple(vm, &args[0])? } else { args[0].clone() };
+    let name = if args[0].as_str().is_some() {
+        name_tuple(vm, &args[0])?
+    } else {
+        args[0].clone()
+    };
     let profile = mget(vm, "profile")?;
     if ops::contains(vm, &profile, &name)? {
         return ops::getitem(vm, &profile, name);
@@ -117,7 +136,12 @@ fn cache_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         return Ok(Value::None);
     }
     py::set(vm, this, "args", arg_or(args, kw, 2, "args", Value::None))?;
-    py::set(vm, this, "kwargs", arg_or(args, kw, 3, "kwargs", Value::None))?;
+    py::set(
+        vm,
+        this,
+        "kwargs",
+        arg_or(args, kw, 3, "kwargs", Value::None),
+    )?;
     py::set(vm, this, "cache", arg_or(args, kw, 4, "cache", Value::None))?;
     let pc = predict_list(vm, &screen)?;
     ops::list_append(vm, &pc, this.clone())?;
@@ -194,7 +218,11 @@ fn screen_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         ops::setitem(vm, &d, v, this.clone())?;
     }
     py::set(vm, this, "function", function.clone())?;
-    let ast = if super::slast::ast_of(&function).is_some() { function } else { Value::None };
+    let ast = if super::slast::ast_of(&function).is_some() {
+        function
+    } else {
+        Value::None
+    };
     py::set(vm, this, "ast", ast)?;
     py::set(vm, this, "modal", modal)?;
     py::set(vm, this, "zorder", zorder)?;
@@ -234,7 +262,15 @@ fn profile_for(vm: &mut Vm, name: &Value) -> PyResult<Value> {
 fn reset_transient(vm: &mut Vm, this: &Value) -> PyResult<()> {
     py::set(vm, this, "child", Value::None)?;
     py::set(vm, this, "children", vm.types.new_list(Vec::new()))?;
-    for n in ["transforms", "widgets", "base_widgets", "hidden_widgets", "cache", "use_cache", "miss_cache"] {
+    for n in [
+        "transforms",
+        "widgets",
+        "base_widgets",
+        "hidden_widgets",
+        "cache",
+        "use_cache",
+        "miss_cache",
+    ] {
         py::set(vm, this, n, vm.types.new_dict())?;
     }
     py::set(vm, this, "old_widgets", Value::None)?;
@@ -265,7 +301,8 @@ fn sd_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let screen = p("screen", &mut props).unwrap_or(Value::None);
     let tag = p("tag", &mut props).unwrap_or(Value::None);
     let layer = p("layer", &mut props).unwrap_or(Value::None);
-    let widget_properties = p("widget_properties", &mut props).unwrap_or_else(|| vm.types.new_dict());
+    let widget_properties =
+        p("widget_properties", &mut props).unwrap_or_else(|| vm.types.new_dict());
     let scope = p("scope", &mut props).unwrap_or_else(|| vm.types.new_dict());
     let transient = p("transient", &mut props).unwrap_or(Value::Bool(false));
     layout_init(vm, this, &props)?;
@@ -285,10 +322,20 @@ fn sd_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     py::set(vm, this, "scope", scope.clone())?;
     py::set(vm, this, "child", Value::None)?;
     py::set(vm, this, "widget_properties", widget_properties)?;
-    for n in ["widgets", "base_widgets", "cache", "miss_cache", "hidden_widgets"] {
+    for n in [
+        "widgets",
+        "base_widgets",
+        "cache",
+        "miss_cache",
+        "hidden_widgets",
+    ] {
         py::set(vm, this, n, vm.types.new_dict())?;
     }
-    let old = if py::truthy(vm, &tag)? && py::truthy(vm, &layer)? { get_screen(vm, &tag, &layer, true)? } else { Value::None };
+    let old = if py::truthy(vm, &tag)? && py::truthy(vm, &layer)? {
+        get_screen(vm, &tag, &layer, true)?
+    } else {
+        Value::None
+    };
     if py::is_none(&old) {
         py::set(vm, this, "transforms", vm.types.new_dict())?;
         py::set(vm, this, "use_cache", vm.types.new_dict())?;
@@ -326,7 +373,10 @@ fn layout_init(vm: &mut Vm, this: &Value, props: &[(Rc<str>, Value)]) -> PyResul
 
 fn sd_name(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let sn = py::get(vm, &args[0], "screen_name")?;
-    let parts: Vec<String> = py::items(vm, &sn)?.iter().map(|p| py::string(vm, p)).collect::<PyResult<_>>()?;
+    let parts: Vec<String> = py::items(vm, &sn)?
+        .iter()
+        .map(|p| py::string(vm, p))
+        .collect::<PyResult<_>>()?;
     Ok(py::s(vm, &parts.join(" ")))
 }
 
@@ -346,7 +396,11 @@ fn sd_visit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     Ok(vm.types.new_list(vec![c]))
 }
 
-fn with_current<R>(vm: &mut Vm, this: &Value, f: impl FnOnce(&mut Vm) -> PyResult<R>) -> PyResult<R> {
+fn with_current<R>(
+    vm: &mut Vm,
+    this: &Value,
+    f: impl FnOnce(&mut Vm) -> PyResult<R>,
+) -> PyResult<R> {
     push_current_screen(vm, this.clone())?;
     let r = f(vm);
     pop_current_screen(vm)?;
@@ -360,7 +414,13 @@ fn sd_visit_all(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     with_current(vm, this, |vm| {
         let c = py::get_or_none(vm, this, "child")?;
         if !py::is_none(&c) {
-            py::method_kw(vm, &c, "visit_all", vec![cb], vec![("seen".into(), Value::None)])?;
+            py::method_kw(
+                vm,
+                &c,
+                "visit_all",
+                vec![cb],
+                vec![("seen".into(), Value::None)],
+            )?;
         }
         Ok(Value::None)
     })
@@ -408,7 +468,11 @@ fn new_sd(vm: &mut Vm, this: &Value) -> PyResult<Value> {
         a.push(py::get_or_none(vm, this, n)?);
     }
     let props = py::get_or_none(vm, this, "properties")?;
-    let k = if py::is_none(&props) { Vec::new() } else { py::str_items(vm, &props)? };
+    let k = if py::is_none(&props) {
+        Vec::new()
+    } else {
+        py::str_items(vm, &props)?
+    };
     vm.call(&c, a, k)
 }
 
@@ -527,7 +591,10 @@ fn sd_hide(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 /// `ui.detached(); ui.default_fixed(focus="_screen_..."); ui.close()`.
 fn new_screen_root(vm: &mut Vm, this: &Value) -> PyResult<Value> {
     let sn = py::get(vm, this, "screen_name")?;
-    let parts: Vec<String> = py::items(vm, &sn)?.iter().map(|p| py::string(vm, p)).collect::<PyResult<_>>()?;
+    let parts: Vec<String> = py::items(vm, &sn)?
+        .iter()
+        .map(|p| py::string(vm, p))
+        .collect::<PyResult<_>>()?;
     let focus = py::s(vm, &format!("_screen_{}", parts.join("_")));
     let det = py::import_attr(vm, "renpy.ui", "detached")?;
     vm.call(&det, Vec::new(), Vec::new())?;
@@ -636,7 +703,10 @@ fn sd_update(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 /// screen function.
 fn new_screen_root_open(vm: &mut Vm, this: &Value) -> PyResult<Value> {
     let sn = py::get(vm, this, "screen_name")?;
-    let parts: Vec<String> = py::items(vm, &sn)?.iter().map(|p| py::string(vm, p)).collect::<PyResult<_>>()?;
+    let parts: Vec<String> = py::items(vm, &sn)?
+        .iter()
+        .map(|p| py::string(vm, p))
+        .collect::<PyResult<_>>()?;
     let focus = py::s(vm, &format!("_screen_{}", parts.join("_")));
     let det = py::import_attr(vm, "renpy.ui", "detached")?;
     vm.call(&det, Vec::new(), Vec::new())?;
@@ -671,9 +741,22 @@ fn sd_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let hiding = hiding(vm, this)?;
     let sens = sensitive(vm, this)?;
     let pos = vm.types.new_tuple(vec![Value::Int(0), Value::Int(0)]);
-    py::method_kw(vm, &rv, "blit", vec![child, pos], vec![("focus".into(), Value::Bool(sens && !hiding)), ("main".into(), Value::Bool(!hiding))])?;
+    py::method_kw(
+        vm,
+        &rv,
+        "blit",
+        vec![child, pos],
+        vec![
+            ("focus".into(), Value::Bool(sens && !hiding)),
+            ("main".into(), Value::Bool(!hiding)),
+        ],
+    )?;
     let modal = py::get_or_none(vm, this, "modal")?;
-    let m = if py::truthy(vm, &modal)? && !hiding { modal } else { Value::Bool(false) };
+    let m = if py::truthy(vm, &modal)? && !hiding {
+        modal
+    } else {
+        Value::Bool(false)
+    };
     py::set(vm, &rv, "modal", m)?;
     Ok(rv)
 }
@@ -723,7 +806,10 @@ fn sd_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn sd_get_phase_name(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let p = phase(vm, &args[0])?;
-    Ok(py::s(vm, PHASE_NAMES.get(p as usize).copied().unwrap_or("UNKNOWN")))
+    Ok(py::s(
+        vm,
+        PHASE_NAMES.get(p as usize).copied().unwrap_or("UNKNOWN"),
+    ))
 }
 
 fn sd_tts(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -841,7 +927,9 @@ fn f_sort_screens(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
         }
         let v = ops::getitem(vm, &screens, k.clone())?;
         let ast = py::get_or_none(vm, &v, "ast")?;
-        let Some(a) = super::slast::ast_of(&ast) else { continue };
+        let Some(a) = super::slast::ast_of(&ast) else {
+            continue;
+        };
         let mut used = Vec::new();
         collect_uses(&a.screen.block, &mut used);
         for u in used {
@@ -859,7 +947,11 @@ fn f_sort_screens(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
         }
     }
     let mut rv = Vec::new();
-    let mut work: Vec<String> = depends.iter().filter(|(_, d)| d.is_empty()).map(|(n, _)| n.clone()).collect();
+    let mut work: Vec<String> = depends
+        .iter()
+        .filter(|(_, d)| d.is_empty())
+        .map(|(n, _)| n.clone())
+        .collect();
     while let Some(name) = work.pop() {
         rv.push(name.clone());
         for i in reverse.remove(&name).unwrap_or_default() {
@@ -886,9 +978,16 @@ fn collect_uses(b: &crate::sl2::Block, out: &mut Vec<String>) {
     for n in &b.children {
         match n {
             SlNode::Displayable(d) => collect_uses(&d.block, out),
-            SlNode::If { entries, .. } | SlNode::ShowIf { entries, .. } => entries.iter().for_each(|(_, b)| collect_uses(b, out)),
+            SlNode::If { entries, .. } | SlNode::ShowIf { entries, .. } => {
+                entries.iter().for_each(|(_, b)| collect_uses(b, out))
+            }
             SlNode::For { block, .. } => collect_uses(block, out),
-            SlNode::Use { target, expression, block, .. } => {
+            SlNode::Use {
+                target,
+                expression,
+                block,
+                ..
+            } => {
                 if !*expression {
                     out.push(target.clone());
                 }
@@ -942,8 +1041,17 @@ fn f_prepare_screens(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     mset(vm, "prepared", Value::Bool(true))?;
     let cycle = mget(vm, "use_cycle")?;
     if py::config_bool(vm, "developer")? && py::truthy(vm, &cycle)? {
-        let names: Vec<String> = py::items(vm, &cycle)?.iter().map(|c| py::string(vm, c)).collect::<PyResult<_>>()?;
-        return Err(py::error(vm, format!("The following screens use each other in a loop: {}. This is not allowed.", names.join(", "))));
+        let names: Vec<String> = py::items(vm, &cycle)?
+            .iter()
+            .map(|c| py::string(vm, c))
+            .collect::<PyResult<_>>()?;
+        return Err(py::error(
+            vm,
+            format!(
+                "The following screens use each other in a loop: {}. This is not allowed.",
+                names.join(", ")
+            ),
+        ));
     }
     Ok(Value::None)
 }
@@ -955,7 +1063,11 @@ fn f_define_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 pub fn get_screen_layer(vm: &mut Vm, name: &Value) -> PyResult<Value> {
-    let n = if name.as_str().is_some() { name.clone() } else { ops::getitem(vm, name, Value::Int(0))? };
+    let n = if name.as_str().is_some() {
+        name.clone()
+    } else {
+        ops::getitem(vm, name, Value::Int(0))?
+    };
     let s = get_screen_variant(vm, &n, None)?;
     if py::is_none(&s) {
         return Ok(py::s(vm, "screens"));
@@ -973,11 +1085,23 @@ fn scene_lists(vm: &mut Vm) -> PyResult<Value> {
 }
 
 pub fn get_screen(vm: &mut Vm, name: &Value, layer: &Value, tag_only: bool) -> PyResult<Value> {
-    let layer = if py::is_none(layer) { get_screen_layer(vm, name)? } else { layer.clone() };
-    let names = if name.as_str().is_some() { vec![name.clone()] } else { py::items(vm, name)? };
+    let layer = if py::is_none(layer) {
+        get_screen_layer(vm, name)?
+    } else {
+        layer.clone()
+    };
+    let names = if name.as_str().is_some() {
+        vec![name.clone()]
+    } else {
+        py::items(vm, name)?
+    };
     let sl = scene_lists(vm)?;
     for tag in &names {
-        let sd = vm.call_method(&sl, "get_displayable_by_tag", vec![layer.clone(), tag.clone()])?;
+        let sd = vm.call_method(
+            &sl,
+            "get_displayable_by_tag",
+            vec![layer.clone(), tag.clone()],
+        )?;
         if !py::is_none(&sd) {
             return Ok(sd);
         }
@@ -1029,7 +1153,10 @@ fn f_get_screen_variable(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value>
         let sn = py::get(vm, &s, "name")?;
         let sn = ops::str(vm, &sn)?;
         let n = ops::str(vm, &name)?;
-        return Err(vm.exc_msg("NameError", &format!("Screen {sn} does not have a variable named {n}.")));
+        return Err(vm.exc_msg(
+            "NameError",
+            &format!("Screen {sn} does not have a variable named {n}."),
+        ));
     }
     ops::getitem(vm, &scope, name)
 }
@@ -1084,7 +1211,8 @@ fn show_args(vm: &mut Vm, kw: Kw) -> ShowArgs {
     ShowArgs {
         layer: take(&mut kwargs, "_layer").unwrap_or(Value::None),
         tag: take(&mut kwargs, "_tag").unwrap_or(Value::None),
-        widget_properties: take(&mut kwargs, "_widget_properties").unwrap_or_else(|| vm.types.new_dict()),
+        widget_properties: take(&mut kwargs, "_widget_properties")
+            .unwrap_or_else(|| vm.types.new_dict()),
         transient: take(&mut kwargs, "_transient").unwrap_or(Value::Bool(false)),
         zorder: take(&mut kwargs, "_zorder").unwrap_or(Value::None),
         kwargs,
@@ -1107,17 +1235,43 @@ fn make_scope(vm: &mut Vm, screen: &Value, args: &[Value], kwargs: &Value) -> Py
 pub fn show_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let sa = show_args(vm, kw);
     let (name, screen) = known(vm, &args[0])?;
-    let layer = if py::is_none(&sa.layer) { get_screen_layer(vm, &name)? } else { sa.layer };
-    let tag = if py::is_none(&sa.tag) { py::get(vm, &screen, "tag")? } else { sa.tag };
+    let layer = if py::is_none(&sa.layer) {
+        get_screen_layer(vm, &name)?
+    } else {
+        sa.layer
+    };
+    let tag = if py::is_none(&sa.tag) {
+        py::get(vm, &screen, "tag")?
+    } else {
+        sa.tag
+    };
     let rest = &args[1..];
     let kwargs = py::kwargs_dict(vm, &sa.kwargs)?;
     let scope = make_scope(vm, &screen, rest, &kwargs)?;
     let c = mget(vm, "ScreenDisplayable")?;
-    let d = vm.call(&c, vec![screen.clone(), tag.clone(), layer.clone(), sa.widget_properties, scope], vec![("transient".into(), sa.transient.clone())])?;
-    let zorder = if py::is_none(&sa.zorder) { py::get(vm, &d, "zorder")? } else { sa.zorder };
+    let d = vm.call(
+        &c,
+        vec![
+            screen.clone(),
+            tag.clone(),
+            layer.clone(),
+            sa.widget_properties,
+            scope,
+        ],
+        vec![("transient".into(), sa.transient.clone())],
+    )?;
+    let zorder = if py::is_none(&sa.zorder) {
+        py::get(vm, &d, "zorder")?
+    } else {
+        sa.zorder
+    };
     let old = get_screen(vm, &tag, &layer, true)?;
     let rest_t = vm.types.new_tuple(rest.to_vec());
-    let old_cache = if py::is_none(&old) { Value::None } else { py::get_or_none(vm, &old, "cache")? };
+    let old_cache = if py::is_none(&old) {
+        Value::None
+    } else {
+        py::get_or_none(vm, &old, "cache")?
+    };
     if !py::is_none(&old) && py::truthy(vm, &old_cache)? {
         py::set(vm, &d, "cache", old_cache)?;
         let mc = cache_get(vm, &screen, &rest_t, &kwargs)?;
@@ -1129,12 +1283,18 @@ pub fn show_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         py::set(vm, &d, "phase", Value::Int(SHOW))?;
     }
     let sls = scene_lists(vm)?;
-    py::method_kw(vm, &sls, "add", vec![layer.clone(), d, tag], vec![
-        ("zorder".into(), zorder),
-        ("transient".into(), sa.transient.clone()),
-        ("keep_st".into(), Value::Bool(true)),
-        ("name".into(), name.clone()),
-    ])?;
+    py::method_kw(
+        vm,
+        &sls,
+        "add",
+        vec![layer.clone(), d, tag],
+        vec![
+            ("zorder".into(), zorder),
+            ("transient".into(), sa.transient.clone()),
+            ("keep_st".into(), Value::Bool(true)),
+            ("name".into(), name.clone()),
+        ],
+    )?;
     if !py::truthy(vm, &sa.transient)? {
         let shown = py::get(vm, &sls, "shown")?;
         vm.call_method(&shown, "predict_show", vec![layer, name, Value::Bool(true)])?;
@@ -1161,13 +1321,27 @@ fn f_predict_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let rest_t = vm.types.new_tuple(rest.to_vec());
     let r = (|| -> PyResult<()> {
         let c = mget(vm, "ScreenDisplayable")?;
-        let d = vm.call(&c, vec![screen.clone(), Value::None, Value::None, sa.widget_properties.clone(), scope.clone()], Vec::new())?;
+        let d = vm.call(
+            &c,
+            vec![
+                screen.clone(),
+                Value::None,
+                Value::None,
+                sa.widget_properties.clone(),
+                scope.clone(),
+            ],
+            Vec::new(),
+        )?;
         let cache = cache_get(vm, &screen, &rest_t, &kwargs)?;
         py::set(vm, &d, "cache", cache)?;
         vm.call_method(&d, "update", Vec::new())?;
         let cp = mget(vm, "ScreenCache")?;
         let c = py::get(vm, &d, "cache")?;
-        vm.call(&cp, vec![screen.clone(), rest_t.clone(), kwargs.clone(), c], Vec::new())?;
+        vm.call(
+            &cp,
+            vec![screen.clone(), rest_t.clone(), kwargs.clone(), c],
+            Vec::new(),
+        )?;
         let pd = py::import_attr(vm, "renpy.display.predict", "displayable")?;
         vm.call(&pd, vec![d], Vec::new())?;
         Ok(())
@@ -1195,8 +1369,18 @@ pub fn hide_screen(vm: &mut Vm, tag: &Value, layer: &Value, immediately: bool) -
     let sls = scene_lists(vm)?;
     if !py::is_none(&screen) {
         let st = py::get(vm, &screen, "tag")?;
-        let prefix = if immediately { Value::None } else { py::s(vm, "hide") };
-        py::method_kw(vm, &sls, "remove", vec![layer.clone(), st], vec![("prefix".into(), prefix)])?;
+        let prefix = if immediately {
+            Value::None
+        } else {
+            py::s(vm, "hide")
+        };
+        py::method_kw(
+            vm,
+            &sls,
+            "remove",
+            vec![layer.clone(), st],
+            vec![("prefix".into(), prefix)],
+        )?;
         let shown = py::get(vm, &sls, "shown")?;
         let sn = py::get(vm, &screen, "screen_name")?;
         vm.call_method(&shown, "predict_hide", vec![layer, sn])?;
@@ -1375,44 +1559,60 @@ fn f_show_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("get_profile", f_get_profile),
-        ("cache_get", f_cache_get),
-        ("push_current_screen", f_push_current_screen),
-        ("pop_current_screen", f_pop_current_screen),
-        ("current_screen", f_current_screen),
-        ("get_screen_variant", f_get_screen_variant),
-        ("get_all_screen_variants", f_get_all_screen_variants),
-        ("sort_screens", f_sort_screens),
-        ("sorted_variants", f_sorted_variants),
-        ("analyze_screens", f_analyze_screens),
-        ("prepare_screens", f_prepare_screens),
-        ("define_screen", f_define_screen),
-        ("get_screen_layer", f_get_screen_layer),
-        ("get_screen", f_get_screen),
-        ("get_screen_variable", f_get_screen_variable),
-        ("set_screen_variable", f_set_screen_variable),
-        ("has_screen", f_has_screen),
-        ("get_screen_roll_forward", f_get_screen_roll_forward),
-        ("show_screen", f_show_screen),
-        ("predict_screen", f_predict_screen),
-        ("hide_screen", f_hide_screen),
-        ("use_screen", f_use_screen),
-        ("get_displayable", f_get_displayable),
-        ("get_widget", f_get_displayable),
-        ("get_displayable_properties", f_get_displayable_properties),
-        ("get_widget_properties", f_get_displayable_properties),
-        ("before_restart", f_before_restart),
-        ("show_overlay_screens", f_show_overlay_screens),
-        ("per_frame", f_per_frame),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("get_profile", f_get_profile),
+            ("cache_get", f_cache_get),
+            ("push_current_screen", f_push_current_screen),
+            ("pop_current_screen", f_pop_current_screen),
+            ("current_screen", f_current_screen),
+            ("get_screen_variant", f_get_screen_variant),
+            ("get_all_screen_variants", f_get_all_screen_variants),
+            ("sort_screens", f_sort_screens),
+            ("sorted_variants", f_sorted_variants),
+            ("analyze_screens", f_analyze_screens),
+            ("prepare_screens", f_prepare_screens),
+            ("define_screen", f_define_screen),
+            ("get_screen_layer", f_get_screen_layer),
+            ("get_screen", f_get_screen),
+            ("get_screen_variable", f_get_screen_variable),
+            ("set_screen_variable", f_set_screen_variable),
+            ("has_screen", f_has_screen),
+            ("get_screen_roll_forward", f_get_screen_roll_forward),
+            ("show_screen", f_show_screen),
+            ("predict_screen", f_predict_screen),
+            ("hide_screen", f_hide_screen),
+            ("use_screen", f_use_screen),
+            ("get_displayable", f_get_displayable),
+            ("get_widget", f_get_displayable),
+            ("get_displayable_properties", f_get_displayable_properties),
+            ("get_widget_properties", f_get_displayable_properties),
+            ("before_restart", f_before_restart),
+            ("show_overlay_screens", f_show_overlay_screens),
+            ("per_frame", f_per_frame),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
-    for (n, v) in [("PREDICT", PREDICT), ("SHOW", SHOW), ("UPDATE", UPDATE), ("HIDE", HIDE), ("OLD", OLD)] {
+    for (n, v) in [
+        ("PREDICT", PREDICT),
+        ("SHOW", SHOW),
+        ("UPDATE", UPDATE),
+        ("HIDE", HIDE),
+        ("OLD", OLD),
+    ] {
         set(vm, n, Value::Int(v));
     }
     let names: Vec<Value> = PHASE_NAMES.iter().map(|n| vm.types.new_str(n)).collect();
     set(vm, "phase_name", vm.types.new_list(names));
-    for n in ["profile", "predict_cache", "screens", "screens_by_name", "screens_at_sort"] {
+    for n in [
+        "profile",
+        "predict_cache",
+        "screens",
+        "screens_by_name",
+        "screens_at_sort",
+    ] {
         set(vm, n, vm.types.new_dict());
     }
     set(vm, "updated_screens", vm.types.new_set(Default::default()));
@@ -1423,16 +1623,37 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     set(vm, "sorted_screens", vm.types.new_list(Vec::new()));
     set(vm, "use_cycle", vm.types.new_list(Vec::new()));
     let object = py::import_attr(vm, "renpy.object", "Object")?;
-    let prof = py::class(vm, MODULE, "ScreenProfile", &[object.clone()], &[("__init__", profile_init)], &[])?;
+    let prof = py::class(
+        vm,
+        MODULE,
+        "ScreenProfile",
+        &[object.clone()],
+        &[("__init__", profile_init)],
+        &[],
+    )?;
     set(vm, "ScreenProfile", Value::Obj(prof));
     let obj = Value::Obj(vm.types.object.clone());
-    let sc = py::class(vm, MODULE, "ScreenCache", &[obj], &[("__init__", cache_init)], &[])?;
+    let sc = py::class(
+        vm,
+        MODULE,
+        "ScreenCache",
+        &[obj],
+        &[("__init__", cache_init)],
+        &[],
+    )?;
     set(vm, "ScreenCache", Value::Obj(sc.clone()));
     set(vm, "cache_put", Value::Obj(sc));
-    let screen = py::class(vm, MODULE, "Screen", &[object], &[("__init__", screen_init)], &[
-        ("sensitive", py::s(vm, "True")),
-        ("roll_forward", Value::None),
-    ])?;
+    let screen = py::class(
+        vm,
+        MODULE,
+        "Screen",
+        &[object],
+        &[("__init__", screen_init)],
+        &[
+            ("sensitive", py::s(vm, "True")),
+            ("roll_forward", Value::None),
+        ],
+    )?;
     set(vm, "Screen", Value::Obj(screen));
     let container = py::import_attr(vm, "renpy.display.layout", "Container")?;
     let name_p = vm.types.new_builtin("name", sd_name);
@@ -1441,35 +1662,79 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
         let v = l.iter().map(|s| vm.types.new_str(s)).collect();
         vm.types.new_list(v)
     };
-    let nosave = strs(vm, &["screen", "child", "children", "transforms", "widgets", "base_widgets", "old_widgets", "hidden_widgets", "old_transforms", "cache", "miss_cache", "profile", "phase", "use_cache", "copied_from"]);
-    let noreach = strs(vm, &["screen", "children", "transforms", "widgets", "base_widgets", "old_widgets", "hidden_widgets", "old_transforms", "cache", "miss_cache", "profile", "phase", "use_cache", "copied_from"]);
-    let sd = py::class(vm, MODULE, "ScreenDisplayable", &[container], &[
-        ("__init__", sd_init),
-        ("after_setstate", sd_after_setstate),
-        ("_repr_info", sd_repr_info),
-        ("visit", sd_visit),
-        ("visit_all", sd_visit_all),
-        ("per_interact", sd_per_interact),
-        ("set_transform_event", sd_set_transform_event),
-        ("find_focusable", sd_find_focusable),
-        ("copy", sd_copy),
-        ("_handles_event", sd_handles_event),
-        ("_hide", sd_hide),
-        ("_in_current_store", sd_in_current_store),
-        ("update", sd_update),
-        ("render", sd_render),
-        ("get_placement", sd_get_placement),
-        ("event", sd_event),
-        ("get_phase_name", sd_get_phase_name),
-        ("_tts", sd_tts),
-    ], &[
-        ("nosave", nosave),
-        ("noreach", noreach),
-        ("restarting", Value::Bool(false)),
-        ("hiding", Value::Bool(false)),
-        ("transient", Value::Bool(false)),
-        ("name", name_p),
-    ])?;
+    let nosave = strs(
+        vm,
+        &[
+            "screen",
+            "child",
+            "children",
+            "transforms",
+            "widgets",
+            "base_widgets",
+            "old_widgets",
+            "hidden_widgets",
+            "old_transforms",
+            "cache",
+            "miss_cache",
+            "profile",
+            "phase",
+            "use_cache",
+            "copied_from",
+        ],
+    );
+    let noreach = strs(
+        vm,
+        &[
+            "screen",
+            "children",
+            "transforms",
+            "widgets",
+            "base_widgets",
+            "old_widgets",
+            "hidden_widgets",
+            "old_transforms",
+            "cache",
+            "miss_cache",
+            "profile",
+            "phase",
+            "use_cache",
+            "copied_from",
+        ],
+    );
+    let sd = py::class(
+        vm,
+        MODULE,
+        "ScreenDisplayable",
+        &[container],
+        &[
+            ("__init__", sd_init),
+            ("after_setstate", sd_after_setstate),
+            ("_repr_info", sd_repr_info),
+            ("visit", sd_visit),
+            ("visit_all", sd_visit_all),
+            ("per_interact", sd_per_interact),
+            ("set_transform_event", sd_set_transform_event),
+            ("find_focusable", sd_find_focusable),
+            ("copy", sd_copy),
+            ("_handles_event", sd_handles_event),
+            ("_hide", sd_hide),
+            ("_in_current_store", sd_in_current_store),
+            ("update", sd_update),
+            ("render", sd_render),
+            ("get_placement", sd_get_placement),
+            ("event", sd_event),
+            ("get_phase_name", sd_get_phase_name),
+            ("_tts", sd_tts),
+        ],
+        &[
+            ("nosave", nosave),
+            ("noreach", noreach),
+            ("restarting", Value::Bool(false)),
+            ("hiding", Value::Bool(false)),
+            ("transient", Value::Bool(false)),
+            ("name", name_p),
+        ],
+    )?;
     set(vm, "ScreenDisplayable", Value::Obj(sd));
     Ok(m)
 }

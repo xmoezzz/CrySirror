@@ -116,9 +116,38 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
         crysirror_python::modules::set(vm, &m, name, Value::Obj(cls));
         Ok(())
     };
-    c(vm, "ImageMapCrop", &[d.clone()], &[("__init__", crop_init), ("visit", crop_visit), ("render", crop_render)])?;
-    c(vm, "ImageCacheCrop", &[d], &[("__init__", ccrop_init), ("visit", ccrop_visit), ("render", ccrop_render)])?;
-    c(vm, "ImageMapCache", &[object], &[("__init__", cache_init), ("visit", cache_visit), ("crop", cache_crop), ("finish", cache_finish), ("render", cache_render)])?;
+    c(
+        vm,
+        "ImageMapCrop",
+        &[d.clone()],
+        &[
+            ("__init__", crop_init),
+            ("visit", crop_visit),
+            ("render", crop_render),
+        ],
+    )?;
+    c(
+        vm,
+        "ImageCacheCrop",
+        &[d],
+        &[
+            ("__init__", ccrop_init),
+            ("visit", ccrop_visit),
+            ("render", ccrop_render),
+        ],
+    )?;
+    c(
+        vm,
+        "ImageMapCache",
+        &[object],
+        &[
+            ("__init__", cache_init),
+            ("visit", cache_visit),
+            ("crop", cache_crop),
+            ("finish", cache_finish),
+            ("render", cache_render),
+        ],
+    )?;
     Ok(m)
 }
 

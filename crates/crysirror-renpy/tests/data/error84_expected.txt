@@ -1,0 +1,149 @@
+Traceback (most recent call last):
+  File "game/script.rpy", line 10, in script
+    $ x = 1 + y
+  File "renpy/common/00start.rpy", line 5, in <module>
+    foo()
+  File "renpy/ast.py", line 3, in f
+    bar  
+  File "<string>", line 1, in <module>
+ValueError: bad {value}
+
+=====
+  File "game/script.rpy", line 10, in script
+    $ x = 1 + y
+ValueError: bad {value}
+
+=====
+  {a=edit:10:game/script.rpy}File "game/script.rpy", line 10{/a}, in script
+    $ x = 1 + y
+ValueError: bad {value}
+
+=====
+ValueError: bad {value}
+
+=====
+bad {value}|ValueError
+=====
+Traceback (most recent call last):
+  File "game/r.rpy", line 2, in g
+    g()
+  File "game/r.rpy", line 2, in g
+    g()
+  File "game/r.rpy", line 2, in g
+    g()
+[Previous line repeated 4 more times]
+  File "game/r.rpy", line 3, in h
+    h()
+RecursionError: deep
+
+=====
+KeyError: 'k'
+
+The above exception was the direct cause of the following exception:
+
+RuntimeError: outer
+
+=====
+ValueError: inner
+
+During handling of the above exception, another exception occurred:
+
+RuntimeError: ctx
+
+=====
+RuntimeError: ctx
+
+=====
+  File "game/a.rpy", line 3
+    x = = 1
+        ^^^
+SyntaxError: invalid syntax
+
+=====
+  File "game/b.rpy", line 4
+    y
+SyntaxError: bad
+
+=====
+  File "game/c.rpy", line 1
+    abc
+       
+SyntaxError: far
+
+=====
+SyntaxError: <no detail available>
+
+=====
+Exception
+
+=====
+Traceback (most recent call last):
+  File "game/t.rpy", line 2, in f
+    foo(a, b) + bar[1]
+    ~~~~~~~~~~^~~~~~~~
+Exception: x
+
+=====
+Traceback (most recent call last):
+  File "game/t.rpy", line 2, in f
+    foo(a, b) + bar[1]
+    ~~~^^^^^^         
+Exception: x
+
+=====
+Traceback (most recent call last):
+  File "game/t.rpy", line 2, in f
+    foo(a, b) + bar[1]
+                ~~~^^^
+Exception: x
+
+=====
+Traceback (most recent call last):
+  File "game/t.rpy", line 2, in f
+    foo(a, b) + bar[1]
+Exception: x
+
+=====
+Traceback (most recent call last):
+  File "game/t.rpy", line 3, in f
+    z = (1 +
+         ~~~
+         2 +
+         ~~^
+         x)
+         ~ 
+Exception: multi
+
+=====
+Traceback (most recent call last):
+  File "game/t.rpy", line 6, in f
+    w = 1
+Exception: stmt
+
+=====
+Traceback (most recent call last):
+  File "game/t.rpy", line 7, in f
+    print(d["k"])
+    ~~~~~^^^^^^^^
+Exception: sub
+
+=====
+Traceback (most recent call last):
+  [94mFile "game/t.rpy", line 7[0m, in f
+    [91mprint[0m[31m(d["k"])[0m
+[97mException[0m: [0msub[0m
+
+=====
+['    ~~~~~^^^^^^^^', '    ~~~~~^^^^^^^^'][0]
+=====
+[None, 'foo', None, 'bar', None, None]
+=====
+" Did you mean: 'apple'?"
+=====
+" Did you mean: '_hidden'?"
+=====
+None
+=====
+[0, 5, 7, 11]
+=====
+10

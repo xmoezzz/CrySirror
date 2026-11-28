@@ -3,7 +3,7 @@
 
 use crysirror_python::{Value, Vm};
 use crysirror_renpy::ast::{Arena, NodeKind};
-use crysirror_renpy::rpyc::{unpickle_script, Converter, Shells};
+use crysirror_renpy::rpyc::{Converter, Shells, unpickle_script};
 use std::io::Write;
 
 const BUILD: &str = r#"
@@ -46,10 +46,15 @@ fn rpc2_roundtrip() {
     let mut shells = Shells::new(&mut vm).unwrap();
     // Build the pickle with the same shell classes the loader uses.
     let ns = shells.namespace();
-    let code = vm.compile_exec(BUILD, "<build>", crysirror_python::Dialect::Py3).unwrap();
-    vm.run_code(code, ns.clone(), None).unwrap_or_else(|e| panic!("{}", crysirror_renpy::rpyc::py_err(&mut Vm::new(), e)));
+    let code = vm
+        .compile_exec(BUILD, "<build>", crysirror_python::Dialect::Py3)
+        .unwrap();
+    vm.run_code(code, ns.clone(), None)
+        .unwrap_or_else(|e| panic!("{}", crysirror_renpy::rpyc::py_err(&mut Vm::new(), e)));
     let blob = ns.dict_get_str_raw("blob").unwrap();
-    let Some(crysirror_python::Payload::Bytes(b)) = blob.payload() else { panic!("no bytes") };
+    let Some(crysirror_python::Payload::Bytes(b)) = blob.payload() else {
+        panic!("no bytes")
+    };
     let file = container(b);
     let (data, stmts) = unpickle_script(&mut vm, &mut shells, &file).unwrap();
     assert!(!matches!(data, Value::None));
@@ -58,13 +63,25 @@ fn rpc2_roundtrip() {
     let mut c = Converter::new(&mut vm, &mut arena, &reg);
     let top = c.convert_block(&stmts);
     assert!(c.errors.is_empty(), "{:?}", c.errors);
-    let NodeKind::Label { name, block, .. } = &arena.get(top[0]).kind else { panic!() };
+    let NodeKind::Label { name, block, .. } = &arena.get(top[0]).kind else {
+        panic!()
+    };
     assert_eq!(&**name, "start");
-    let NodeKind::Say { who, what, attributes, .. } = &arena.get(block[0]).kind else { panic!() };
+    let NodeKind::Say {
+        who,
+        what,
+        attributes,
+        ..
+    } = &arena.get(block[0]).kind
+    else {
+        panic!()
+    };
     assert_eq!(who.as_ref().unwrap().text.as_ref(), "e");
     assert_eq!(what, "Hello, world.");
     assert_eq!(attributes.as_deref(), Some(&["happy".to_string()][..]));
-    let NodeKind::Menu { items, .. } = &arena.get(block[1]).kind else { panic!() };
+    let NodeKind::Menu { items, .. } = &arena.get(block[1]).kind else {
+        panic!()
+    };
     assert_eq!(items.len(), 2);
     assert!(items[1].block.is_none());
 }

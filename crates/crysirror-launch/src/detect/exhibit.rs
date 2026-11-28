@@ -71,6 +71,20 @@ pub(super) fn detect(dir: &SourcePath, names: &[String], name: &str) -> Result<O
     } else {
         None
     };
+    let native_bootstrap = if abi == 3 && entry.eq_ignore_ascii_case("start") {
+        let mut module = Vec::new();
+        SourceFile::open(dir.join(dll.relative()))?.take(4 << 20).read_to_end(&mut module)?;
+        crysirror_resource::pe::PeData::parse(&module).is_ok_and(|pe| {
+            matches!((pe.export_rva("start"), pe.export_rva("ExHIBIT")),
+                (Ok(0x2440), Ok(0x2880)) | (Ok(0x32710), Ok(0x31de0)))
+        })
+    } else {
+        false
+    };
+    // INIT_ENTRY passes [setting] CLASS to FCScenario::create, which
+    // appends .system.dat beside the game's user directory.
+    let save_class = (abi == 1).then(|| values
+        .get(&("setting".into(), "class".into())).copied().unwrap_or("ExHIBIT"));
     let mounts = if dir.join("res/res2000.grp").is_file() {
         vec![ArchiveMount {
             fallback: false,
@@ -87,7 +101,7 @@ pub(super) fn detect(dir: &SourcePath, names: &[String], name: &str) -> Result<O
             name,
             canvas,
             "exhibit",
-            json!({ "entry":entry,"abi":abi,"canvas":canvas,"sources":sources,"limits":limits,"slots":slots }),
+            json!({ "entry":entry,"abi":abi,"canvas":canvas,"sources":sources,"native_bootstrap":native_bootstrap,"limits":limits,"slots":slots,"save_class":save_class }),
         ),
         profiles: Default::default(),
         mounts,

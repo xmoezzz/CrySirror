@@ -17,6 +17,7 @@ pub mod checkpoint;
 pub mod compile;
 pub mod dict;
 pub mod format;
+pub mod gc;
 pub mod hash;
 pub mod import;
 pub mod lexer;

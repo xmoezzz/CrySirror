@@ -37,6 +37,8 @@ pub struct GameState {
     pub idle_speech_until: f64,
     /// Contextual look targets offered by state scripts.
     pub contextual: Vec<u32>,
+    pub(crate) movie_sound: Option<(String, i32)>,
+    pub(crate) stingers: Vec<u32>,
     /// Flags recorded without a consumer, by native name `StringId`.
     pub flags: std::collections::BTreeMap<u32, u32>,
 }
@@ -569,7 +571,7 @@ impl Ctx<'_> {
             "set-rain-state" | "set-time-to-dry-period" | "use-rain-intensity-values" | "use-wind-intensity-values" | "use-audio-rain-level"
             | "use-water-unit-for-reflection" | "lerp-reflection-plane-of-water-units" | "rope-disable-character-collision" | "disable-platform-control-on-object"
             | "disable-gadgetry" | "enable-gadgetry" | "grenade-director-change-settings" | "journal-set-ambient-scale" | "update-ap-ref" | "set-e3-loading-screen"
-            | "start-movie-audio" | "demo-reset-defaults" | "draw-reticle" | "sync-vox-mp-meta-data" | "disable-cover-camera" | "camera-set-default-follow"
+            | "demo-reset-defaults" | "draw-reticle" | "sync-vox-mp-meta-data" | "disable-cover-camera" | "camera-set-default-follow"
             | "camera-aim-override-point" | "camera-cancel-aim-override" | "camera-store-locator" | "camera-restore-locator" => {
                 self.inner.game.flags.insert(sid(name), arg(0));
                 ok(0)
@@ -588,12 +590,16 @@ impl Ctx<'_> {
                 self.inner.game.wet_mask = a[1];
                 ok(0)
             }
-            // A music stinger: played as a sound (`sub_319F78`'s music
-            // streams are not separated from sound effects).
+            // sub_13C5E0: begin the companion immediately; the signed
+            // second argument is retained by the movie synchronizer.
+            "start-movie-audio" => {
+                ensure!(n == 2, "start-movie-audio expects a filename and sync offset");
+                self.inner.game.movie_sound = Some((dc.mem.cstr(a[0])?, a[1] as i32));
+                ok(0)
+            }
+            // sub_13BA68 looks up a music-settings record; it returns zero.
             "play-music-stinger" => {
-                if n > 0 && a[0] != 0 {
-                    return ok(self.world.play_sound(a[0], super::sound_natives::SoundAt::Listener, 1., 0.));
-                }
+                if n > 0 { self.inner.game.stingers.push(a[0]); }
                 ok(0)
             }
             // (play-sound-attached name object joint [volume] [pitch]).

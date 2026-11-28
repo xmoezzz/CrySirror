@@ -123,7 +123,10 @@ impl Builder {
         let mangled = name.to_string();
         let sc = &mut self.st.scopes[self.cur];
         let e = sc.flags.entry(mangled.clone()).or_insert(0);
-        if flag & DEF_PARAM != 0 && *e & DEF_PARAM != 0 {
+        // Python 2 code compiled through the pure-Python `compiler` package
+        // (Ren'Py through 6.10) accepts a repeated parameter name; the
+        // later parameter keeps its slot and the name reads the first.
+        if flag & DEF_PARAM != 0 && *e & DEF_PARAM != 0 && self.st.dialect != Dialect::Py2 {
             return Err(SymError(format!("duplicate argument '{name}' in function definition"), 0));
         }
         if *e == 0 {

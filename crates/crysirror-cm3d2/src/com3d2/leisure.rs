@@ -3,10 +3,15 @@
 use super::*;
 use crate::tjs::retail::activities;
 use std::collections::BTreeSet;
+mod blackjack;
 mod casino;
+mod casino_shop;
 mod examination;
 mod room;
 mod studio;
+mod slot_machine;
+mod native_menus;
+pub(super) use native_menus::{FreeSkillLayout, VipLayout, is_free_skill};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Destination {
@@ -14,6 +19,13 @@ pub(super) enum Destination {
     CreativeRoom,
     Examination,
     Casino,
+    CasinoShop,
+    Blackjack,
+    SlotMachine,
+    FreeMode,
+    GuestClub,
+    Yotogi,
+    OldYotogi,
 }
 use Destination::*;
 impl Destination {
@@ -23,10 +35,17 @@ impl Destination {
             CreativeRoom => "SceneCreativeRoom",
             Examination => "SceneCompetitiveShow",
             Casino => "SceneCasino",
+            CasinoShop => "SceneCasinoShop",
+            Blackjack => "SceneBlackJack",
+            SlotMachine => "SceneCasinoSlot",
+            FreeMode => "SceneFreeModeSelect",
+            GuestClub => "SceneKasizukiMainMenu",
+            Yotogi => "SceneYotogi",
+            OldYotogi => "SceneYotogiOld",
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
-        [Photography, CreativeRoom, Examination, Casino]
+        [Photography, CreativeRoom, Examination, Casino, CasinoShop, Blackjack, SlotMachine, FreeMode, GuestClub, Yotogi, OldYotogi]
             .into_iter()
             .find(|d| d.name() == s)
     }
@@ -41,6 +60,10 @@ pub(super) struct Screen {
     response: Option<Response>,
     studio: studio::Studio,
     casino: casino::CasinoMenu,
+    casino_shop: casino_shop::Shop,
+    blackjack: blackjack::Table,
+    machine: slot_machine::Machine,
+    native_menu: native_menus::Menu,
     room: room::Room,
     examination: examination::Show,
 }
@@ -52,6 +75,11 @@ enum Response {
     Simplify,
     EndShow,
     RoomFile(usize, bool),
+    CasinoBuy(usize),
+    BlackjackBet(bool),
+    BlackjackExit,
+    SlotExit,
+    GuestTitle,
 }
 pub(super) use studio::photo_widget;
 
@@ -112,9 +140,13 @@ impl Game {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("TJS lock"))?;
             let s = &mut vm.runtime.host_mut().state;
-            self.actors.reset_for_day(s);
-            self.actors.slots.retain(|&(man, _), _| man);
-            if d != Casino {
+            if is_free_skill(d, &self.script.tag_backup) {
+                self.actors.reset_positions();
+            } else {
+                self.actors.reset_for_day(s);
+                self.actors.slots.retain(|&(man, _), _| man);
+            }
+            if !matches!(d, Casino | CasinoShop | Blackjack | SlotMachine | FreeMode | GuestClub | Yotogi | OldYotogi) {
                 s.active_maids.fill(None);
             }
         }
@@ -125,6 +157,10 @@ impl Game {
             CreativeRoom => return self.open_room(op, host, c),
             Examination => self.open_examination(op, host, c, now)?,
             Casino => self.open_casino(op, host, c, now)?,
+            CasinoShop => self.open_casino_shop(op, host, c, now)?,
+            Blackjack => self.open_blackjack(op, host, c, now)?,
+            SlotMachine => self.load_slot_machine(op, host, c, now)?,
+            FreeMode | GuestClub | Yotogi | OldYotogi => self.open_native_menu(d, op, host, c, now)?,
         };
         Ok((
             name.clone(),
@@ -141,7 +177,10 @@ impl Game {
         released: u64,
         now: u64,
     ) -> Result<()> {
-        if matches!(d, Examination | Casino) {
+        if d == GuestClub && self.update_guest_comment(host, c, input)? {
+            return Ok(());
+        }
+        if matches!(d, Examination | Casino | CasinoShop | Blackjack) {
             let effects = self.actors.tick_motions(&self.files, op, now)?;
             self.edit_motion_effects(effects, op, now)?;
         }
@@ -170,10 +209,24 @@ impl Game {
                         self.casino_venue(if ok { 0 } else { 1 }, op, host, c, now)?
                     }
                     Response::Simplify => self.start_judging(ok, op, host, c, now)?,
+                    Response::CasinoBuy(item) if ok => self.buy_casino_item(item, op, host, c, now)?,
+                    Response::BlackjackBet(warn) if ok => self.blackjack_bet(warn, op, host, c, now)?,
+                    Response::GuestTitle if ok => self.return_to_title(op,host,c,now)?,
+                    Response::SlotExit if ok => self.begin_slot_exit(now),
+                    Response::BlackjackExit if ok => self.resume_at("cancel_label", op, host, c, now)?,
                     _ => {}
                 }
             }
             return Ok(());
+        }
+        if matches!(d, FreeMode | GuestClub | Yotogi | OldYotogi) {
+            self.native_menu_scroll(d, input)?;
+        }
+        if d == SlotMachine {
+            self.tick_slot_machine(op, host, c, input, now)?;
+            if self.scene != Scene::Leisure(d) || self.leisure.dialog.is_some() {
+                return Ok(());
+            }
         }
         if d == Examination {
             self.tick_examination(op, host, c, now)?;
@@ -181,6 +234,9 @@ impl Game {
         if d == Photography {
             self.publish_studio_shot(op)?;
             self.studio_scroll(&input);
+        }
+        if d == CasinoShop && self.leisure.pressed.is_none() {
+            self.casino_shop_scroll(input)?;
         }
         let hit = self.widgets.iter().enumerate().rev().find_map(|(i, w)| {
             w.collider
@@ -200,9 +256,17 @@ impl Game {
             CreativeRoom => self.room_click(&path, input, op, host, c, now),
             Examination => self.examination_click(&path, op, host, c, now),
             Casino => self.casino_click(i, &path, op, host, c, now),
+            CasinoShop => self.casino_shop_click(i, &path, op, host, c, now),
+            Blackjack => self.blackjack_click(i, &path, op, host, c, now),
+            SlotMachine => self.slot_machine_click(&path, op, host, c, now),
+            FreeMode | GuestClub | Yotogi | OldYotogi => self.native_menu_click(d, &path, op, host, c, now),
         }
     }
     fn leisure_actor(&mut self, id: usize, op: &mut Opener, now: u64) -> Result<()> {
+        self.leisure_activate_actor(id, op, now)?;
+        self.leisure_motion("h_kaiwa_tati_001.ks", "*会話立ち待機", op, now)
+    }
+    fn leisure_activate_actor(&mut self, id: usize, op: &mut Opener, now: u64) -> Result<()> {
         {
             let mut vm = self
                 .script
@@ -225,8 +289,7 @@ impl Game {
             &mut self.assets,
             op,
             now,
-        )?;
-        self.leisure_motion("h_kaiwa_tati_001.ks", "*会話立ち待機", op, now)
+        )
     }
     fn leisure_motion(&mut self, file: &str, label: &str, op: &mut Opener, now: u64) -> Result<()> {
         let effects = self.actors.start_motion(
@@ -243,7 +306,7 @@ impl Game {
         )?;
         self.edit_motion_effects(effects, op, now)
     }
-    fn replace_leisure_model(
+    pub(super) fn replace_leisure_model(
         &mut self,
         name: &str,
         (glb, count): (Vec<u8>, usize),

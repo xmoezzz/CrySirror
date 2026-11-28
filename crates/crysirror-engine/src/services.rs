@@ -147,6 +147,7 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("ui", "reset_window_shape", "Ui.resetWindowShape"),
     ("ui", "set_ime_cursor_area", "Ui.setImeCursorArea"),
     ("ui", "set_fullscreen", "Ui.setFullscreen"),
+    ("ui", "set_capture_scale", "Ui.setCaptureScale"),
     ("ui", "set_cursor_visible", "Ui.setCursorVisible"),
     ("ui", "define_cursor", "Ui.defineCursor"),
     ("ui", "set_cursor", "Ui.setCursor"),
@@ -464,6 +465,7 @@ fn ui_info() -> &'static ClassInfo {
             m("setCursorVisible",vec![("visible",T::Bool)],T::Void,"Set engine cursor presentation visibility."),
             m("defineCursor",vec![("id",T::Int),("cursor",T::Map)],T::Void,"Define or replace a client cursor {frames:[{width,height,hotspot:[x,y],rgba:[bytes]}], steps:[[frame,ms]]} (edges 1..256, straight RGBA8; one 0 ms step for a still cursor)."),
             m("setCursor",vec![("cursor",T::Map)],T::Void,"Select the pointer shape: {kind:'standard', shape:'default'|'pointer'|'text'|'wait'|...} or {kind:'custom', id} for a cursor this client defined."),
+            m("setCaptureScale",vec![("scale",T::Int)],T::Void,"Set the presentation screenshot magnification (1, 2 or 4) in client-owned state."),
             m("setFullscreen",vec![("enabled",T::Bool)],T::Void,"Request borderless desktop fullscreen. Headless hosts retain client-owned state; the desktop applies it at frame publication."),
             m("setWindowPolicy",vec![("decorated",T::Bool),("resizable",T::Bool)],T::Void,"Request desktop decorations and resizing through engine-owned client state. Headless hosts retain the request; the desktop applies it at frame publication."),
             m("beginWindowDrag",vec![],T::Void,"Request a native pointer-driven move of the presenting window; requires an active pointer gesture."),
@@ -622,6 +624,7 @@ impl Class for UiClass {
             "setCursorVisible" => UiCommand::SetCursorVisible {
                 visible: arg(args, 0, "visible")?.as_bool()?,
             },
+            "setCaptureScale" => UiCommand::SetCaptureScale {scale: id(args)?},
             "setFullscreen" => UiCommand::SetFullscreen{enabled:arg(args,0,"enabled")?.as_bool()?},
             "setWindowPolicy" => UiCommand::SetWindowPolicy{decorated:arg(args,0,"decorated")?.as_bool()?,resizable:arg(args,1,"resizable")?.as_bool()?},
             "beginWindowDrag" => UiCommand::BeginWindowDrag{},

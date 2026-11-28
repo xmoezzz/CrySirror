@@ -284,6 +284,11 @@ fn effect_output_size(mut size: [u32; 2], effects: &[ImageEffect]) -> Result<[u3
                     .output_size(size)
                     .map_err(|e| Error::Io(e.to_string()))?
             }
+            ImageEffect::RectResampleByte255 { spec } => {
+                size = spec
+                    .output_size(size)
+                    .map_err(|e| Error::Io(e.to_string()))?
+            }
             ImageEffect::CanvasMargins { margins, .. } => {
                 size = crysirror_image::canvas_margins::output_size(size, *margins)
                     .map_err(|e| Error::Io(e.to_string()))?

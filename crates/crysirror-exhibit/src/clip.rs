@@ -88,7 +88,7 @@ pub(super) fn draw_uv(
 }
 
 pub(super) fn draw_commands(
-    asset: &str,
+    paint: Value,
     [width, height]: [u32; 2],
     uv: Option<[f32; 4]>,
     duration: u64,
@@ -108,13 +108,20 @@ pub(super) fn draw_commands(
         "id": 1,
         "order": [0, 0],
         "rect": [0, 0, width, height],
-        "paint": {"kind": "image", "asset": asset},
+        "paint": paint,
     });
     if let Some(uv) = uv {
         layer["uv"] = json!(uv);
     }
     layers.push(json!({"op": "put", "layer": layer}));
     json!({"layers": layers})
+}
+
+pub(super) fn solid_paint(id: i32) -> Value {
+    // draw converts the signed CG word to COLORREF, then 0x8b1f0
+    // writes its three channels to an opaque 24-bit surface.
+    let [b, g, r, _] = id.to_le_bytes();
+    json!({"kind": "solid", "color": [r, g, b, 255]})
 }
 
 pub(super) fn offset(delta: i32, elapsed: u32, duration: u32, mode: i32) -> i32 {
@@ -260,7 +267,7 @@ mod tests {
         let asset = "res/g/ev/12/1239.gyu";
         let canvas = [800, 600];
         let uv = draw_uv([0, 0, 1600, 1200], canvas, canvas, true)?;
-        let command = draw_commands(asset, canvas, Some(uv), 500);
+        let command = draw_commands(json!({"kind":"image","asset":asset}), canvas, Some(uv), 500);
         let ops = command["layers"].as_array().context("draw operations")?;
         assert_eq!(ops.len(), 2);
         assert_eq!(ops[0]["transition"]["duration_ms"], 500);

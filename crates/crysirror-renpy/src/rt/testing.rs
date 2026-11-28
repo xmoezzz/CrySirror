@@ -25,7 +25,14 @@ fn ts_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn init_testast(vm: &mut Vm) -> PyResult<ObjRef> {
     let m = crysirror_python::modules::module_with(vm, AST, &[]);
     let base = py::import_attr(vm, "renpy.object", "Object")?;
-    let ts = py::class(vm, AST, "TestSettings", &[base], &[("__init__", ts_init)], &[])?;
+    let ts = py::class(
+        vm,
+        AST,
+        "TestSettings",
+        &[base],
+        &[("__init__", ts_init)],
+        &[],
+    )?;
     let t = vm.call(&Value::Obj(ts.clone()), Vec::new(), Vec::new())?;
     crysirror_python::modules::set(vm, &m, "TestSettings", Value::Obj(ts));
     crysirror_python::modules::set(vm, &m, "_test", t);
@@ -57,7 +64,11 @@ fn f_lookup(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let name = ops::str(vm, &args[0])?;
     let f = py::get(vm, &args[1], "filename")?;
     let l = py::get(vm, &args[1], "linenumber")?;
-    let msg = format!("Testcase {name} not found at {}:{}.", ops::str(vm, &f)?, ops::str(vm, &l)?);
+    let msg = format!(
+        "Testcase {name} not found at {}:{}.",
+        ops::str(vm, &f)?,
+        ops::str(vm, &l)?
+    );
     Err(py::error(vm, msg))
 }
 
@@ -78,19 +89,31 @@ fn f_test_command(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn init_testexecution(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, EXEC, &[
-        ("take_name", f_take_name),
-        ("lookup", f_lookup),
-        ("execute", f_execute),
-        ("execute_node", f_test_command),
-        ("test_command", f_test_command),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        EXEC,
+        &[
+            ("take_name", f_take_name),
+            ("lookup", f_lookup),
+            ("execute", f_execute),
+            ("execute_node", f_test_command),
+            ("test_command", f_test_command),
+        ],
+    );
     let exc = Value::Obj(vm.types.exc("Exception"));
     let tj = py::class(vm, EXEC, "TestJump", &[exc], &[("__init__", tj_init)], &[])?;
     let set = |vm: &Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     set(vm, "TestJump", Value::Obj(tj));
     set(vm, "testcases", vm.types.new_dict());
-    for n in ["node", "node_loc", "state", "old_state", "old_loc", "start_time", "action"] {
+    for n in [
+        "node",
+        "node_loc",
+        "state",
+        "old_state",
+        "old_loc",
+        "start_time",
+        "action",
+    ] {
         set(vm, n, Value::None);
     }
     set(vm, "last_state_change", Value::Int(0));
@@ -98,7 +121,11 @@ fn init_testexecution(vm: &mut Vm) -> PyResult<ObjRef> {
     let reg = py::import_attr(vm, "renpy.arguments", "register_command")?;
     let name = py::s(vm, "test");
     let f = py::get_raw(&m, "test_command");
-    vm.call(&reg, vec![name, f], vec![("uses_display".into(), Value::Bool(true))])?;
+    vm.call(
+        &reg,
+        vec![name, f],
+        vec![("uses_display".into(), Value::Bool(true))],
+    )?;
     Ok(m)
 }
 

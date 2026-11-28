@@ -1,0 +1,20 @@
+[
+  {"frame": 200, "pressed": ["enter"]},
+  {"frame": 500, "pressed": ["enter"]},
+  {"frame": 800, "pressed": ["enter"]},
+  {"frame": 1100, "pressed": ["enter"]},
+  {"frame": 1200, "pressed": ["enter"]},
+  {"frame": 1300, "pressed": ["enter"]},
+  {"frame": 3000, "down": ["a"]},
+  {"frame": 3700, "down": []},
+  {"frame": 3800, "down": ["a", "space"], "pressed": ["space"]},
+  {"frame": 3801, "down": ["a"]},
+  {"frame": 4050, "down": []},
+  {"frame": 4100, "down": ["w"]},
+  {"frame": 4820, "down": ["d"]},
+  {"frame": 5020, "down": []},
+  {"frame": 5050, "down": ["w"]},
+  {"frame": 5400, "down": []},
+  {"frame": 5420, "down": ["space"], "pressed": ["space"]},
+  {"frame": 5421, "down": []}
+]

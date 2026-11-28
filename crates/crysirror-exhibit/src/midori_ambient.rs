@@ -122,6 +122,11 @@ impl Ambient {
         self.definitions.insert(definition.id, definition);
     }
 
+    pub fn live_volume(&mut self) -> Option<(u32, &mut Lane)> {
+        let live = self.active?;
+        Some((live.channel, &mut self.requested))
+    }
+
     pub fn capture_lane(&self) -> Option<Lane> {
         (self.preparing.is_none() && self.retiring.is_none()).then_some(self.requested)
     }

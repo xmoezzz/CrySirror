@@ -932,6 +932,15 @@ fn intersect(a: Rect2, b: Rect2) -> Rect2 {
     Rect2 { x0: a.x0.max(b.x0), y0: a.y0.max(b.y0), x1: a.x1.min(b.x1).max(a.x0.max(b.x0)), y1: a.y1.min(b.y1).max(a.y0.max(b.y0)) }
 }
 
+pub(super) fn clip_collider(rect: [f32; 4], bounds: [f32; 4]) -> Option<[f32; 4]> {
+    let edges = |[x, y, width, height]: [f32; 4]| Rect2 {
+        x0: x, y0: y, x1: x + width, y1: y + height,
+    };
+    let rect = intersect(edges(rect), edges(bounds));
+    (rect.x1 > rect.x0 && rect.y1 > rect.y0)
+        .then_some([rect.x0, rect.y0, rect.x1 - rect.x0, rect.y1 - rect.y0])
+}
+
 fn byte(v: f32) -> u8 {
     (v.clamp(0., 1.) * 255. + 0.5) as u8
 }

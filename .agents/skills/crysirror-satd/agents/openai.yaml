@@ -1,4 +1,0 @@
-interface:
-  display_name: "CrySirror SATD"
-  short_description: "Track unfinished work and code moves"
-  default_prompt: "Use $crysirror-satd to record or update incomplete CrySirror work, preserve its move history, and close it only after full implementation and verification."

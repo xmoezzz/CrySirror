@@ -127,6 +127,59 @@ pub struct OutlineEmMetrics {
     pub typographic_ascent: f32,
 }
 
+/// One variable-font design axis (OpenType `fvar`), in user coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FontVariationAxis {
+    pub tag: [u8; 4],
+    /// Axis name from the font's `name` table (the tag when absent).
+    pub name: String,
+    pub minimum: f32,
+    pub default: f32,
+    pub maximum: f32,
+}
+/// A named instance: one coordinate per axis, in axis order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FontNamedInstance {
+    pub name: String,
+    pub coordinates: Vec<f32>,
+}
+/// Variation data of a face; both lists are empty for static fonts.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FontVariations {
+    pub axes: Vec<FontVariationAxis>,
+    pub instances: Vec<FontNamedInstance>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShapeDirection {
+    LeftToRight,
+    RightToLeft,
+    TopToBottom,
+}
+/// OpenType shaping of one run of text in an authorized face.
+#[derive(Clone, Debug)]
+pub struct ShapeRequest {
+    pub font: String,
+    /// Pixels per em.
+    pub size: f32,
+    pub text: String,
+    pub direction: ShapeDirection,
+    /// Variation axis coordinates (user units) by tag.
+    pub variations: Vec<([u8; 4], f32)>,
+    /// Feature settings by tag, applied to the whole run.
+    pub features: Vec<([u8; 4], u32)>,
+}
+/// One shaped glyph in pixels; `cluster` is the byte offset in the text of
+/// the first character the glyph represents.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShapedGlyph {
+    pub glyph_id: u32,
+    pub cluster: u32,
+    pub x_advance: f32,
+    pub y_advance: f32,
+    pub x_offset: f32,
+    pub y_offset: f32,
+}
+
 /// Bounded font registration capability. Handles cannot cross clients.
 pub trait FontLibrary: Send + Sync {
     /// Actual metadata of the authorized, currently published font catalogue.
@@ -174,6 +227,19 @@ pub trait FontLibrary: Send + Sync {
         Err(crate::Error::Unsupported("scoped glyph bounds worker"))
     }
     fn is_loaded(&self, alias: &str) -> Result<bool>;
+    /// Pair kerning (legacy `kern` table) between two characters, in pixels
+    /// at `size` pixels per em; zero when the face has no such pair.
+    fn kerning(&self, _alias: &str, _size: f32, _left: char, _right: char) -> Result<f32> {
+        Err(crate::Error::Unsupported("scoped font kerning"))
+    }
+    /// OpenType shaping (GSUB/GPOS, variations, features) of one run.
+    fn shape(&self, _request: &ShapeRequest) -> Result<Vec<ShapedGlyph>> {
+        Err(crate::Error::Unsupported("scoped text shaping"))
+    }
+    /// Variable-font axes and named instances of an authorized face.
+    fn variations(&self, _alias: &str) -> Result<FontVariations> {
+        Err(crate::Error::Unsupported("scoped font variation metadata"))
+    }
     fn release_job(&self, job: FontJob) -> Result<()>;
     fn release_font(&self, handle: FontHandle) -> Result<()>;
 }

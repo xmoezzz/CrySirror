@@ -2,6 +2,7 @@
 //! CPU-side PBR model and environment decoding for the renderer (ADR 0010).
 //! Everything here is plain data rebuilt from asset bytes; nothing is saved.
 use anyhow::{bail, ensure, Context, Result};
+pub use crysirror_scene::effect::ShaderEffect;
 
 pub const MAX_TEXTURE_DIM: u32 = 8192;
 

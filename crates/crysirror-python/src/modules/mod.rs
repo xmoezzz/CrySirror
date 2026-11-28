@@ -4,12 +4,13 @@
 //! embedded source (`pysrc`) written for this interpreter.
 
 use crate::object::*;
-use crate::vm::{PyResult, Vm};
+use crate::vm::Vm;
 
 pub mod binascii;
 pub mod collections;
 pub mod copyreg;
 pub mod functools;
+pub mod gc;
 mod host_files;
 pub mod hashlib;
 pub mod io;
@@ -25,6 +26,7 @@ pub mod re;
 pub mod struct_;
 pub mod sys;
 pub mod time;
+pub mod weakref;
 pub mod zlib;
 
 pub fn install(vm: &mut Vm) {
@@ -51,8 +53,8 @@ pub fn install(vm: &mut Vm) {
         ("_hashlib", hashlib::init),
         ("binascii", binascii::init),
         ("posix", os::init),
-        ("_weakref", init_weakref),
-        ("gc", init_gc),
+        ("_weakref", weakref::init),
+        ("gc", gc::init),
         ("errno", os::init_errno),
         ("_pickle", crate::pickle::init),
     ];
@@ -83,43 +85,4 @@ pub fn module_with(vm: &mut Vm, name: &str, funcs: &[(&'static str, NativeFn)]) 
 
 pub fn set(vm: &Vm, m: &ObjRef, name: &str, v: Value) {
     crate::ops::set_raw_attr(vm, m, name, v);
-}
-
-fn init_weakref(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = vm.new_module("_weakref");
-    let r = Value::Obj(vm.types.weakref.clone());
-    set(vm, &m, "ref", r);
-    let p = vm.types.new_builtin("proxy", weak_proxy);
-    set(vm, &m, "proxy", p);
-    let c = vm.types.new_builtin("getweakrefcount", weak_count);
-    set(vm, &m, "getweakrefcount", c);
-    Ok(m)
-}
-
-fn weak_proxy(_vm: &mut Vm, a: &[Value], _k: crate::builtins::Kw) -> PyResult<Value> {
-    // Proxies behave as strong references (no finalization is observable).
-    Ok(a.first().cloned().unwrap_or(Value::None))
-}
-
-fn weak_count(_vm: &mut Vm, _a: &[Value], _k: crate::builtins::Kw) -> PyResult<Value> {
-    Ok(Value::Int(0))
-}
-
-fn init_gc(vm: &mut Vm) -> PyResult<ObjRef> {
-    fn zero(_vm: &mut Vm, _a: &[Value], _k: crate::builtins::Kw) -> PyResult<Value> {
-        Ok(Value::Int(0))
-    }
-    fn none(_vm: &mut Vm, _a: &[Value], _k: crate::builtins::Kw) -> PyResult<Value> {
-        Ok(Value::None)
-    }
-    fn truth(_vm: &mut Vm, _a: &[Value], _k: crate::builtins::Kw) -> PyResult<Value> {
-        Ok(Value::Bool(true))
-    }
-    fn empty(vm: &mut Vm, _a: &[Value], _k: crate::builtins::Kw) -> PyResult<Value> {
-        Ok(vm.types.new_list(Vec::new()))
-    }
-    let m = module_with(vm, "gc", &[("collect", zero), ("disable", none), ("enable", none), ("isenabled", truth), ("get_objects", empty), ("get_referrers", empty), ("freeze", none), ("set_threshold", none)]);
-    let g = vm.types.new_list(Vec::new());
-    set(vm, &m, "garbage", g);
-    Ok(m)
 }

@@ -364,7 +364,7 @@ impl Game {
                     }
                 }
             }
-            AdvUi::YotogiCall { name, label, edit_label } => match &mut self.active {
+            AdvUi::YotogiCall { name, label, edit_label, .. } => match &mut self.active {
                 crate::scenes::Active::Yotogi(y) => y.call(name, label, edit_label),
                 _ => anyhow::bail!("@yotogicall outside SceneYotogi"),
             },

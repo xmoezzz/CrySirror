@@ -3,7 +3,8 @@
 use super::*;
 use crate::{
     binio::Writer,
-    save::{Header, save_path},
+    save::{Header, save_path, slot_1040::{Guest, edit_guest_slots, read_guest_slots}},
+    tjs::retail::guest,
 };
 use crysirror_core::{
     path::Mount,
@@ -131,8 +132,24 @@ enum Action {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Mode {
     TitleLoad,
+    TitleGuest,
+    GuestTitleLoad,
     DailyLoad,
     DailySave,
+    GuestLoad,
+    GuestSave,
+}
+
+impl Mode {
+    fn local(self) -> bool {
+        matches!(self, Self::GuestTitleLoad | Self::GuestLoad | Self::GuestSave)
+    }
+    fn saving(self) -> bool {
+        matches!(self, Self::DailySave | Self::GuestSave)
+    }
+    fn rows(self) -> i32 {
+        if self.local() { 16 } else { 10 }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -140,7 +157,16 @@ enum Confirmation {
     Load,
     Save,
     Delete,
+    NewGuest,
     Notice,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SlotOperation {
+    Save { slot: i32, comment: String },
+    Load { slot: i32 },
+    DeleteGuest { slot: i32 },
+    NewGuest,
 }
 
 pub(super) struct Viewer {
@@ -160,6 +186,9 @@ pub(super) struct Viewer {
     right_pressed: Option<i32>,
     opened: u64,
     closing: Option<u64>,
+    operation: Option<SlotOperation>,
+    origin: Option<i32>,
+    guest_layout: Option<TableLayout>,
 }
 
 fn latest(entries: &BTreeMap<i32, Header>) -> Option<i32> {
@@ -186,23 +215,48 @@ impl Viewer {
         now: u64,
     ) -> Result<Self> {
         let entries = catalog(op.storage.as_ref())?;
+        Self::open_with(mode, assets, op, host, c, now, entries, None)
+    }
+
+    fn open_with(
+        mode: Mode,
+        assets: &mut Assets,
+        op: &mut Opener,
+        host: &mut dyn HostServices,
+        c: ClientId,
+        now: u64,
+        entries: BTreeMap<i32, Header>,
+        origin: Option<i32>,
+    ) -> Result<Self> {
         let latest = latest(&entries);
+        let mut base = assets.scene(op, host, c, match mode {
+            Mode::TitleLoad | Mode::TitleGuest => "StandaloneLoadPanel",
+            local if local.local() => "GuestSlotPanel",
+            _ => "DailySlotPanel",
+        })?;
+        let (full, empty, guest_layout) = if mode.local() {
+            let mut unit = Vec::new();
+            base.retain(|w| {
+                if let Some(path) = w.path.strip_prefix("UI Root/SaveAndLoadPanel/DataViewer/DataUnitParent/") {
+                    let mut row = w.clone();
+                    row.path = path.into();
+                    unit.push(row);
+                    false
+                } else {
+                    true
+                }
+            });
+            ensure!(unit.iter().any(|w| w.path == "DataUnit" && w.collider.is_some()), "missing native guest slot row");
+            (unit.clone(), unit, Some(assets.guest_slot_table))
+        } else {
+            (assets.scene(op, host, c, "StandaloneDataUnit")?,
+             assets.scene(op, host, c, "StandaloneEmptyUnit")?, None)
+        };
         Ok(Self {
             entries,
-            base: assets.scene(
-                op,
-                host,
-                c,
-                if mode == Mode::TitleLoad {
-                    "StandaloneLoadPanel"
-                } else {
-                    "DailySlotPanel"
-                },
-            )?,
-            full: assets.scene(op, host, c, "StandaloneDataUnit")?,
-            empty: assets.scene(op, host, c, "StandaloneEmptyUnit")?,
+            base, full, empty, guest_layout, origin,
             latest,
-            page: latest.map_or(1, |i| i / 10 + 1),
+            page: latest.map_or(1, |i| i / mode.rows() + 1),
             active: None,
             pressed: None,
             editing: None,
@@ -213,6 +267,7 @@ impl Viewer {
             confirmation: Confirmation::Notice,
             opened: now,
             closing: None,
+            operation: None,
         })
     }
     pub fn alpha(&self, now: u64) -> u8 {
@@ -225,11 +280,12 @@ impl Viewer {
     }
     fn populate(&self, layout: TableLayout) -> Result<Vec<Widget>> {
         let mut out = Vec::new();
-        let saving = self.mode == Mode::DailySave;
+        let saving = self.mode.saving();
         for w in self.base.iter().cloned() {
             if w.path.contains("/TitleGroup/TitleSave") && !saving
                 || w.path.contains("/TitleGroup/TitleLoad") && saving
                 || w.path.contains("/DisplayButtonGroup/DisplaySave") && saving
+                || w.path.contains("/DisplayButtonGroup/DisplaySave") && self.mode == Mode::GuestTitleLoad
                 || w.path.contains("/DisplayButtonGroup/DisplayLoad") && !saving
             {
                 continue;
@@ -242,8 +298,8 @@ impl Viewer {
             out.push(w);
         }
         let mut rows = Vec::new();
-        for n in 0..10 {
-            let slot = (self.page - 1) * 10 + n;
+        for n in 0..self.mode.rows() {
+            let slot = (self.page - 1) * self.mode.rows() + n;
             let h = self.entries.get(&slot);
             let mut unit = if h.is_some() {
                 self.full.clone()
@@ -260,7 +316,9 @@ impl Viewer {
                         Some(crate::saveload::date_text(&h.save_time))
                     } else if w.path.ends_with("/LapsedDays/Number") {
                         Some(h.game_day.to_string())
-                    } else if w.path.ends_with("/Manager/Name") {
+                    } else if w.path.ends_with("/UsedCount/Number") {
+                        Some(h.game_day.to_string())
+                    } else if w.path.ends_with("/Manager/Name") || w.path.ends_with("/Man/Name") {
                         Some(h.player_name.clone())
                     } else if w.path.ends_with("/NumberOfEmployees/Number") {
                         Some(h.maid_num.to_string())
@@ -277,7 +335,20 @@ impl Viewer {
             }
             rows.push(unit);
         }
-        layout.position(&mut rows)?;
+        self.guest_layout.unwrap_or(layout).position(&mut rows)?;
+        if self.mode.local() {
+            for (n, unit) in rows.iter_mut().enumerate() {
+                let slot = (self.page - 1) * 16 + n as i32;
+                let occupied = self.entries.contains_key(&slot);
+                unit.retain(|w| if w.path.ends_with("/NewGameLabel") {
+                    n == 0
+                } else if w.path.contains("/DataUnit/Content/") {
+                    occupied
+                } else {
+                    true
+                });
+            }
+        }
         out.extend(rows.into_iter().flatten());
         out.sort_by_key(|w| w.depth);
         Ok(out)
@@ -294,7 +365,11 @@ impl Viewer {
                 let (num, _) = tail.split_once('/')?;
                 let slot = num.parse().ok()?;
                 if !self.entries.contains_key(&slot) {
-                    if self.mode == Mode::DailySave && w.path.ends_with("/EmptyUnit") {
+                    if self.mode.local() && w.path.ends_with("/DataUnit")
+                        && (self.mode.saving() != (slot % 16 == 0))
+                    {
+                        hit = Some(Action::Slot(slot));
+                    } else if self.mode == Mode::DailySave && w.path.ends_with("/EmptyUnit") {
                         hit = Some(Action::Slot(slot));
                     }
                     continue;
@@ -302,13 +377,15 @@ impl Viewer {
                 if w.path.ends_with("/InputField") {
                     return Some(Action::Comment(slot));
                 }
-                if w.path.ends_with("/DataUnit") {
+                if w.path.ends_with("/DataUnit")
+                    && !(self.mode == Mode::GuestSave && slot % 16 == 0)
+                {
                     hit = Some(Action::Slot(slot));
                 }
             } else if w.path.ends_with("/DisplaySave") {
-                return Some(Action::Switch(Mode::DailySave));
+                return Some(Action::Switch(if self.mode.local() { Mode::GuestSave } else { Mode::DailySave }));
             } else if w.path.ends_with("/DisplayLoad") {
-                return Some(Action::Switch(Mode::DailyLoad));
+                return Some(Action::Switch(if self.mode.local() { Mode::GuestLoad } else { Mode::DailyLoad }));
             } else if w.path.ends_with("/Cancel") {
                 return Some(Action::Cancel);
             } else if let Some(page) = w
@@ -351,30 +428,25 @@ impl Viewer {
                 self.dialog = None;
                 let action = self.confirmation;
                 self.confirmation = Confirmation::Notice;
-                if a == quit_dialog::Choice::Ok
+                if a == quit_dialog::Choice::Ok && action == Confirmation::NewGuest {
+                    self.operation = Some(SlotOperation::NewGuest);
+                } else if a == quit_dialog::Choice::Ok
                     && matches!(action, Confirmation::Load | Confirmation::Save)
                 {
                     let slot = self.active.context("missing confirmed slot")?;
-                    let message = if action == Confirmation::Save {
-                        "CrySirror は COM3D2 1.0.4 の完全なセーブデータをまだ保存できません。"
-                            .to_owned()
+                    self.operation = Some(if action == Confirmation::Save {
+                        let comment = self.entries.get(&slot).map(|header| header.comment.clone()).unwrap_or_default();
+                        SlotOperation::Save { slot, comment }
                     } else {
-                        let bytes = op.storage.read(&save_path(slot)?)?;
-                        match crate::save::stock_1040::read_slot(&bytes) {
-                            Ok(stock) => format!(
-                                "{}日目・在籍{}人。CrySirror はこのセーブのキャラクターとシナリオをまだ復元できません。",
-                                stock.player.days, stock.employees
-                            ),
-                            Err(err) => format!("セーブデータの読み込みに失敗しました。\n{err}"),
-                        }
-                    };
-                    let panel = assets.scene(op, host, c, "SystemDialog")?;
-                    let alert = quit_dialog::QuitDialog::show(widgets, panel, now, &message)?;
-                    widgets.retain(|w| !w.path.contains("SystemDialog/Base/Cancel"));
-                    self.dialog = Some(alert);
+                        SlotOperation::Load { slot }
+                    });
                 } else {
                     if a == quit_dialog::Choice::Ok && action == Confirmation::Delete {
                         let slot = self.active.context("missing confirmed slot")?;
+                        if self.mode.local() {
+                            self.operation = Some(SlotOperation::DeleteGuest { slot });
+                            return Ok(false);
+                        }
                         op.storage.remove(&save_path(slot)?)?;
                         self.entries = catalog(op.storage.as_ref())?;
                         // PageUpper rebuilds this page. GameMain keeps the latest-slot number until UpdateSaveDataDay.
@@ -402,7 +474,17 @@ impl Viewer {
                     text.pop();
                 }
                 text.push_str(&added);
-                let updated = change_comment(op.storage.as_ref(), slot, old, &text)?;
+                let updated = if self.mode.local() {
+                    let mut header = old.clone();
+                    let limit = assets.guest_slot_comment_limit;
+                    if limit != 0 {
+                        text = String::from_utf16_lossy(&text.encode_utf16().take(limit).collect::<Vec<_>>());
+                    }
+                    header.comment.clone_from(&text);
+                    header
+                } else {
+                    change_comment(op.storage.as_ref(), slot, old, &text)?
+                };
                 self.entries.insert(slot, updated);
                 self.editing = Some((slot, h, false));
                 *widgets = self.populate(assets.slot_table)?;
@@ -452,7 +534,7 @@ impl Viewer {
             }
             Some(Action::Switch(mode)) => {
                 self.mode = mode;
-                self.page = self.latest.map_or(1, |slot| slot / 10 + 1);
+                self.page = self.latest.map_or(1, |slot| slot / mode.rows() + 1);
                 self.active = None;
                 *widgets = self.populate(assets.slot_table)?;
             }
@@ -464,22 +546,37 @@ impl Viewer {
             Some(Action::Slot(slot)) => {
                 self.active = Some(slot);
                 *widgets = self.populate(assets.slot_table)?;
-                let message = if self.mode == Mode::DailySave {
+                let message = if self.mode.local() {
+                    if slot % 16 == 0 {
+                        self.confirmation = Confirmation::NewGuest;
+                        "ここに新規顧客情報を登録します。".to_owned()
+                    } else if self.mode.saving() {
+                        self.confirmation = Confirmation::Save;
+                        if self.entries.contains_key(&slot) {
+                            format!("{slot}番に上書きして保存します。\n宜しいですか？")
+                        } else {
+                            format!("{slot}番にデータを保存しますか？")
+                        }
+                    } else {
+                        self.confirmation = Confirmation::Load;
+                        format!("{slot}番のデータをロードしますか？")
+                    }
+                } else if self.mode.saving() {
                     self.confirmation = Confirmation::Save;
                     if self.entries.contains_key(&slot) {
-                        "上書きして保存しますが宜しいですか？"
+                        "上書きして保存しますが宜しいですか？".to_owned()
                     } else {
-                        "データを保存しますか？"
+                        "データを保存しますか？".to_owned()
                     }
                 } else {
                     self.confirmation = Confirmation::Load;
-                    "データをロードしますか？"
+                    "データをロードしますか？".to_owned()
                 };
                 self.dialog = Some(quit_dialog::QuitDialog::show(
                     widgets,
                     assets.scene(op, host, c, "SystemDialog")?,
                     now,
-                    message,
+                    &message,
                 )?);
             }
             Some(Action::Comment(slot)) if self.editing.is_none() => {
@@ -570,6 +667,134 @@ impl TableLayout {
 }
 
 impl Game {
+    fn guest_slot_headers(&self, slots: &[Guest], maid_count: i32) -> Result<BTreeMap<i32, Header>> {
+        // The shared slot viewer uses the same header projection for its
+        // two panels. Guest rows display play count and customer name.
+        let mut script = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+        let people = guest::men(&mut script.runtime.host_mut().state)?;
+        Ok(slots.iter().filter(|slot| (0..80).contains(&slot.slot)).map(|slot| {
+            let man = people.iter().find(|(id, _)| *id == slot.last_man_type)
+                .map(|(_, name)| name.clone()).unwrap_or_else(|| slot.last_man_type.to_string());
+            (slot.slot, Header {
+                save_time: slot.save_time.clone(),
+                game_day: slot.play_count,
+                player_name: man,
+                maid_num: maid_count,
+                comment: slot.comment.clone(),
+            })
+        }).collect())
+    }
+
+    pub(super) fn open_guest_slots(
+        &mut self, mode: Mode, op: &mut Opener, host: &mut dyn HostServices, c: ClientId, now: u64,
+    ) -> Result<()> {
+        let (origin, slots, maid_count) = {
+            let script = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+            let state = &script.runtime.host().state;
+            (guest::origin(state)?, guest::saved_slots(state).to_vec(),
+                i32::try_from(guest::eligible_maids(state).len())?)
+        };
+        self.replace_guest_panel(mode, origin, &slots, maid_count, op, host, c, now)
+    }
+
+    fn replace_guest_panel(
+        &mut self, mode: Mode, origin: i32, slots: &[Guest], maid_count: i32,
+        op: &mut Opener, host: &mut dyn HostServices, c: ClientId, now: u64,
+    ) -> Result<()> {
+        let entries = self.guest_slot_headers(slots, maid_count)?;
+        let mut viewer = Viewer::open_with(mode, &mut self.assets, op, host, c, now, entries, Some(origin))?;
+        let panel = viewer.populate(self.assets.slot_table)?;
+        viewer.caller_widgets = if let Some(old) = self.slot_viewer.take() {
+            old.caller_widgets
+        } else {
+            std::mem::take(&mut self.widgets)
+        };
+        self.widgets = panel;
+        self.slot_viewer = Some(viewer);
+        self.pressed = None;
+        Ok(())
+    }
+
+    fn load_guest_in_club(
+        &mut self, origin: i32, slot: Option<i32>, op: &mut Opener, now: u64,
+    ) -> Result<()> {
+        let (old, id) = {
+            let mut script = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+            let state = &mut script.runtime.host_mut().state;
+            let mut staged = state.clone();
+            let saved = slot.map(|slot| guest::saved_slots(state).iter()
+                .find(|record| record.slot == slot).context("guest slot missing")).transpose()?;
+            guest::apply_slot(&mut staged, origin, saved)?;
+            let id = guest::man(&staged);
+            (std::mem::replace(state, staged), id)
+        };
+        if let Err(err) = self.show_guest_man(id, op, now) {
+            self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?.runtime.host_mut().state = old;
+            return Err(err);
+        }
+        self.close_slot_viewer()?;
+        Ok(())
+    }
+
+    fn close_slot_viewer(&mut self) -> Result<()> {
+        let viewer = self.slot_viewer.take().context("slot panel closed")?;
+        if matches!(viewer.mode, Mode::GuestLoad | Mode::GuestSave) {
+            self.copy_guest_comments(&viewer.entries)?;
+        }
+        self.widgets = viewer.caller_widgets;
+        self.pressed = None;
+        Ok(())
+    }
+
+    fn copy_guest_comments(&mut self, entries: &BTreeMap<i32, Header>) -> Result<()> {
+        let mut vm = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+        apply_guest_comments(entries, guest::saved_slots_mut(&mut vm.runtime.host_mut().state));
+        Ok(())
+    }
+
+    fn write_guest_operation(
+        &mut self, origin: i32, operation: SlotOperation, op: &Opener, mode: Mode,
+    ) -> Result<()> {
+        let viewer = self.slot_viewer.as_ref().context("missing guest slot panel")?;
+        let maid_count = if mode == Mode::GuestTitleLoad {
+            catalog(op.storage.as_ref())?.get(&origin).context("campaign slot disappeared")?.maid_num
+        } else {
+            let script = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+            i32::try_from(guest::eligible_maids(&script.runtime.host().state).len())?
+        };
+        let path = save_path(origin)?;
+        let bytes = op.storage.read(&path)?;
+        let revised = edit_guest_slots(&bytes, |slots| {
+            apply_guest_comments(&viewer.entries, slots);
+            match operation {
+                SlotOperation::Save { slot, comment } => {
+                    let script = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+                    let data = guest::capture_slot(&script.runtime.host().state, slot, comment);
+                    if let Some(old) = slots.iter_mut().find(|old| old.slot == slot) {
+                        *old = data;
+                    } else {
+                        slots.push(data);
+                    }
+                }
+                SlotOperation::DeleteGuest { slot } => slots.retain(|saved| saved.slot != slot),
+                _ => bail!("wrong guest slot operation"),
+            }
+            Ok(())
+        })?;
+        let slots = read_guest_slots(&revised)?;
+        let entries = self.guest_slot_headers(&slots, maid_count)?;
+        op.storage.write_atomic(&path, &revised)?;
+        if mode != Mode::GuestTitleLoad {
+            let mut script = self.script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+            guest::set_saved_slots(&mut script.runtime.host_mut().state, slots);
+        }
+        let viewer = self.slot_viewer.as_mut().context("missing guest slot panel")?;
+        viewer.entries = entries;
+        viewer.latest = latest(&viewer.entries);
+        self.widgets = viewer.populate(self.assets.slot_table)?;
+        Ok(())
+    }
+
     pub(super) fn open_slots(
         &mut self,
         mode: Mode,
@@ -605,11 +830,112 @@ impl Game {
             released,
             now,
         )? {
-            self.widgets = std::mem::take(&mut viewer.caller_widgets);
-            self.slot_viewer = None;
-            self.pressed = None;
+            let mode = viewer.mode;
+            self.close_slot_viewer()?;
+            if mode == Mode::GuestTitleLoad {
+                self.open_slots(Mode::TitleGuest, op, host, c, now)?;
+            }
+            return Ok(());
+        }
+        let Some(operation) = viewer.operation.take() else {
+            return Ok(());
+        };
+        let was_save = matches!(&operation, SlotOperation::Save { .. });
+        let mode = viewer.mode;
+        if mode == Mode::TitleGuest && let SlotOperation::Load { slot } = operation {
+            let result = (|| {
+                let bytes = op.storage.read(&save_path(slot)?)?;
+                let saved = crate::save::slot_1040::Slot::read(&bytes)?;
+                let original_staff = saved.roster.employees.iter().filter(|employee| {
+                    matches!(employee.status.heroine, crate::save::status_1040::Heroine::Original)
+                }).count();
+                self.replace_guest_panel(Mode::GuestTitleLoad, slot, &saved.guest_slots,
+                    i32::try_from(original_staff)?, op, host, c, now)
+            })();
+            return match result {
+                Ok(()) => Ok(()),
+                Err(err) => self.slot_notice(op, host, c, now,
+                    &format!("セーブデータの読み込みに失敗しました。\n{err:#}"), false),
+            };
+        }
+        if mode.local() {
+            let origin = viewer.origin.context("missing campaign origin")?;
+            return match operation {
+                SlotOperation::Save { .. } | SlotOperation::DeleteGuest { .. } => {
+                    let text = match self.write_guest_operation(origin, operation, op, mode) {
+                        Ok(()) if was_save => "データを保存しました。".to_owned(),
+                        Ok(()) => "データを削除しました。".to_owned(),
+                        Err(err) => format!("セーブデータの書き込みに失敗しました。\n{err:#}"),
+                    };
+                    self.slot_notice(op, host, c, now, &text, true)
+                }
+                load => {
+                    let selection = match load {
+                        SlotOperation::NewGuest => None,
+                        SlotOperation::Load { slot } => Some(slot),
+                        _ => unreachable!(),
+                    };
+                    let result = if mode == Mode::GuestTitleLoad {
+                        let entries = viewer.entries.clone();
+                        self.load_native_guest(op, host, c, origin, selection, now)
+                            .and_then(|()| self.copy_guest_comments(&entries))
+                    } else {
+                        self.load_guest_in_club(origin, selection, op, now)
+                    };
+                    match result {
+                        Ok(()) => Ok(()),
+                        Err(err) => self.slot_notice(op, host, c, now,
+                            &format!("セーブデータの読み込みに失敗しました。\n{err:#}"), false),
+                    }
+                }
+            };
+        }
+        let message = match operation {
+            SlotOperation::Save { slot, comment } => {
+                match self.write_native_slot(op, slot, comment) {
+                    Ok(()) => {
+                        let viewer = self.slot_viewer.as_mut().context("slot viewer closed during save")?;
+                        viewer.entries = catalog(op.storage.as_ref())?;
+                        self.widgets = viewer.populate(self.assets.slot_table)?;
+                        "データが保存されました。".to_owned()
+                    }
+                    Err(err) => format!("セーブデータの保存に失敗しました。\n{err:#}"),
+                }
+            }
+            SlotOperation::Load { slot } => {
+                match self.load_native_slot(op, host, c, slot, now) {
+                    Ok(()) => return Ok(()),
+                    Err(err) => format!("セーブデータの読み込みに失敗しました。\n{err:#}"),
+                }
+            }
+            _ => bail!("guest-only action in campaign slot panel"),
+        };
+        self.slot_notice(op, host, c, now, &message, was_save)
+    }
+
+    fn slot_notice(
+        &mut self, op: &mut Opener, host: &mut dyn HostServices, c: ClientId, now: u64,
+        message: &str, clear_selection: bool,
+    ) -> Result<()> {
+        let viewer = self.slot_viewer.as_mut().context("slot panel closed during operation")?;
+        let panel = self.assets.scene(op, host, c, "SystemDialog")?;
+        viewer.dialog = Some(quit_dialog::QuitDialog::show(&mut self.widgets, panel, now, message)?);
+        self.widgets.retain(|w| !w.path.contains("SystemDialog/Base/Cancel"));
+        viewer.confirmation = Confirmation::Notice;
+        if clear_selection {
+            viewer.active = None;
         }
         Ok(())
+    }
+}
+
+fn apply_guest_comments(entries: &BTreeMap<i32, Header>, records: &mut [Guest]) {
+    for record in records {
+        if let Some(header) = entries.get(&record.slot)
+            && header.save_time == record.save_time
+        {
+            record.comment.clone_from(&header.comment);
+        }
     }
 }
 
@@ -626,6 +952,16 @@ mod tests {
     }
 
     fn slot_with_stock(time: &str, comment: &str, stock: &[u8]) -> (Vec<u8>, Vec<u8>) {
+        slot_with_sections(time, comment, stock, &[33, 44, 55], &[77, 88])
+    }
+
+    fn slot_with_sections(
+        time: &str,
+        comment: &str,
+        stock: &[u8],
+        guest: &[u8],
+        casino: &[u8],
+    ) -> (Vec<u8>, Vec<u8>) {
         // GameMain.Serialize writes the two bookmark tags and patches each
         // distance after its managed section. The section contents are opaque
         // to GetSaveDataHeader and SaveDataCommentSave.
@@ -652,9 +988,9 @@ mod tests {
         body.bytes.extend(p.encode().unwrap());
         body.bytes.extend_from_slice(stock);
         let end1 = (body.bytes.len() - first - 8) as i64;
-        body.bytes.extend_from_slice(&[33, 44, 55]);
+        body.bytes.extend_from_slice(guest);
         let end2 = (body.bytes.len() - second - 8) as i64;
-        body.bytes.extend_from_slice(&[77, 88]);
+        body.bytes.extend_from_slice(casino);
         body.bytes[first..first + 8].copy_from_slice(&end1.to_le_bytes());
         body.bytes[second..second + 8].copy_from_slice(&end2.to_le_bytes());
         let mut w = Writer::default();
@@ -669,7 +1005,7 @@ mod tests {
         (w.bytes, body.bytes)
     }
     #[test]
-    fn native_stock_appearance_stops_at_the_first_employee_status() -> Result<()> {
+    fn native_stock_roster_round_trips_two_employees_to_the_script_boundary() -> Result<()> {
         // Original 1.0.4 MaidProp.Serialize on a detached sample with two
         // sub-prop slots and a non-default bone length.
         let hex = concat!(
@@ -703,38 +1039,75 @@ mod tests {
             stock.f32(value);
         }
         stock.i32(53);
-        stock.i32(1);
-        write_props(&mut stock);
-        stock.str("CM3D2_MULTI_COL");
-        stock.i32(1040);
-        stock.i32(9);
-        for i in 0..9 {
-            stock.bool(i == 8);
-            for n in 0..9 {
-                stock.i32(i * 10 + n);
+        stock.i32(2);
+        for (index, name) in ["第一", "第二"].into_iter().enumerate() {
+            write_props(&mut stock);
+            stock.str("CM3D2_MULTI_COL");
+            stock.i32(1040);
+            stock.i32(9);
+            for i in 0..9 {
+                stock.bool(i == 8);
+                for n in 0..9 {
+                    stock.i32(i * 10 + n);
+                }
             }
+            stock.str("CM3D2_MAID_STATUS");
+            stock.i32(1040);
+            stock.str(&format!("fixture-{index}"));
+            stock.str("20261125000000");
+            stock.bytes.extend_from_slice(&0i16.to_le_bytes()); // Original heroine.
+            stock.bool(false);
+            stock.i32(1); // Employment day.
+            for text in [name, "社員", "", ""] {
+                stock.str(text);
+            }
+            // Initial and current experience types, personality and contract.
+            stock.bytes.extend_from_slice(&[0; 10]);
+            stock.bytes.extend_from_slice(&[0; 10]); // Five body measurements.
+            stock.str("");
+            stock.bytes.extend_from_slice(&[0; 2 + 26 * 2]); // Relation and u16 parameters.
+            stock.i64(1_234_567_890_123); // Sales.
+            stock.i64(1_234_567_890_124); // Total sales.
+            stock.bytes.extend_from_slice(&0xf032u16.to_le_bytes()); // Evaluation.
+            stock.i64(4);
+            stock.bytes.extend_from_slice(&[0; 3 + 2 + 8 + 2]); // Flags, eye tab and shifts.
+            stock.bytes.extend_from_slice(&[0; 12 * 2]); // Counts for the twelve collections.
+            stock.bytes.extend_from_slice(&[0; 3]); // Optional old status and chosen classes.
+            stock.u32(2_177_629_204);
+            stock.str("CM3D2_MAID_MISC");
+            stock.i32(1040);
+            stock.i32(index as i32);
+            stock.i32(0);
+            stock.str("");
+            for _ in 0..4 { stock.f32(1.); }
+            stock.i32(51);
+            stock.str("CM3D2_MAID_BODY");
+            stock.i32(1040);
         }
-        stock.str("CM3D2_MAID_STATUS");
+        stock.str("CM3D2_SCRIPT");
         stock.i32(1040);
         let fixture = |bytes: &[u8]| slot_with_stock("20261125000000", "", bytes).0;
         let bytes = fixture(&stock.bytes);
         let parsed = crate::save::stock_1040::read_slot(&bytes)?;
         let man = &parsed.men[0];
-        assert_eq!(man.properties, [("wear".into(), prop.as_slice())]);
-        assert_eq!(man.active_slot, -1);
-        assert_eq!(man.thumbnail, [1, 2, 3]);
-        assert_eq!(man.thumbnail_time, "架空");
-        assert_eq!(man.color, [0.25, 0.5, 0.75, 1.]);
-        assert_eq!(man.voice_pitch, 53);
-        assert_eq!(parsed.employees, 1);
-        let first = parsed.first.unwrap();
+        assert_eq!(man.properties, [("wear".into(), std::borrow::Cow::Borrowed(prop.as_slice()))]);
+        assert_eq!(man.misc.active_slot, -1);
+        assert_eq!(man.misc.thumbnail.as_ref(), [1, 2, 3]);
+        assert_eq!(man.misc.thumbnail_time, "架空");
+        assert_eq!(man.misc.color, [0.25, 0.5, 0.75, 1.]);
+        assert_eq!(man.misc.voice_pitch, 53);
+        assert_eq!(parsed.employees.len(), 2);
+        let first = &parsed.employees[0];
         assert_eq!(first.properties, man.properties);
         assert!(first.colors[8].used);
         assert_eq!(first.colors[8].shadow_contrast, 88);
+        assert_eq!(parsed.employees[1].misc.active_slot, 1);
         assert_eq!(
-            crate::binio::Reader::new(&bytes[parsed.next..]).str()?,
-            "CM3D2_MAID_STATUS"
+            crate::binio::Reader::new(&bytes[parsed.script_offset..]).str()?,
+            "CM3D2_SCRIPT"
         );
+        let chr = parsed.encode()?;
+        assert_eq!(chr.as_slice(), &bytes[parsed.script_offset - chr.len()..parsed.script_offset]);
         // Relative bookmarks still point inside the file, but no part may read
         // the following management section to complete a truncated field.
         for len in 0..stock.bytes.len() {
@@ -745,11 +1118,152 @@ mod tests {
         }
         let (empty, _) = slot("20261125000000", "");
         let parsed = crate::save::stock_1040::read_slot(&empty)?;
-        assert!(parsed.first.is_none() && parsed.men.is_empty());
+        assert!(parsed.employees.is_empty() && parsed.men.is_empty());
         assert_eq!(
-            crate::binio::Reader::new(&empty[parsed.next..]).str()?,
+            crate::binio::Reader::new(&empty[parsed.script_offset..]).str()?,
             "CM3D2_SCRIPT"
         );
+        Ok(())
+    }
+
+    const CHECKPOINT: [u8; 4] = [0x80, 0x00, 0x72, 0x45];
+
+    struct NativeSlotSections {
+        management: Vec<u8>,
+        guest: Vec<u8>,
+        casino: Vec<u8>,
+    }
+
+    fn native_slot_sections() -> Result<NativeSlotSections> {
+        let mut management = Writer::default();
+        management.i32(0); // Men.
+        management.i32(0); // Employees.
+        for header in ["CM3D2_SCRIPT", "CM3D2_KAG"] {
+            management.str(header);
+            management.i32(1040);
+        }
+        management.i32(CHECKPOINT.len() as i32);
+        management.bytes.extend(CHECKPOINT);
+        management.bool(true);
+        management.bool(false);
+        management.str("CM3D2_DeskCustomize");
+        management.i32(1040);
+        management.i32(1);
+        management.i32(20);
+        management.i32(21);
+        management.bool(false);
+        management.bool(true);
+        for n in [4.5, -1.25, 0.0, -15.0, 180.0, 0.0, 1.0, 2.0, 1.0] {
+            management.f32(n);
+        }
+        management.str("COM3D2_SCENARIO_SELECT");
+        management.f32(1.3);
+        for value in [
+            "CM3D2_SCENARIO_ID_START",
+            "870",
+            "40",
+            "CM3D2_SCENARIO_ID_END",
+            "CM3D2_SELECTABLE_START",
+            "40",
+            "CM3D2_SELECTABLE_END",
+        ] {
+            management.str(value);
+        }
+        management.bool(true);
+        management.bool(false);
+        management.str("CM3D21_FACILITY_MGR");
+        management.i32(1040);
+        management.str("5");
+        management.i32(0); // Existing rooms.
+        management.str("CM3D21_TEMP_FLAG");
+        management.i32(0); // Materials.
+        management.i32(0); // Pending rooms.
+        for _ in 0..3 {
+            management.str("CM3D21_TEMP_FLAG");
+            management.i32(0);
+        }
+
+        // The installed 1.0.4 SaveData.Serialize and DataArray.Serialize
+        // generated this nested guest record using synthetic flags and text.
+        let reference = concat!(
+            "07000000050000000e32303236313132353030303030300a0000000c00000006",
+            "e68ea5e5aea2ce0110434d334432315f54454d505f464c41470100000004726f",
+            "6f6d0766697874757265010000000e666978747572652d776f726b657210434d",
+            "334432315f54454d505f464c41470100000007636f6d6d656e747be4bbaee4bb",
+            "aee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4",
+            "bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbae",
+            "e4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bb",
+            "aee4bbaee4bbaee4bbaee4bbaee4bbaee4bbaee4bbae",
+        );
+        let mut guest = Writer::default();
+        guest.str("COM3D2_KASIZUKI");
+        guest.i32(1040);
+        guest.bytes.push(1);
+        for i in (0..reference.len()).step_by(2) {
+            guest.bytes.push(u8::from_str_radix(&reference[i..i + 2], 16)?);
+        }
+
+        let mut casino = Writer::default();
+        for word in ["COM3D2_CASINO", "Ver:1.1", "Low"] {
+            casino.str(word);
+        }
+        casino.i32(-1);
+        casino.i32(2);
+        for word in ["High", "COM3D2_CASINOSHOP_ID", "32", "29", "COM3D2_CASINOSHOP_ID_END"] {
+            casino.str(word);
+        }
+        casino.bool(true);
+        casino.bool(false);
+
+        Ok(NativeSlotSections {
+            management: management.bytes,
+            guest: guest.bytes,
+            casino: casino.bytes,
+        })
+    }
+
+    #[test]
+    fn native_slot_round_trips_all_sections_and_relocates_bookmarks() -> Result<()> {
+        use crate::save::slot_1040::Slot;
+        let NativeSlotSections { management, guest, casino } = native_slot_sections()?;
+        let slot = |management: &[u8], guest: &[u8], casino: &[u8]| {
+            slot_with_sections("20261125000000", "fixture", management, guest, casino).0
+        };
+        let bytes = slot(&management, &guest, &casino);
+        let mut snapshot = Slot::read(&bytes)?;
+        assert_eq!(snapshot.csv_paths[0], ["base"]);
+        assert_eq!(snapshot.management.script.checkpoint, CHECKPOINT);
+        assert!(snapshot.management.script.fade_wait && !snapshot.management.script.enabled);
+        let item = &snapshot.management.desk[0];
+        assert_eq!((item.key, item.id), (20, 21));
+        assert!(item.seasonal && !item.visible);
+        assert_eq!(item.position, [4.5, -1.25, 0.0]);
+        assert_eq!(item.rotation, [-15.0, 180.0, 0.0]);
+        assert_eq!(snapshot.management.scenario.played, [(870, true), (40, false)]);
+        assert_eq!(snapshot.management.scenario.selectable, [40]);
+        assert!(snapshot.management.facilities.rooms.is_empty());
+        assert_eq!(snapshot.guest_slots[0].slot, 7);
+        assert_eq!(snapshot.guest_slots[0].play_count, 12);
+        assert_eq!(snapshot.guest_slots[0].characters[0].1[0].1, "仮".repeat(41));
+        assert_eq!(snapshot.casino.low.as_ref().unwrap().stock_index, 2);
+        assert!(snapshot.casino.high.is_none());
+        assert_eq!(snapshot.casino.sold_out, [(32, true), (29, false)]);
+        assert_eq!(snapshot.encode()?, bytes);
+
+        snapshot.header.comment = "別のコメント".into();
+        snapshot.guest_slots[0].comment = "再開用".repeat(95);
+        snapshot.casino.sold_out[0].1 = false;
+        let changed = snapshot.encode()?;
+        let restored = Slot::read(&changed)?;
+        assert_eq!(restored.header.comment, "別のコメント");
+        assert_eq!(restored.guest_slots, snapshot.guest_slots);
+        assert_eq!(restored.casino, snapshot.casino);
+
+        let short_management = slot(&management[..management.len() - 1], &guest, &casino);
+        assert!(Slot::read(&short_management).is_err());
+        let short_guest = slot(&management, &guest[..guest.len() - 1], &casino);
+        assert!(Slot::read(&short_guest).is_err());
+        assert!(Slot::read(&bytes[..bytes.len() - 1]).is_err());
         Ok(())
     }
 
@@ -757,7 +1271,8 @@ mod tests {
     #[ignore = "requires COM3D2_ROOT standalone installation"]
     fn installed_daily_slot_modes_and_confirmed_deletion() -> Result<()> {
         let (_tmp, mut rt, c, mut op, _, _, mut assets) = daily::installed_panel(&[])?;
-        let (bytes, _) = slot("20261125000000", "保管");
+        let NativeSlotSections { management, guest, casino } = native_slot_sections()?;
+        let (bytes, _) = slot_with_sections("20261125000000", "保管", &management, &guest, &casino);
         op.storage.write_atomic(&save_path(13)?, &bytes)?;
         op.storage
             .write_atomic(&save_path(0)?, &slot("20261124000000", "別のデータ").0)?;
@@ -835,13 +1350,10 @@ mod tests {
             "SystemDialog/Base/Ok",
             buttons::MOUSE_LEFT,
         )?;
-        assert!(message(&widgets, "まだ保存できません"));
-        click(
-            &mut viewer,
-            &mut widgets,
-            "SystemDialog/Base/Ok",
-            buttons::MOUSE_LEFT,
-        )?;
+        assert_eq!(viewer.operation.take(), Some(SlotOperation::Save {
+            slot: 13,
+            comment: "保管".into(),
+        }));
         click(
             &mut viewer,
             &mut widgets,
@@ -870,13 +1382,7 @@ mod tests {
             "SystemDialog/Base/Ok",
             buttons::MOUSE_LEFT,
         )?;
-        assert!(message(&widgets, "12日目・在籍0人"));
-        click(
-            &mut viewer,
-            &mut widgets,
-            "SystemDialog/Base/Ok",
-            buttons::MOUSE_LEFT,
-        )?;
+        assert_eq!(viewer.operation.take(), Some(SlotOperation::Load { slot: 13 }));
         click(
             &mut viewer,
             &mut widgets,

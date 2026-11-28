@@ -19,27 +19,89 @@ pub const MODULE: &str = "renpy.display.transform";
 
 /// (name, default, diff kind: 2 = plain, 4 = with inherited value, 0 = none)
 pub const PROPERTIES: &[(&str, Def, u8)] = &[
-    ("additive", Def::F(0.), 2), ("alpha", Def::F(1.), 2), ("blend", Def::None, 2), ("blur", Def::None, 2),
-    ("corner1", Def::None, 2), ("corner2", Def::None, 2), ("crop", Def::None, 2), ("crop_relative", Def::None, 2),
-    ("debug", Def::None, 2), ("delay", Def::I(0), 2), ("events", Def::B(true), 2), ("fit", Def::None, 2), ("fps", Def::None, 2),
-    ("matrixanchor", Def::None, 2), ("matrixcolor", Def::None, 2), ("matrixtransform", Def::None, 2), ("maxsize", Def::None, 2),
-    ("mesh", Def::B(false), 0), ("mesh_pad", Def::None, 2), ("nearest", Def::None, 2), ("perspective", Def::None, 2),
-    ("rotate", Def::None, 2), ("rotate_pad", Def::B(true), 2), ("point_to", Def::None, 2), ("orientation", Def::None, 2),
-    ("xrotate", Def::None, 2), ("yrotate", Def::None, 2), ("zrotate", Def::None, 2), ("shader", Def::None, 0),
-    ("show_cancels_hide", Def::B(true), 2), ("subpixel", Def::B(false), 2), ("transform_anchor", Def::B(false), 2),
-    ("zoom", Def::F(1.), 2), ("xanchoraround", Def::F(0.5), 2), ("xanchor", Def::None, 4), ("xaround", Def::F(0.), 2),
-    ("xoffset", Def::F(0.), 2), ("xpan", Def::None, 2), ("xpos", Def::None, 4), ("xsize", Def::None, 2), ("xtile", Def::I(1), 2),
-    ("xzoom", Def::F(1.), 2), ("yanchoraround", Def::F(0.5), 2), ("yanchor", Def::None, 4), ("yaround", Def::F(0.), 2),
-    ("yoffset", Def::F(0.), 2), ("ypan", Def::None, 2), ("ypos", Def::None, 4), ("ysize", Def::None, 2), ("ytile", Def::I(1), 2),
-    ("yzoom", Def::F(1.), 2), ("zpos", Def::F(0.), 2), ("zzoom", Def::B(false), 2),
-    ("gl_anisotropic", Def::None, 0), ("gl_blend_func", Def::None, 0), ("gl_color_mask", Def::None, 0), ("gl_depth", Def::None, 0),
-    ("gl_drawable_resolution", Def::None, 0), ("gl_mipmap", Def::None, 0), ("gl_pixel_perfect", Def::None, 0),
-    ("gl_texture_scaling", Def::None, 0), ("gl_texture_wrap", Def::None, 0),
+    ("additive", Def::F(0.), 2),
+    ("alpha", Def::F(1.), 2),
+    ("blend", Def::None, 2),
+    ("blur", Def::None, 2),
+    ("corner1", Def::None, 2),
+    ("corner2", Def::None, 2),
+    ("crop", Def::None, 2),
+    ("crop_relative", Def::None, 2),
+    ("debug", Def::None, 2),
+    ("delay", Def::I(0), 2),
+    ("events", Def::B(true), 2),
+    ("fit", Def::None, 2),
+    ("fps", Def::None, 2),
+    ("matrixanchor", Def::None, 2),
+    ("matrixcolor", Def::None, 2),
+    ("matrixtransform", Def::None, 2),
+    ("maxsize", Def::None, 2),
+    ("mesh", Def::B(false), 0),
+    ("mesh_pad", Def::None, 2),
+    ("nearest", Def::None, 2),
+    ("perspective", Def::None, 2),
+    ("rotate", Def::None, 2),
+    ("rotate_pad", Def::B(true), 2),
+    ("point_to", Def::None, 2),
+    ("orientation", Def::None, 2),
+    ("xrotate", Def::None, 2),
+    ("yrotate", Def::None, 2),
+    ("zrotate", Def::None, 2),
+    ("shader", Def::None, 0),
+    ("show_cancels_hide", Def::B(true), 2),
+    ("subpixel", Def::B(false), 2),
+    ("transform_anchor", Def::B(false), 2),
+    ("zoom", Def::F(1.), 2),
+    ("xanchoraround", Def::F(0.5), 2),
+    ("xanchor", Def::None, 4),
+    ("xaround", Def::F(0.), 2),
+    ("xoffset", Def::F(0.), 2),
+    ("xpan", Def::None, 2),
+    ("xpos", Def::None, 4),
+    ("xsize", Def::None, 2),
+    ("xtile", Def::I(1), 2),
+    ("xzoom", Def::F(1.), 2),
+    ("yanchoraround", Def::F(0.5), 2),
+    ("yanchor", Def::None, 4),
+    ("yaround", Def::F(0.), 2),
+    ("yoffset", Def::F(0.), 2),
+    ("ypan", Def::None, 2),
+    ("ypos", Def::None, 4),
+    ("ysize", Def::None, 2),
+    ("ytile", Def::I(1), 2),
+    ("yzoom", Def::F(1.), 2),
+    ("zpos", Def::F(0.), 2),
+    ("zzoom", Def::B(false), 2),
+    ("gl_anisotropic", Def::None, 0),
+    ("gl_blend_func", Def::None, 0),
+    ("gl_color_mask", Def::None, 0),
+    ("gl_depth", Def::None, 0),
+    ("gl_drawable_resolution", Def::None, 0),
+    ("gl_mipmap", Def::None, 0),
+    ("gl_pixel_perfect", Def::None, 0),
+    ("gl_texture_scaling", Def::None, 0),
+    ("gl_texture_wrap", Def::None, 0),
 ];
 
 pub const ALIASES: &[&str] = &[
-    "alignaround", "align", "anchor", "anchorangle", "anchoraround", "anchorradius", "angle", "around", "offset", "pos", "radius",
-    "size", "xalign", "xcenter", "xycenter", "xysize", "yalign", "ycenter",
+    "alignaround",
+    "align",
+    "anchor",
+    "anchorangle",
+    "anchoraround",
+    "anchorradius",
+    "angle",
+    "around",
+    "offset",
+    "pos",
+    "radius",
+    "size",
+    "xalign",
+    "xcenter",
+    "xycenter",
+    "xysize",
+    "yalign",
+    "ycenter",
 ];
 
 #[derive(Clone, Copy)]
@@ -60,7 +122,10 @@ fn def_value(d: Def) -> Value {
 }
 
 pub fn is_property(name: &str) -> bool {
-    PROPERTIES.iter().any(|p| p.0 == name) || ALIASES.contains(&name) || name.starts_with("u_") || name.starts_with("gl_")
+    PROPERTIES.iter().any(|p| p.0 == name)
+        || ALIASES.contains(&name)
+        || name.starts_with("u_")
+        || name.starts_with("gl_")
 }
 
 fn absolute(vm: &mut Vm, v: f64) -> PyResult<Value> {
@@ -69,11 +134,18 @@ fn absolute(vm: &mut Vm, v: f64) -> PyResult<Value> {
 }
 
 fn num(vm: &mut Vm, v: &Value) -> PyResult<f64> {
-    if py::is_none(v) { Ok(0.) } else { py::f64_of(vm, v) }
+    if py::is_none(v) {
+        Ok(0.)
+    } else {
+        py::f64_of(vm, v)
+    }
 }
 
 fn first_not_none(vals: &[Value]) -> Value {
-    vals.iter().find(|v| !py::is_none(v)).cloned().unwrap_or_else(|| vals.last().cloned().unwrap_or(Value::None))
+    vals.iter()
+        .find(|v| !py::is_none(v))
+        .cloned()
+        .unwrap_or_else(|| vals.last().cloned().unwrap_or(Value::None))
 }
 
 fn g(vm: &mut Vm, s: &Value, n: &str) -> PyResult<Value> {
@@ -92,7 +164,13 @@ fn limit_angle(n: f64) -> f64 {
 
 fn ts_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let s = &args[0];
-    for n in ["inherited_xpos", "inherited_ypos", "inherited_xanchor", "inherited_yanchor", "last_angle"] {
+    for n in [
+        "inherited_xpos",
+        "inherited_ypos",
+        "inherited_xanchor",
+        "inherited_yanchor",
+        "last_angle",
+    ] {
         st(vm, s, n, Value::None)?;
     }
     Ok(Value::None)
@@ -105,7 +183,17 @@ fn ts_take_state(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let v = g(vm, &ts, n)?;
         st(vm, s, n, v)?;
     }
-    for n in ["last_angle", "radius_sign", "relative_anchor_radius_sign", "absolute_anchor_radius_sign", "last_absolute_anchorangle", "last_relative_anchorangle", "last_events", "available_width", "available_height"] {
+    for n in [
+        "last_angle",
+        "radius_sign",
+        "relative_anchor_radius_sign",
+        "absolute_anchor_radius_sign",
+        "last_absolute_anchorangle",
+        "last_relative_anchorangle",
+        "last_events",
+        "available_width",
+        "available_height",
+    ] {
         let v = g(vm, &ts, n)?;
         st(vm, s, n, v)?;
     }
@@ -171,7 +259,10 @@ fn ts_diff(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn ts_get(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let s = &args[0];
     let prop = py::string(vm, &args.get(1).cloned().unwrap_or(Value::None))?;
-    let saved: Vec<Value> = ["xpos", "ypos", "xanchor", "yanchor"].iter().map(|n| g(vm, s, n)).collect::<PyResult<_>>()?;
+    let saved: Vec<Value> = ["xpos", "ypos", "xanchor", "yanchor"]
+        .iter()
+        .map(|n| g(vm, s, n))
+        .collect::<PyResult<_>>()?;
     for (i, n) in ["xpos", "ypos", "xanchor", "yanchor"].iter().enumerate() {
         if py::is_none(&saved[i]) {
             let v = g(vm, s, &format!("inherited_{n}"))?;
@@ -188,7 +279,15 @@ fn ts_get(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn get_placement(vm: &mut Vm, s: &Value, cxo: f64, cyo: f64) -> PyResult<Vec<Value>> {
     let persp = g(vm, s, "perspective")?;
     if !py::is_none(&persp) && !matches!(persp, Value::Bool(false)) {
-        return Ok(vec![Value::Int(0), Value::Int(0), Value::Int(0), Value::Int(0), Value::Float(cxo), Value::Float(cyo), Value::Bool(false)]);
+        return Ok(vec![
+            Value::Int(0),
+            Value::Int(0),
+            Value::Int(0),
+            Value::Int(0),
+            Value::Float(cxo),
+            Value::Float(cyo),
+            Value::Bool(false),
+        ]);
     }
     let mut out = Vec::new();
     for n in ["xpos", "ypos", "xanchor", "yanchor"] {
@@ -223,11 +322,22 @@ fn avail(vm: &mut Vm, s: &Value) -> PyResult<(f64, f64)> {
 
 fn pos_polar_vector(vm: &mut Vm, s: &Value) -> PyResult<(f64, f64)> {
     let (aw, ah) = avail(vm, s)?;
-    let xp = { let a = g(vm, s, "xpos")?; let b = g(vm, s, "inherited_xpos")?; first_not_none(&[a, b, Value::Int(0)]) };
-    let yp = { let a = g(vm, s, "ypos")?; let b = g(vm, s, "inherited_ypos")?; first_not_none(&[a, b, Value::Int(0)]) };
+    let xp = {
+        let a = g(vm, s, "xpos")?;
+        let b = g(vm, s, "inherited_xpos")?;
+        first_not_none(&[a, b, Value::Int(0)])
+    };
+    let yp = {
+        let a = g(vm, s, "ypos")?;
+        let b = g(vm, s, "inherited_ypos")?;
+        first_not_none(&[a, b, Value::Int(0)])
+    };
     let xa = g(vm, s, "xaround")?;
     let ya = g(vm, s, "yaround")?;
-    Ok((scale(vm, &xp, aw)? - scale(vm, &xa, aw)?, scale(vm, &yp, ah)? - scale(vm, &ya, ah)?))
+    Ok((
+        scale(vm, &xp, aw)? - scale(vm, &xa, aw)?,
+        scale(vm, &yp, ah)? - scale(vm, &ya, ah)?,
+    ))
 }
 
 fn get_angle(vm: &mut Vm, s: &Value) -> PyResult<f64> {
@@ -238,7 +348,14 @@ fn get_angle(vm: &mut Vm, s: &Value) -> PyResult<f64> {
         angle += 360.;
     }
     let last = g(vm, s, "last_angle")?;
-    let sign = { let v = g(vm, s, "radius_sign")?; if py::is_none(&v) { 1. } else { py::f64_of(vm, &v)? } };
+    let sign = {
+        let v = g(vm, s, "radius_sign")?;
+        if py::is_none(&v) {
+            1.
+        } else {
+            py::f64_of(vm, &v)?
+        }
+    };
     if radius < 0.001 && !py::is_none(&last) {
         angle = py::f64_of(vm, &last)?;
     } else if sign < 0. {
@@ -249,7 +366,14 @@ fn get_angle(vm: &mut Vm, s: &Value) -> PyResult<f64> {
 
 fn get_radius(vm: &mut Vm, s: &Value) -> PyResult<f64> {
     let (vx, vy) = pos_polar_vector(vm, s)?;
-    let sign = { let v = g(vm, s, "radius_sign")?; if py::is_none(&v) { 1. } else { py::f64_of(vm, &v)? } };
+    let sign = {
+        let v = g(vm, s, "radius_sign")?;
+        if py::is_none(&v) {
+            1.
+        } else {
+            py::f64_of(vm, &v)?
+        }
+    };
     Ok(vx.hypot(vy) * sign)
 }
 
@@ -314,8 +438,16 @@ fn make_position(vm: &mut Vm, a: f64, r: f64) -> PyResult<Value> {
 fn anchor_polar_vectors(vm: &mut Vm, s: &Value) -> PyResult<((f64, f64), (f64, f64))> {
     let xar = g(vm, s, "xanchoraround")?;
     let yar = g(vm, s, "yanchoraround")?;
-    let xa = { let a = g(vm, s, "xanchor")?; let b = g(vm, s, "inherited_xanchor")?; first_not_none(&[a, b, Value::Int(0)]) };
-    let ya = { let a = g(vm, s, "yanchor")?; let b = g(vm, s, "inherited_yanchor")?; first_not_none(&[a, b, Value::Int(0)]) };
+    let xa = {
+        let a = g(vm, s, "xanchor")?;
+        let b = g(vm, s, "inherited_xanchor")?;
+        first_not_none(&[a, b, Value::Int(0)])
+    };
+    let ya = {
+        let a = g(vm, s, "yanchor")?;
+        let b = g(vm, s, "inherited_yanchor")?;
+        first_not_none(&[a, b, Value::Int(0)])
+    };
     let (xra, xrr) = pos_parts(vm, &xar)?;
     let (yra, yrr) = pos_parts(vm, &yar)?;
     let (xaa, xar2) = pos_parts(vm, &xa)?;
@@ -361,7 +493,14 @@ fn anchorradius(vm: &mut Vm, s: &Value) -> PyResult<(f64, f64)> {
     Ok((ax.hypot(ay) * asign, rx.hypot(ry) * rsign))
 }
 
-fn set_anchor_from_polar(vm: &mut Vm, s: &Value, aa: f64, ra: f64, ar: f64, rr: f64) -> PyResult<()> {
+fn set_anchor_from_polar(
+    vm: &mut Vm,
+    s: &Value,
+    aa: f64,
+    ra: f64,
+    ar: f64,
+    rr: f64,
+) -> PyResult<()> {
     let xar = g(vm, s, "xanchoraround")?;
     let yar = g(vm, s, "yanchoraround")?;
     let (xra, xrr) = pos_parts(vm, &xar)?;
@@ -441,7 +580,14 @@ fn alias_set(vm: &mut Vm, s: &Value, name: &str, v: Value) -> PyResult<()> {
         }
         "alignaround" => {
             let (a, b) = pair(vm, &v)?;
-            for (n, x) in [("xanchor", &a), ("yanchor", &b), ("xaround", &a), ("yaround", &b), ("xanchoraround", &a), ("yanchoraround", &b)] {
+            for (n, x) in [
+                ("xanchor", &a),
+                ("yanchor", &b),
+                ("xaround", &a),
+                ("yaround", &b),
+                ("xanchoraround", &a),
+                ("yanchoraround", &b),
+            ] {
                 st(vm, s, n, x.clone())?;
             }
             Ok(())
@@ -480,7 +626,10 @@ fn alias_set(vm: &mut Vm, s: &Value, name: &str, v: Value) -> PyResult<()> {
         }
         "size" => {
             let (a, b) = pair(vm, &v)?;
-            let fix = |v: Value| match v { Value::Float(f) => Value::Int(f as i64), o => o };
+            let fix = |v: Value| match v {
+                Value::Float(f) => Value::Int(f as i64),
+                o => o,
+            };
             st(vm, s, "xsize", fix(a))?;
             st(vm, s, "ysize", fix(b))
         }
@@ -517,8 +666,18 @@ fn alias_set(vm: &mut Vm, s: &Value, name: &str, v: Value) -> PyResult<()> {
                 let x = py::f64_of(vm, &v)?;
                 (x, x)
             };
-            st(vm, s, "last_absolute_anchorangle", Value::Float(limit_angle(aa)))?;
-            st(vm, s, "last_relative_anchorangle", Value::Float(limit_angle(ra)))?;
+            st(
+                vm,
+                s,
+                "last_absolute_anchorangle",
+                Value::Float(limit_angle(aa)),
+            )?;
+            st(
+                vm,
+                s,
+                "last_relative_anchorangle",
+                Value::Float(limit_angle(ra)),
+            )?;
             let (mut ar, mut rr) = anchorradius(vm, s)?;
             let (mut aa2, mut ra2) = (aa, ra);
             if ar < 0. {
@@ -572,24 +731,40 @@ fn alias_getter(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn alias_setter(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let name = py::string(vm, &args[0])?;
-    alias_set(vm, &args[1], &name, args.get(2).cloned().unwrap_or(Value::None))?;
+    alias_set(
+        vm,
+        &args[1],
+        &name,
+        args.get(2).cloned().unwrap_or(Value::None),
+    )?;
     Ok(Value::None)
 }
 
 fn f_scale(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let room = py::f64_of(vm, &args.get(1).cloned().unwrap_or(Value::Int(0)))?;
-    Ok(Value::Float(compute_raw(vm, &args.first().cloned().unwrap_or(Value::None), room)?))
+    Ok(Value::Float(compute_raw(
+        vm,
+        &args.first().cloned().unwrap_or(Value::None),
+        room,
+    )?))
 }
 
 // Proxy ------------------------------------------------------------------------------------
 
 fn proxy_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    st(vm, &args[0], "name", args.get(1).cloned().unwrap_or(Value::None))?;
+    st(
+        vm,
+        &args[0],
+        "name",
+        args.get(1).cloned().unwrap_or(Value::None),
+    )?;
     Ok(Value::None)
 }
 
 fn simplify(vm: &mut Vm, v: Value) -> PyResult<Value> {
-    if let Some(items) = py::seq(&v).filter(|_| matches!(v.payload(), Some(crysirror_python::Payload::Tuple(_)))) {
+    if let Some(items) =
+        py::seq(&v).filter(|_| matches!(v.payload(), Some(crysirror_python::Payload::Tuple(_))))
+    {
         let mut out = Vec::new();
         for i in items {
             out.push(simplify(vm, i)?);
@@ -619,7 +794,12 @@ fn proxy_set(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let name = py::get(vm, &args[0], "name")?;
     let name = py::string(vm, &name)?;
     let state = py::get(vm, &args[1], "state")?;
-    py::set(vm, &state, &name, args.get(2).cloned().unwrap_or(Value::None))?;
+    py::set(
+        vm,
+        &state,
+        &name,
+        args.get(2).cloned().unwrap_or(Value::None),
+    )?;
     Ok(Value::None)
 }
 
@@ -640,12 +820,29 @@ pub fn is_transform(vm: &mut Vm, v: &Value) -> bool {
     }
 }
 
-const PREFIXES: &[&str] = &["selected_activate", "selected_hover", "selected_idle", "selected_insensitive", "activate", "hover", "idle", "insensitive", ""];
+const PREFIXES: &[&str] = &[
+    "selected_activate",
+    "selected_hover",
+    "selected_idle",
+    "selected_insensitive",
+    "activate",
+    "hover",
+    "idle",
+    "insensitive",
+    "",
+];
 
 pub fn t_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let names = ["child", "function", "style", "focus", "default", "_args"];
-    let mut vals = vec![Value::None, Value::None, vm.types.new_str("default"), Value::None, Value::Bool(false), Value::None];
+    let mut vals = vec![
+        Value::None,
+        Value::None,
+        vm.types.new_str("default"),
+        Value::None,
+        Value::Bool(false),
+        Value::None,
+    ];
     for (i, v) in args[1..].iter().enumerate().take(names.len()) {
         vals[i] = v.clone();
     }
@@ -668,7 +865,11 @@ pub fn t_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     init_kw.push(("_args".into(), vals[5].clone()));
     super::layout::container_init(vm, &[this.clone()], &init_kw)?;
     py::set(vm, this, "function", vals[1].clone())?;
-    let child = if py::is_none(&vals[0]) { Value::None } else { super::easy::displayable(vm, &vals[0], &Value::None, true)? };
+    let child = if py::is_none(&vals[0]) {
+        Value::None
+    } else {
+        super::easy::displayable(vm, &vals[0], &Value::None, true)?
+    };
     if !py::is_none(&child) {
         vm.call_method(this, "add", vec![child])?;
     }
@@ -681,9 +882,11 @@ pub fn t_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             let mut prefix = String::new();
             let mut prop = k.to_string();
             loop {
-                if is_property(&prop) && (prefix.is_empty() || PREFIXES.contains(&prefix.as_str())) {
+                if is_property(&prop) && (prefix.is_empty() || PREFIXES.contains(&prefix.as_str()))
+                {
                     let key = vm.types.new_str(&prefix);
-                    let mut d = vm.call_method(&arguments, "get", vec![key.clone(), Value::None])?;
+                    let mut d =
+                        vm.call_method(&arguments, "get", vec![key.clone(), Value::None])?;
                     if py::is_none(&d) {
                         d = vm.types.new_dict();
                         ops::setitem(vm, &arguments, key, d.clone())?;
@@ -694,7 +897,11 @@ pub fn t_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
                 let Some((np, rest)) = prop.split_once('_') else {
                     return Err(py::error(vm, format!("Unknown transform property: {k:?}")));
                 };
-                prefix = if prefix.is_empty() { np.to_owned() } else { format!("{prefix}_{np}") };
+                prefix = if prefix.is_empty() {
+                    np.to_owned()
+                } else {
+                    format!("{prefix}_{np}")
+                };
                 prop = rest.to_owned();
             }
         }
@@ -712,7 +919,13 @@ pub fn t_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     for n in ["forward", "reverse"] {
         py::set(vm, this, n, Value::None)?;
     }
-    for (n, v) in [("active", false), ("hide_request", false), ("hide_response", true), ("replaced_request", false), ("replaced_response", true)] {
+    for (n, v) in [
+        ("active", false),
+        ("hide_request", false),
+        ("hide_response", true),
+        ("replaced_request", false),
+        ("replaced_response", true),
+    ] {
         py::set(vm, this, n, Value::Bool(v))?;
     }
     for n in ["st", "at", "st_offset", "at_offset", "child_st_base"] {
@@ -733,7 +946,11 @@ fn t_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let state = vm.call(&sc, Vec::new(), Vec::new())?;
         for n in ["xpos", "ypos", "xanchor", "yanchor"] {
             let x = py::get_or_none(vm, this, n)?;
-            let x = if ops::truthy(vm, &x)? { x } else { Value::Int(0) };
+            let x = if ops::truthy(vm, &x)? {
+                x
+            } else {
+                Value::Int(0)
+            };
             py::set(vm, &state, n, x)?;
         }
         for n in ["alpha", "rotate", "zoom", "xzoom", "yzoom"] {
@@ -765,7 +982,9 @@ fn t_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn t_visit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let c = py::get_or_none(vm, &args[0], "child")?;
-    Ok(vm.types.new_list(if py::is_none(&c) { Vec::new() } else { vec![c] }))
+    Ok(vm
+        .types
+        .new_list(if py::is_none(&c) { Vec::new() } else { vec![c] }))
 }
 
 fn t_default_function(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -781,11 +1000,18 @@ fn t_default_function(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let mut prefixes = Vec::new();
     while !prefix.is_empty() {
         prefixes.insert(0, prefix.clone());
-        prefix = prefix.split_once('_').map(|(_, r)| r.to_owned()).unwrap_or_default();
+        prefix = prefix
+            .split_once('_')
+            .map(|(_, r)| r.to_owned())
+            .unwrap_or_default();
     }
     prefixes.insert(0, String::new());
     // State is the Transform itself in upstream (properties proxy to state).
-    let target = if py::is_none(&state) { this.clone() } else { state };
+    let target = if py::is_none(&state) {
+        this.clone()
+    } else {
+        state
+    };
     for p in prefixes {
         let key = vm.types.new_string(p);
         let d = vm.call_method(&arguments, "get", vec![key, Value::None])?;
@@ -952,7 +1178,11 @@ fn t_hide(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let state = py::get(vm, this, "state")?;
     if kind.as_str() == Some("cancel") {
         let sch = g(vm, &state, "show_cancels_hide")?;
-        return Ok(if ops::truthy(vm, &sch)? { Value::None } else { this.clone() });
+        return Ok(if ops::truthy(vm, &sch)? {
+            Value::None
+        } else {
+            this.clone()
+        });
     }
     let (s, a) = sync_times(vm, this, s0, a0)?;
     let active = py::get_or_none(vm, this, "active")?;
@@ -965,14 +1195,22 @@ fn t_hide(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let hr = py::get_or_none(vm, this, "hide_request")?;
     let rr = py::get_or_none(vm, this, "replaced_request")?;
-    let d = if !(ops::truthy(vm, &hr)? || ops::truthy(vm, &rr)?) { vm.call_method(this, "copy", Vec::new())? } else { this.clone() };
+    let d = if !(ops::truthy(vm, &hr)? || ops::truthy(vm, &rr)?) {
+        vm.call_method(this, "copy", Vec::new())?
+    } else {
+        this.clone()
+    };
     for n in ["st_offset", "at_offset"] {
         let v = py::get_or_none(vm, this, n)?;
         py::set(vm, &d, n, v)?;
     }
     if is_atl(vm, this) {
         let aso = py::get_or_none(vm, this, "atl_st_offset")?;
-        let v = if py::is_none(&aso) { py::get_or_none(vm, this, "st_offset")? } else { aso };
+        let v = if py::is_none(&aso) {
+            py::get_or_none(vm, this, "st_offset")?
+        } else {
+            aso
+        };
         py::set(vm, &d, "atl_st_offset", v)?;
     }
     if kind.as_str() == Some("hide") {
@@ -985,14 +1223,26 @@ fn t_hide(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (fs, fa) = adjust_for_fps(vm, this, s, a)?;
     let f = py::get_or_none(vm, &d, "function")?;
     if !py::is_none(&f) {
-        vm.call(&f, vec![d.clone(), Value::Float(fs), Value::Float(fa)], Vec::new())?;
+        vm.call(
+            &f,
+            vec![d.clone(), Value::Float(fs), Value::Float(fa)],
+            Vec::new(),
+        )?;
     } else if is_atl(vm, &d) {
-        vm.call_method(&d, "execute", vec![d.clone(), Value::Float(fs), Value::Float(fa)])?;
+        vm.call_method(
+            &d,
+            "execute",
+            vec![d.clone(), Value::Float(fs), Value::Float(fa)],
+        )?;
     }
     let so = fget(vm, this, "st_offset")?;
     let ao = fget(vm, this, "at_offset")?;
     let dchild = py::get(vm, &d, "child")?;
-    let nc = vm.call_method(&dchild, "_hide", vec![Value::Float(s - so), Value::Float(a - ao), kind])?;
+    let nc = vm.call_method(
+        &dchild,
+        "_hide",
+        vec![Value::Float(s - so), Value::Float(a - ao), kind],
+    )?;
     if !py::is_none(&nc) {
         py::set(vm, &d, "child", nc)?;
         py::set(vm, &d, "hide_response", Value::Bool(false))?;
@@ -1010,7 +1260,10 @@ fn t_hide(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn t_set_child(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let child = arg_or(args, kw, 1, "child", Value::None);
-    let duplicate = match arg(args, kw, 2, "duplicate") { Some(v) => ops::truthy(vm, v)?, None => true };
+    let duplicate = match arg(args, kw, 2, "duplicate") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => true,
+    };
     let mut child = super::easy::displayable(vm, &child, &Value::None, true)?;
     let dup = py::get_or_none(vm, &child, "_duplicatable")?;
     if duplicate && ops::truthy(vm, &dup)? {
@@ -1039,11 +1292,19 @@ fn t_update_state(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (fs, fa) = adjust_for_fps(vm, this, s, a)?;
     let arguments = py::get_or_none(vm, this, "arguments")?;
     if !py::is_none(&arguments) {
-        vm.call_method(this, "default_function", vec![this.clone(), Value::Float(fs), Value::Float(fa)])?;
+        vm.call_method(
+            this,
+            "default_function",
+            vec![this.clone(), Value::Float(fs), Value::Float(fa)],
+        )?;
     }
     let f = py::get_or_none(vm, this, "function")?;
     if !py::is_none(&f) {
-        let fr = vm.call(&f, vec![this.clone(), Value::Float(fs), Value::Float(fa)], Vec::new())?;
+        let fr = vm.call(
+            &f,
+            vec![this.clone(), Value::Float(fs), Value::Float(fa)],
+            Vec::new(),
+        )?;
         if !py::is_none(&fr) {
             let t = py::f64_of(vm, &fr)?;
             render::redraw(vm, this, t);
@@ -1086,34 +1347,70 @@ fn rot(vm: &mut Vm, state: &Value, n: &str) -> PyResult<f64> {
 }
 
 /// The RenderTransform pipeline.
-pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, heighto: f64, st: f64, at: f64) -> PyResult<Value> {
+pub fn render_transform(
+    vm: &mut Vm,
+    this: &Value,
+    state: &Value,
+    widtho: f64,
+    heighto: f64,
+    st: f64,
+    at: f64,
+) -> PyResult<Value> {
     let persp = g(vm, state, "perspective")?;
     if ops::truthy(vm, &persp)? {
-        return Err(py::error(vm, "The perspective transform property needs a 3D camera projection, which the CrySirror layer presenter does not provide for Ren'Py transforms."));
+        return Err(py::error(
+            vm,
+            "The perspective transform property needs a 3D camera projection, which the CrySirror layer presenter does not provide for Ren'Py transforms.",
+        ));
     }
     // render_child (xsize/ysize).
     let mut child = py::get_or_none(vm, this, "child")?;
     if py::is_none(&child) {
-        child = py::import_attr(vm, MODULE, "get_null").and_then(|f| vm.call(&f, Vec::new(), Vec::new()))?;
+        child = py::import_attr(vm, MODULE, "get_null")
+            .and_then(|f| vm.call(&f, Vec::new(), Vec::new()))?;
     }
     let rel = py::config_bool(vm, "relative_transform_size").unwrap_or(true);
     let (mut wo, mut ho) = (widtho, heighto);
     let xs = g(vm, state, "xsize")?;
     let ys = g(vm, state, "ysize")?;
-    let xsize = if py::is_none(&xs) { None } else { let v = compute_raw(vm, &xs, if rel { wo } else { 1. })?; wo = v; Some(v) };
-    let ysize = if py::is_none(&ys) { None } else { let v = compute_raw(vm, &ys, if rel { ho } else { 1. })?; ho = v; Some(v) };
+    let xsize = if py::is_none(&xs) {
+        None
+    } else {
+        let v = compute_raw(vm, &xs, if rel { wo } else { 1. })?;
+        wo = v;
+        Some(v)
+    };
+    let ysize = if py::is_none(&ys) {
+        None
+    } else {
+        let v = compute_raw(vm, &ys, if rel { ho } else { 1. })?;
+        ho = v;
+        Some(v)
+    };
     let base = fget(vm, this, "child_st_base")?;
     let mut cr = render::render(vm, &child, wo, ho, st - base, at)?;
     // tile_and_pan
-    let xtile = { let v = g(vm, state, "xtile")?; if py::is_none(&v) { 1 } else { py::int(vm, &v)? } };
-    let ytile = { let v = g(vm, state, "ytile")?; if py::is_none(&v) { 1 } else { py::int(vm, &v)? } };
+    let xtile = {
+        let v = g(vm, state, "xtile")?;
+        if py::is_none(&v) { 1 } else { py::int(vm, &v)? }
+    };
+    let ytile = {
+        let v = g(vm, state, "ytile")?;
+        if py::is_none(&v) { 1 } else { py::int(vm, &v)? }
+    };
     let (cw0, ch0) = super::layout::size(&cr);
     if xtile != 1 || ytile != 1 {
         let mut t = RenderData::new(cw0 * xtile as f64, ch0 * ytile as f64);
         let src = render::source_of(vm, &cr)?;
         for i in 0..xtile {
             for j in 0..ytile {
-                t.children.push(render::Blit { source: src.clone(), x: i as f64 * cw0, y: j as f64 * ch0, focus: true, main: true });
+                t.children.push(render::Blit {
+                    source: src.clone(),
+                    x: i as f64 * cw0,
+                    y: j as f64 * ch0,
+                    focus: true,
+                    main: true,
+                });
             }
         }
         cr = new_render(vm, t);
@@ -1122,15 +1419,29 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
     let ypan = g(vm, state, "ypan")?;
     if !py::is_none(&xpan) || !py::is_none(&ypan) {
         let (crw, crh) = super::layout::size(&cr);
-        let (pan_x, pan_w) = if py::is_none(&xpan) { (0., crw) } else { (cw0 * (py::f64_of(vm, &xpan)?.rem_euclid(360.) / 360.), cw0) };
-        let (pan_y, pan_h) = if py::is_none(&ypan) { (0., crh) } else { (ch0 * (py::f64_of(vm, &ypan)?.rem_euclid(360.) / 360.), ch0) };
+        let (pan_x, pan_w) = if py::is_none(&xpan) {
+            (0., crw)
+        } else {
+            (cw0 * (py::f64_of(vm, &xpan)?.rem_euclid(360.) / 360.), cw0)
+        };
+        let (pan_y, pan_h) = if py::is_none(&ypan) {
+            (0., crh)
+        } else {
+            (ch0 * (py::f64_of(vm, &ypan)?.rem_euclid(360.) / 360.), ch0)
+        };
         let mut t = RenderData::new(pan_w, pan_h);
         let src = render::source_of(vm, &cr)?;
         let xs: &[f64] = if py::is_none(&xpan) { &[0.] } else { &[0., 1.] };
         let ys: &[f64] = if py::is_none(&ypan) { &[0.] } else { &[0., 1.] };
         for xo in xs {
             for yo in ys {
-                t.children.push(render::Blit { source: src.clone(), x: xo * cw0 - pan_x, y: yo * ch0 - pan_y, focus: true, main: true });
+                t.children.push(render::Blit {
+                    source: src.clone(),
+                    x: xo * cw0 - pan_x,
+                    y: yo * ch0 - pan_y,
+                    focus: true,
+                    main: true,
+                });
             }
         }
         t.xclipping = true;
@@ -1141,10 +1452,15 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
     let blur = g(vm, state, "blur")?;
     let has_blur = !py::is_none(&blur) && py::f64_of(vm, &blur)? > 0.;
     if ops::truthy(vm, &mesh)? && !has_blur {
-        return Err(py::error(vm, "The mesh transform property needs a shader mesh pipeline, which the CrySirror layer presenter does not provide."));
+        return Err(py::error(
+            vm,
+            "The mesh transform property needs a shader mesh pipeline, which the CrySirror layer presenter does not provide.",
+        ));
     }
     let (mut width, mut height) = super::layout::size(&cr);
-    let cs = vm.types.new_tuple(vec![Value::Float(width), Value::Float(height)]);
+    let cs = vm
+        .types
+        .new_tuple(vec![Value::Float(width), Value::Float(height)]);
     py::set(vm, this, "child_size", cs)?;
     // cropping
     let (mut xo, mut yo) = (0f64, 0f64);
@@ -1161,7 +1477,11 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
             return num(vm, n);
         }
         let rv = compute_raw(vm, n, base)?.trunc();
-        Ok(if ops::truthy(vm, &ltc).unwrap_or(false) { rv.min(limit) } else { rv })
+        Ok(if ops::truthy(vm, &ltc).unwrap_or(false) {
+            rv.min(limit)
+        } else {
+            rv
+        })
     };
     let mut crop: Option<[f64; 4]> = None;
     if !py::is_none(&crop_v) {
@@ -1196,7 +1516,13 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
         if !py::is_none(&rotate) {
             let mut c = RenderData::new(w, h);
             let src = render::source_of(vm, &cr)?;
-            c.children.push(render::Blit { source: src, x: -nx, y: -ny, focus: true, main: true });
+            c.children.push(render::Blit {
+                source: src,
+                x: -nx,
+                y: -ny,
+                focus: true,
+                main: true,
+            });
             c.xclipping = true;
             c.yclipping = true;
             cr = new_render(vm, c);
@@ -1266,8 +1592,22 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
         }
     }
     let zoom = rot(vm, state, "zoom")?;
-    let xzoom = zoom * { let v = g(vm, state, "xzoom")?; if py::is_none(&v) { 1. } else { py::f64_of(vm, &v)? } };
-    let yzoom = zoom * { let v = g(vm, state, "yzoom")?; if py::is_none(&v) { 1. } else { py::f64_of(vm, &v)? } };
+    let xzoom = zoom * {
+        let v = g(vm, state, "xzoom")?;
+        if py::is_none(&v) {
+            1.
+        } else {
+            py::f64_of(vm, &v)?
+        }
+    };
+    let yzoom = zoom * {
+        let v = g(vm, state, "yzoom")?;
+        if py::is_none(&v) {
+            1.
+        } else {
+            py::f64_of(vm, &v)?
+        }
+    };
     if xzoom != 1. {
         rxdx *= xzoom;
         width *= xzoom.abs();
@@ -1294,14 +1634,22 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
         rydy *= cosa;
         let px = if xzoom < 0. { -cw / 2. } else { cw / 2. };
         let py_ = if yzoom < 0. { -ch / 2. } else { ch / 2. };
-        let pad = { let v = g(vm, state, "rotate_pad")?; ops::truthy(vm, &v)? };
+        let pad = {
+            let v = g(vm, state, "rotate_pad")?;
+            ops::truthy(vm, &v)?
+        };
         xo = -px * cosa + py_ * sina;
         yo = -px * sina - py_ * cosa;
         if pad {
             width = cw.hypot(ch);
             height = width;
         } else {
-            let pts = [(xo, yo), (-px * cosa - py_ * sina, -px * sina + py_ * cosa), (px * cosa - py_ * sina, px * sina + py_ * cosa), (px * cosa + py_ * sina, px * sina - py_ * cosa)];
+            let pts = [
+                (xo, yo),
+                (-px * cosa - py_ * sina, -px * sina + py_ * cosa),
+                (px * cosa - py_ * sina, px * sina + py_ * cosa),
+                (px * cosa + py_ * sina, px * sina - py_ * cosa),
+            ];
             let minx = pts.iter().map(|p| p.0).fold(f64::MAX, f64::min);
             let maxx = pts.iter().map(|p| p.0).fold(f64::MIN, f64::max);
             let miny = pts.iter().map(|p| p.1).fold(f64::MAX, f64::min);
@@ -1324,11 +1672,18 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
         m
     };
     // matrix_operations: x/y/z rotate, orientation, point_to, zpos.
-    let (xr, yr, zr) = (rot(vm, state, "xrotate")?, rot(vm, state, "yrotate")?, rot(vm, state, "zrotate")?);
+    let (xr, yr, zr) = (
+        rot(vm, state, "xrotate")?,
+        rot(vm, state, "yrotate")?,
+        rot(vm, state, "zrotate")?,
+    );
     let orient = g(vm, state, "orientation")?;
     let point_to = g(vm, state, "point_to")?;
     if !py::is_none(&point_to) {
-        return Err(py::error(vm, "The point_to transform property needs a 3D camera, which the CrySirror layer presenter does not provide for Ren'Py transforms."));
+        return Err(py::error(
+            vm,
+            "The point_to transform property needs a 3D camera, which the CrySirror layer presenter does not provide for Ren'Py transforms.",
+        ));
     }
     let anchor = |vm: &mut Vm| -> PyResult<(f64, f64)> {
         let ma = g(vm, state, "matrixanchor")?;
@@ -1336,14 +1691,22 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
             return Ok((width / 2., height / 2.));
         }
         let m = py::items(vm, &ma)?;
-        Ok((compute_raw(vm, &m[0], width)?, compute_raw(vm, &m[1], height)?))
+        Ok((
+            compute_raw(vm, &m[0], width)?,
+            compute_raw(vm, &m[1], height)?,
+        ))
     };
     if xr != 0. || yr != 0. || zr != 0. || ops::truthy(vm, &orient)? {
         let (mx, my) = anchor(vm)?;
         let mut m = Mat::offset(-mx, -my, 0.);
         if ops::truthy(vm, &orient)? {
             let o = py::items(vm, &orient)?;
-            m = Mat::rotate(py::f64_of(vm, &o[0])?, py::f64_of(vm, &o[1])?, py::f64_of(vm, &o[2])?).mul(&m);
+            m = Mat::rotate(
+                py::f64_of(vm, &o[0])?,
+                py::f64_of(vm, &o[1])?,
+                py::f64_of(vm, &o[2])?,
+            )
+            .mul(&m);
         }
         if xr != 0. || yr != 0. || zr != 0. {
             m = Mat::rotate(xr, yr, zr).mul(&m);
@@ -1361,9 +1724,12 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
         if crysirror_python::builtins::is_callable(vm, &mo) && render::matrix_data(&mo).is_none() {
             mo = vm.call(&mo, vec![Value::None, Value::Float(1.)], Vec::new())?;
         }
-        let m = render::matrix_data(&mo).ok_or_else(|| py::error(vm, "matrixtransform requires a Matrix"))?;
+        let m = render::matrix_data(&mo)
+            .ok_or_else(|| py::error(vm, "matrixtransform requires a Matrix"))?;
         let (mx, my) = anchor(vm)?;
-        let full = Mat::offset(mx, my, 0.).mul(&m).mul(&Mat::offset(-mx, -my, 0.));
+        let full = Mat::offset(mx, my, 0.)
+            .mul(&m)
+            .mul(&Mat::offset(-mx, -my, 0.));
         reverse = full.mul(&reverse);
     }
     let mut rv = RenderData::new(width, height);
@@ -1382,15 +1748,28 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
         py::set(vm, this, "forward", id)?;
     }
     let alpha = rot(vm, state, "alpha")?.clamp(0., 1.);
-    let subpixel = { let v = g(vm, state, "subpixel")?; ops::truthy(vm, &v)? };
+    let subpixel = {
+        let v = g(vm, state, "subpixel")?;
+        ops::truthy(vm, &v)?
+    };
     let src = render::source_of(vm, &cr)?;
     if alpha <= 0. {
         if let render::Source::Render(r, _) = &src {
             rv.pass_focuses.push(r.clone());
         }
     } else {
-        let (bx, by) = if subpixel { (xo, yo) } else { (xo.trunc(), yo.trunc()) };
-        rv.children.push(render::Blit { source: src, x: bx, y: by, focus: true, main: true });
+        let (bx, by) = if subpixel {
+            (xo, yo)
+        } else {
+            (xo.trunc(), yo.trunc())
+        };
+        rv.children.push(render::Blit {
+            source: src,
+            x: bx,
+            y: by,
+            focus: true,
+            main: true,
+        });
     }
     // final_render
     let mc = g(vm, state, "matrixcolor")?;
@@ -1401,7 +1780,10 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
         }
         if render::matrix_data(&m).is_none() {
             let r = ops::repr(vm, &m)?;
-            return Err(py::error(vm, format!("matrixcolor requires a Matrix (not im.matrix, got {r})")));
+            return Err(py::error(
+                vm,
+                format!("matrixcolor requires a Matrix (not im.matrix, got {r})"),
+            ));
         }
         let d = vm.types.new_dict();
         py::dict_set(vm, &d, "matrixcolor", m)?;
@@ -1412,25 +1794,38 @@ pub fn render_transform(vm: &mut Vm, this: &Value, state: &Value, widtho: f64, h
     rv.alpha = alpha;
     rv.over = 1. - rot(vm, state, "additive")?;
     if has_blur {
-        let d = if py::is_none(&rv.properties) { vm.types.new_dict() } else { rv.properties.clone() };
+        let d = if py::is_none(&rv.properties) {
+            vm.types.new_dict()
+        } else {
+            rv.properties.clone()
+        };
         py::dict_set(vm, &d, "blur", blur)?;
         rv.properties = d;
     }
     let blend = g(vm, state, "blend")?;
     if ops::truthy(vm, &blend)? {
-        let d = if py::is_none(&rv.properties) { vm.types.new_dict() } else { rv.properties.clone() };
+        let d = if py::is_none(&rv.properties) {
+            vm.types.new_dict()
+        } else {
+            rv.properties.clone()
+        };
         py::dict_set(vm, &d, "blend", blend)?;
         rv.properties = d;
     }
     let shader = g(vm, state, "shader")?;
     if !py::is_none(&shader) {
-        return Err(py::error(vm, "The shader transform property needs model-based GLSL shaders, which the CrySirror layer presenter does not run for Ren'Py."));
+        return Err(py::error(
+            vm,
+            "The shader transform property needs model-based GLSL shaders, which the CrySirror layer presenter does not run for Ren'Py.",
+        ));
     }
     rv.xclipping = clipping;
     rv.yclipping = clipping;
     let off = vm.types.new_tuple(vec![Value::Float(xo), Value::Float(yo)]);
     py::set(vm, this, "offsets", vm.types.new_list(vec![off]))?;
-    let rs = vm.types.new_tuple(vec![Value::Float(width), Value::Float(height)]);
+    let rs = vm
+        .types
+        .new_tuple(vec![Value::Float(width), Value::Float(height)]);
     py::set(vm, this, "render_size", rs)?;
     Ok(new_render(vm, rv))
 }
@@ -1462,7 +1857,11 @@ fn t_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     for i in (0..children.len().min(offs.len())).rev() {
         let o = py::items(vm, &offs[i])?;
         let (cx, cy) = fm.transform2(x - py::f64_of(vm, &o[0])?, y - py::f64_of(vm, &o[1])?);
-        let rv = vm.call_method(&children[i], "event", vec![ev.clone(), Value::Float(cx), Value::Float(cy), stv.clone()])?;
+        let rv = vm.call_method(
+            &children[i],
+            "event",
+            vec![ev.clone(), Value::Float(cx), Value::Float(cy), stv.clone()],
+        )?;
         if !py::is_none(&rv) {
             return Ok(rv);
         }
@@ -1521,7 +1920,12 @@ fn t_get_placement(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let p = vm.call_method(&child, "get_placement", Vec::new())?;
         let p = py::items(vm, &p)?;
         if py::config_bool(vm, "transform_uses_child_position").unwrap_or(true) {
-            for (i, n) in [(0, "inherited_xpos"), (2, "inherited_xanchor"), (1, "inherited_ypos"), (3, "inherited_yanchor")] {
+            for (i, n) in [
+                (0, "inherited_xpos"),
+                (2, "inherited_xanchor"),
+                (1, "inherited_ypos"),
+                (3, "inherited_yanchor"),
+            ] {
                 if !py::is_none(&p[i]) {
                     py::set(vm, &state, n, p[i].clone())?;
                 }
@@ -1622,35 +2026,60 @@ fn camera_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("add_property", f_add_property),
-        ("add_uniform", f_add_uniform),
-        ("add_gl_property", f_add_gl_property),
-        ("get_null", f_get_null),
-        ("first_not_none", |_, a, _| Ok(first_not_none(a))),
-        ("limit_angle", |vm, a, _| {
-            let n = py::f64_of(vm, &a.first().cloned().unwrap_or(Value::Int(0)))?;
-            Ok(Value::Float(limit_angle(n)))
-        }),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("add_property", f_add_property),
+            ("add_uniform", f_add_uniform),
+            ("add_gl_property", f_add_gl_property),
+            ("get_null", f_get_null),
+            ("first_not_none", |_, a, _| Ok(first_not_none(a))),
+            ("limit_angle", |vm, a, _| {
+                let n = py::f64_of(vm, &a.first().cloned().unwrap_or(Value::Int(0)))?;
+                Ok(Value::Float(limit_angle(n)))
+            }),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     set(vm, "null", Value::None);
     let object = py::import_attr(vm, "renpy.object", "Object")?;
-    let cam = py::class(vm, MODULE, "Camera", &[object.clone()], &[("__init__", camera_init)], &[])?;
+    let cam = py::class(
+        vm,
+        MODULE,
+        "Camera",
+        &[object.clone()],
+        &[("__init__", camera_init)],
+        &[],
+    )?;
     set(vm, "Camera", Value::Obj(cam));
     // TransformState
     let absolute_c = py::import_attr(vm, "renpy.display.core", "absolute")?;
-    let ts = py::class(vm, MODULE, "TransformState", &[object], &[
-        ("__init__", ts_init),
-        ("take_state", ts_take_state),
-        ("diff", ts_diff),
-        ("get", ts_get),
-        ("get_placement", ts_get_placement),
-    ], &[
-        ("last_angle", Value::Float(0.)), ("last_relative_anchorangle", Value::Float(0.)), ("last_absolute_anchorangle", Value::Float(0.)),
-        ("last_events", Value::Bool(true)), ("available_width", Value::Int(0)), ("available_height", Value::Int(0)), ("radius_type", absolute_c),
-        ("radius_sign", Value::Int(1)), ("relative_anchor_radius_sign", Value::Int(1)), ("absolute_anchor_radius_sign", Value::Int(1)),
-    ])?;
+    let ts = py::class(
+        vm,
+        MODULE,
+        "TransformState",
+        &[object],
+        &[
+            ("__init__", ts_init),
+            ("take_state", ts_take_state),
+            ("diff", ts_diff),
+            ("get", ts_get),
+            ("get_placement", ts_get_placement),
+        ],
+        &[
+            ("last_angle", Value::Float(0.)),
+            ("last_relative_anchorangle", Value::Float(0.)),
+            ("last_absolute_anchorangle", Value::Float(0.)),
+            ("last_events", Value::Bool(true)),
+            ("available_width", Value::Int(0)),
+            ("available_height", Value::Int(0)),
+            ("radius_type", absolute_c),
+            ("radius_sign", Value::Int(1)),
+            ("relative_anchor_radius_sign", Value::Int(1)),
+            ("absolute_anchor_radius_sign", Value::Int(1)),
+        ],
+    )?;
     for (n, d, _) in PROPERTIES {
         vm.types.set_attr(&ts, n, def_value(*d));
     }
@@ -1666,7 +2095,18 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     }
     set(vm, "TransformState", Value::Obj(ts));
     // Proxy
-    let proxy = py::class(vm, MODULE, "Proxy", &[], &[("__init__", proxy_init), ("__get__", proxy_get), ("__set__", proxy_set)], &[])?;
+    let proxy = py::class(
+        vm,
+        MODULE,
+        "Proxy",
+        &[],
+        &[
+            ("__init__", proxy_init),
+            ("__get__", proxy_get),
+            ("__set__", proxy_set),
+        ],
+        &[],
+    )?;
     set(vm, "Proxy", Value::Obj(proxy.clone()));
     // Transform
     let container = py::import_attr(vm, "renpy.display.layout", "Container")?;
@@ -1676,47 +2116,76 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     }
     let empty_list = vm.types.new_list(Vec::new());
     let zero2 = vm.types.new_tuple(vec![Value::Int(0), Value::Int(0)]);
-    let tcls = py::class(vm, MODULE, "Transform", &[container], &[
-        ("__init__", t_init),
-        ("after_upgrade", t_after_upgrade),
-        ("visit", t_visit),
-        ("default_function", t_default_function),
-        ("set_transform_event", t_set_transform_event),
-        ("take_state", t_take_state),
-        ("take_execution_state", t_take_execution_state),
-        ("copy", t_copy),
-        ("_change_transform_child", t_change_transform_child),
-        ("_handles_event", t_handles_event),
-        ("_hide", t_hide),
-        ("set_child", t_set_child),
-        ("update_state", t_update_state),
-        ("render", t_render),
-        ("event", t_event),
-        ("__call__", t_call),
-        ("_unique", t_unique),
-        ("get_placement", t_get_placement),
-        ("update", t_update),
-        ("_duplicate", t_duplicate),
-        ("_in_current_store", t_in_current_store),
-        ("_repr_info", t_repr_info),
-    ], &[
-        ("__version__", Value::Int(5)), ("transform_event_responder", Value::Bool(true)), ("DEFAULT_ARGUMENTS", args_default.clone()),
-        ("active", Value::Bool(false)), ("children", empty_list), ("arguments", args_default), ("child_size", zero2),
-        ("_duplicatable", Value::Bool(true)),
-    ])?;
-    for (n, _, _) in PROPERTIES.iter().map(|p| (p.0, p.1, p.2)).chain(ALIASES.iter().map(|a| (*a, Def::None, 0))) {
+    let tcls = py::class(
+        vm,
+        MODULE,
+        "Transform",
+        &[container],
+        &[
+            ("__init__", t_init),
+            ("after_upgrade", t_after_upgrade),
+            ("visit", t_visit),
+            ("default_function", t_default_function),
+            ("set_transform_event", t_set_transform_event),
+            ("take_state", t_take_state),
+            ("take_execution_state", t_take_execution_state),
+            ("copy", t_copy),
+            ("_change_transform_child", t_change_transform_child),
+            ("_handles_event", t_handles_event),
+            ("_hide", t_hide),
+            ("set_child", t_set_child),
+            ("update_state", t_update_state),
+            ("render", t_render),
+            ("event", t_event),
+            ("__call__", t_call),
+            ("_unique", t_unique),
+            ("get_placement", t_get_placement),
+            ("update", t_update),
+            ("_duplicate", t_duplicate),
+            ("_in_current_store", t_in_current_store),
+            ("_repr_info", t_repr_info),
+        ],
+        &[
+            ("__version__", Value::Int(5)),
+            ("transform_event_responder", Value::Bool(true)),
+            ("DEFAULT_ARGUMENTS", args_default.clone()),
+            ("active", Value::Bool(false)),
+            ("children", empty_list),
+            ("arguments", args_default),
+            ("child_size", zero2),
+            ("_duplicatable", Value::Bool(true)),
+        ],
+    )?;
+    for (n, _, _) in PROPERTIES
+        .iter()
+        .map(|p| (p.0, p.1, p.2))
+        .chain(ALIASES.iter().map(|a| (*a, Def::None, 0)))
+    {
         let nv = vm.types.new_str(n);
         let p = vm.call(&Value::Obj(proxy.clone()), vec![nv], Vec::new())?;
         vm.types.set_attr(&tcls, n, p);
     }
     set(vm, "Transform", Value::Obj(tcls.clone()));
     super::atlrt::create_atl_transform(vm, &m, Value::Obj(tcls))?;
-    let sp = vm.call(&Value::Obj(vm.types.set.clone()), vec![vm.types.new_list(vec![vm.types.new_str("alt")])], Vec::new())?;
+    let sp = vm.call(
+        &Value::Obj(vm.types.set.clone()),
+        vec![vm.types.new_list(vec![vm.types.new_str("alt")])],
+        Vec::new(),
+    )?;
     set(vm, "style_properties", sp);
     let names: Vec<Value> = PROPERTIES.iter().map(|p| vm.types.new_str(p.0)).collect();
-    let all = vm.call(&Value::Obj(vm.types.set.clone()), vec![vm.types.new_list(names)], Vec::new())?;
+    let all = vm.call(
+        &Value::Obj(vm.types.set.clone()),
+        vec![vm.types.new_list(names)],
+        Vec::new(),
+    )?;
     set(vm, "all_properties", all);
-    for n in ["diff2_properties", "diff4_properties", "uniforms", "gl_properties"] {
+    for n in [
+        "diff2_properties",
+        "diff4_properties",
+        "uniforms",
+        "gl_properties",
+    ] {
         let s = vm.call(&Value::Obj(vm.types.set.clone()), Vec::new(), Vec::new())?;
         set(vm, n, s);
     }
@@ -1771,7 +2240,9 @@ fn f_add_property(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 /// (the standard uniforms of the GL2 renderer excepted).
 fn f_add_uniform(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let n = py::string(vm, &args[0])?;
-    if !n.starts_with("u_") || ["u_transform", "u_time", "u_random", "u_drawable_size"].contains(&n.as_str()) {
+    if !n.starts_with("u_")
+        || ["u_transform", "u_time", "u_random", "u_drawable_size"].contains(&n.as_str())
+    {
         return Ok(Value::None);
     }
     add_property(vm, &args[0], None, Some(2))?;

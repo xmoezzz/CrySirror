@@ -10,6 +10,7 @@ pub(super) struct Facility {
     pub before_assignment: [BTreeSet<String>; 2],
     pub costume: wardrobe::Wardrobe,
     pub recipes: BTreeMap<i32,Vec<i32>>,
+    pub native_parameters: Option<[i32; 3]>,
 }
 pub(super) fn roster(s: &TjsState) -> Vec<usize> {
     s.player

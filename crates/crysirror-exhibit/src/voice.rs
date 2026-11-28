@@ -28,7 +28,6 @@ impl Voice {
     /// Prepare the authored ordinary voice using the loose PCM path. Do not
     /// enter this from the effect-voice command: its gain and message marks
     /// belong to a different native caller. Dialogue owns playback/advance.
-    #[allow(dead_code)] // waits for the transactional 0x1c caller
     pub fn begin_character(
         h: &mut dyn HostServices,
         worker: &TaskPool,

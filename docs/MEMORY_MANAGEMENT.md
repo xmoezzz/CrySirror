@@ -54,7 +54,12 @@ Adapter-built models (`HostServices::upload_model`) stay in the client asset
 cache until the adapter calls `release_model`. The runtime drops the bytes at
 the end of the first tick in which no world entity of that client references the
 asset, so an adapter releases a model when it despawns or rebuilds the entity
-that drew it. Unreleased models count toward prepared CPU residency. On 64-bit Windows, macOS, Linux, iOS and Android the host defaults to no aggregate prepared-cache cap. Other targets retain the 256 MiB default. A configured host budget still enforces admission, and diagnostics report a null budget when uncapped.
+that drew it. On 64-bit Windows, macOS, Linux, iOS and Android, the immutable
+GLB backing and the prepared CPU cache each default to no aggregate cap. The
+host reports their byte counts separately. An explicit prepared-cache budget
+limits each pool and cannot be lowered below either pool's current residency.
+Ordinary cached file reads retain their 256 MiB bound. On other targets the
+encoded file cache, including generated GLBs, retains its 256 MiB limit.
 
 The prepared CPU asset cache normally keeps recently used images for five
 seconds so repeated draws can reuse the decode. When a new result would

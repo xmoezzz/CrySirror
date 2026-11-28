@@ -52,7 +52,14 @@ pub struct Fog {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderSettings {
+    /// First light-info in the lighting group (the sun), before normalization.
+    pub sun_direction: [f32; 3],
+    pub sun_colour: [f32; 3],
+    pub sun_intensity: f32,
+    pub sun_shadow_distance: f32,
     pub ambient_scale: f32,
+    /// Misc group +0, material vertex uniform g_basis3InGameScalar.
+    pub baked_vertex_scale: f32,
     /// RGB × intensity.
     pub tint: [f32; 3],
     pub ambient: [f32; 3],
@@ -83,7 +90,12 @@ pub fn read(dc: &Dc, name: u32) -> Result<Option<RenderSettings>> {
     };
     let t = |o: u32| f(TONEMAP + o);
     Ok(Some(RenderSettings {
+        sun_direction: [f(0x20)?, f(0x24)?, f(0x28)?],
+        sun_colour: [f(0)?, f(4)?, f(8)?],
+        sun_intensity: f(0xc)?,
+        sun_shadow_distance: f(0xc0)?,
         ambient_scale: f(LIGHTING_AMBIENT_SCALE)?,
+        baked_vertex_scale: f(0x7e0)?,
         tint: rgbi(POST)?,
         ambient: rgbi(POST + 0x20)?,
         light_scale: rgbi(POST + 0x30)?,
@@ -126,7 +138,12 @@ impl RenderSettings {
         let (a, b) = (&self.tonemap, &other.tonemap);
         let (fa, fb) = (&self.fog, &other.fog);
         Self {
+            sun_direction: mix3(self.sun_direction, other.sun_direction, t),
+            sun_colour: mix3(self.sun_colour, other.sun_colour, t),
+            sun_intensity: m(self.sun_intensity, other.sun_intensity),
+            sun_shadow_distance: m(self.sun_shadow_distance, other.sun_shadow_distance),
             ambient_scale: m(self.ambient_scale, other.ambient_scale),
+            baked_vertex_scale: m(self.baked_vertex_scale, other.baked_vertex_scale),
             tint: mix3(self.tint, other.tint, t),
             ambient: mix3(self.ambient, other.ambient, t),
             light_scale: mix3(self.light_scale, other.light_scale, t),

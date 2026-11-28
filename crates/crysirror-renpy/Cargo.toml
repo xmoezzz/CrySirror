@@ -13,6 +13,7 @@ crysirror-python.workspace = true
 flate2 = "1.1"
 num-traits = "0.2"
 crysirror-core.workspace = true
+crysirror-text.workspace = true
 crysirror-image.workspace = true
 crysirror-runtime.workspace = true
 crysirror-scene.workspace = true

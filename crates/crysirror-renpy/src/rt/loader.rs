@@ -41,12 +41,18 @@ impl GameFiles for FileSet {
 
 struct Shells(crate::rpyc::Shells);
 
-fn with_shells<R>(vm: &mut Vm, f: impl FnOnce(&mut Vm, &mut crate::rpyc::Shells) -> R) -> PyResult<R> {
-    let existing = vm.ext_get::<std::rc::Rc<std::cell::RefCell<Shells>>>().map(|s| s.clone());
+fn with_shells<R>(
+    vm: &mut Vm,
+    f: impl FnOnce(&mut Vm, &mut crate::rpyc::Shells) -> R,
+) -> PyResult<R> {
+    let existing = vm
+        .ext_get::<std::rc::Rc<std::cell::RefCell<Shells>>>()
+        .map(|s| s.clone());
     let sh = match existing {
         Some(s) => s,
         None => {
-            let s = crate::rpyc::Shells::new(vm).map_err(|e| py::error(vm, format!("rpyc unpickler: {e}")))?;
+            let s = crate::rpyc::Shells::new(vm)
+                .map_err(|e| py::error(vm, format!("rpyc unpickler: {e}")))?;
             let s = std::rc::Rc::new(std::cell::RefCell::new(Shells(s)));
             vm.ext_set(s.clone());
             s
@@ -78,7 +84,9 @@ fn load_file(vm: &mut Vm, f: &ScriptFile) -> PyResult<Vec<(i32, NodeId)>> {
     let stmts = match &f.source {
         Source::Rpyc(bytes) => {
             let registry = r.registry.borrow().clone();
-            with_shells(vm, |vm, sh| r.script.borrow_mut().load_rpyc(vm, sh, &registry, f, bytes))?
+            with_shells(vm, |vm, sh| {
+                r.script.borrow_mut().load_rpyc(vm, sh, &registry, f, bytes)
+            })?
         }
         Source::Rpy(text) => {
             let cx = ParseCx::new(vm);
@@ -121,7 +129,9 @@ fn initcode_value(vm: &mut Vm, init: &[(i32, NodeId)]) -> PyResult<Value> {
                 Some(first) => nodes::handle(vm, *first)?,
                 None => continue,
             },
-            NodeKind::UserStatement { .. } => py::closure(vm, "execute_init", f_execute_init, Value::Int(*id as i64)),
+            NodeKind::UserStatement { .. } => {
+                py::closure(vm, "execute_init", f_execute_init, Value::Int(*id as i64))
+            }
             _ => nodes::handle(vm, *id)?,
         };
         out.push(vm.types.new_tuple(vec![Value::Int(*prio as i64), v]));
@@ -132,7 +142,9 @@ fn initcode_value(vm: &mut Vm, init: &[(i32, NodeId)]) -> PyResult<Value> {
 fn f_execute_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let id = py::int(vm, &args[0])? as NodeId;
     let p = astexec::user_execute_init(vm, id)?;
-    if let NodeKind::UserStatement { init_priority, .. } = &mut rt(vm).script.borrow_mut().arena.get_mut(id).kind {
+    if let NodeKind::UserStatement { init_priority, .. } =
+        &mut rt(vm).script.borrow_mut().arena.get_mut(id).kind
+    {
         *init_priority = p.max(*init_priority);
     }
     Ok(Value::None)
@@ -147,8 +159,10 @@ fn sort_init(init: &mut [(i32, NodeId)]) {
 fn s_load_script(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let r = rt(vm);
-    let ren_py = r.profile.at_least(8, 1) || (r.profile.at_least(7, 6) && !r.profile.at_least(8, 0));
-    let files = crate::script::discover_release(&FileSet(r.files.clone()), ren_py).map_err(|e| py::error(vm, e))?;
+    let ren_py =
+        r.profile.at_least(8, 1) || (r.profile.at_least(7, 6) && !r.profile.at_least(8, 0));
+    let files = crate::script::discover_release(&FileSet(r.files.clone()), ren_py)
+        .map_err(|e| py::error(vm, e))?;
     let loaded = py::get(vm, this, "loaded_scripts")?;
     let mut init = Vec::new();
     for f in &files {
@@ -171,7 +185,8 @@ fn s_load_script(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 /// Finds `name.rpym` / `name.rpymc` in the game, then the common files.
 fn module_file(vm: &mut Vm, name: &str) -> PyResult<ScriptFile> {
     let r = rt(vm);
-    let modules = crate::script::find_module(&FileSet(r.files.clone()), name).map_err(|e| py::error(vm, e))?;
+    let modules = crate::script::find_module(&FileSet(r.files.clone()), name)
+        .map_err(|e| py::error(vm, e))?;
     modules.ok_or_else(|| py::error(vm, format!("Module {name} could not be loaded.")))
 }
 
@@ -195,15 +210,23 @@ fn s_include_module(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let mi = s_load_module(vm, args, &[])?;
     let items = py::items(vm, &mi)?;
-    let Some(first) = items.first() else { return Ok(Value::None) };
+    let Some(first) = items.first() else {
+        return Ok(Value::None);
+    };
     let ic = py::get(vm, this, "initcode")?;
     let current = py::import_attr(vm, "renpy.game", "initcode_ast_id")?;
     let current = py::int(vm, &current)?;
     let cur = ops::getitem(vm, &ic, Value::Int(current))?;
-    let (a, b) = (ops::getitem(vm, first, Value::Int(0))?, ops::getitem(vm, &cur, Value::Int(0))?);
+    let (a, b) = (
+        ops::getitem(vm, first, Value::Int(0))?,
+        ops::getitem(vm, &cur, Value::Int(0))?,
+    );
     if py::lt(vm, &a, &b)? {
         let n = py::string(vm, &args[1])?;
-        return Err(py::error(vm, format!("Module {n} contains nodes with priority lower than the node that loads it")));
+        return Err(py::error(
+            vm,
+            format!("Module {n} contains nodes with priority lower than the node that loads it"),
+        ));
     }
     let all = py::items(vm, &ic)?;
     let merge = (current + 1) as usize;
@@ -232,7 +255,8 @@ fn s_load_string(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let none = vm.types.new_tuple(vec![Value::None, Value::None]);
     let r = rt(vm);
     let f: std::rc::Rc<str> = filename.as_str().into();
-    let grouped = crate::lexer::list_logical_lines(&f, &data, first).and_then(|l| crate::lexer::group_logical_lines(&f, l));
+    let grouped = crate::lexer::list_logical_lines(&f, &data, first)
+        .and_then(|l| crate::lexer::group_logical_lines(&f, l));
     let block = match grouped {
         Ok(b) => b,
         Err(e) => {
@@ -287,8 +311,18 @@ fn s_load_string(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn s_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     py::set(vm, this, "initcode", vm.types.new_list(Vec::new()))?;
-    py::set(vm, this, "loaded_scripts", vm.types.new_set(Default::default()))?;
-    py::set(vm, this, "load_languages", vm.types.new_set(Default::default()))?;
+    py::set(
+        vm,
+        this,
+        "loaded_scripts",
+        vm.types.new_set(Default::default()),
+    )?;
+    py::set(
+        vm,
+        this,
+        "load_languages",
+        vm.types.new_set(Default::default()),
+    )?;
     py::set(vm, this, "duplicate_labels", vm.types.new_list(Vec::new()))?;
     py::set(vm, this, "serial", Value::Int(0))?;
     let st = py::import_attr(vm, "renpy.translation", "ScriptTranslator")?;
@@ -300,7 +334,9 @@ fn s_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 /// `report_duplicate_labels()`: labels defined twice are parse errors
 /// unless `config.allow_duplicate_labels`.
 fn s_report_duplicate_labels(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
-    if !py::config_bool(vm, "developer").unwrap_or(false) || py::config_bool(vm, "allow_duplicate_labels").unwrap_or(false) {
+    if !py::config_bool(vm, "developer").unwrap_or(false)
+        || py::config_bool(vm, "allow_duplicate_labels").unwrap_or(false)
+    {
         return Ok(Value::Bool(false));
     }
     let dups = rt(vm).script.borrow().duplicate_labels.clone();

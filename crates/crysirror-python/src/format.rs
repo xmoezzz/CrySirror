@@ -228,6 +228,10 @@ pub fn native_repr(vm: &mut Vm, v: &Value) -> PyResult<String> {
                 format!("{name}([{}])", seq_repr(vm, &items, None)?)
             }
             Payload::Code(c) => format!("<code object {} at 0x{:x}, file \"{}\", line {}>", c.name, v.id(), c.filename, c.firstlineno),
+            Payload::WeakRef(d) => match d.upgrade() {
+                Some(t) => format!("<weakref at 0x{:x}; to '{}' at 0x{:x}>", v.id(), t.class_name(), Value::Obj(t.clone()).id()),
+                None => format!("<weakref at 0x{:x}; dead>", v.id()),
+            },
             _ => {
                 if crate::ops::is_subclass(&o.class(), &vm.types.exc("BaseException")) {
                     let args = exc_args(o);

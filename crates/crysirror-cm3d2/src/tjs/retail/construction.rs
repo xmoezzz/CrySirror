@@ -8,7 +8,7 @@ pub(crate) type Orders = OrderedMap<usize, Option<Planned>>;
 #[derive(Clone)]
 pub(crate) struct Planned {
     pub id: i32,
-    name: Option<String>,
+    pub(super) name: Option<String>,
     pub wardrobe: wardrobe::Wardrobe,
 }
 
@@ -156,13 +156,17 @@ impl Catalog {
                 "empty facility slot"
             );
         }
+        let plan = id.map(|id| Planned {
+            id,
+            name: None,
+            wardrobe: wardrobe::Wardrobe {
+                guid: s.guid(),
+                ..Default::default()
+            },
+        });
         s.retail.construction.insert(
             slot,
-            id.map(|id| Planned {
-                id,
-                name: None,
-                wardrobe: Default::default(),
-            }),
+            plan,
         );
         Ok(())
     }
@@ -194,6 +198,8 @@ pub(super) fn advance(s: &mut TjsState) -> Result<()> {
                 .buildings
                 .get_or_insert_with(Default::default)
                 .insert(id);
+            let count = s.retail.facility_build_counts.entry(id).or_default();
+            *count = count.saturating_add(1);
             s.retail.facilities.push(facility::Facility {
                 type_id: id,
                 name: plan.name.clone(),

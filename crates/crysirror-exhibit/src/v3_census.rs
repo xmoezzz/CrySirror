@@ -44,8 +44,8 @@ impl ClientStorage for ReadOnly {
 /// numeric mode are not the native low marker bit.
 fn verify_definition_frontier(bytes: &[u8]) -> Result<()> {
     let mut script = Script::new(bytes.to_vec(), 3)?;
-    ensure!(script.pc == 0x114 && script.remaining == 71, "different stock definition header");
-    ensure!(matches!(script.next()?, Action::DefineMidoriDebug(_)), "different stock definition prefix");
+    ensure!(script.pc == 0x114 && script.remaining == 82, "different stock definition header");
+    ensure!(matches!(script.next()?, Action::DefineDebug(_)), "different stock definition prefix");
     ensure!(script.pc == 0x155 && word(bytes, script.pc)? == 0x1100_0005,
         "different first stock definition checkpoint offset");
     let (raw, _) = cstring(bytes, script.pc + 4)?;
@@ -203,7 +203,7 @@ fn static_midori_2011_corpus() -> Result<()> {
                 ensure!(script.pc == at, "partial Midori opcode admission {op:#06x}");
             }
             match decoded {
-                Ok(Action::DefineMidoriDebug(def)) => {
+                Ok(Action::DefineDebug(def)) => {
                     ensure!(name == "def" && def.mode == 0 && def.pairs == [[-1, 0]; 8], "different stock Midori debug mode");
                     debug_offsets.push(pc);
                 }
@@ -918,5 +918,119 @@ fn taken_2011_block_preflight_does_not_install_a_v1_checkpoint() -> Result<()> {
     assert_eq!(regs.read(Value::Local(4))?, 0x97);
     assert_eq!(regs.read(Value::Local(7))?, 12);
     assert!(regs.text(1)?.is_empty());
+    Ok(())
+}
+
+/// These two READ-ONLY probes use the installed resident's own initialization
+/// parameters. They decode definitions and keep the ordinary entry independent.
+#[test]
+#[ignore = "requires both installed late residents; static reads only"]
+fn late_installed_definitions_and_entry_resources() -> Result<()> {
+    for (variable, exe, expected, records) in [
+        ("CRYSIRROR_EXHIBIT_VOL1_ROOT", "StraySheepVol1.exe", profile::Resident::LateVol1, 76),
+        ("CRYSIRROR_EXHIBIT_VOL2_ROOT", "StraySheepVol2.exe", profile::Resident::LateVol2, 68),
+    ] {
+        let root = PathBuf::from(std::env::var_os(variable).with_context(|| format!("set {variable}"))?);
+        let storage = ReadOnly(root);
+        let seeds = profile::Seeds::read(&storage, &profile::Sources {
+            exe: exe.into(), ini: "ExHIBIT.ini".into(), resident: "resident.dll".into()
+        })?;
+        assert_eq!(seeds.resident, expected);
+        let mut definition = storage.read(&script_path("def")?)?;
+        seeds.decode("def", &mut definition)?;
+        let mut script = Script::new(definition, 3)?;
+        script.resident = Some(expected);
+        assert_eq!(script.remaining, records);
+        let mut pc = script.pc;
+        let mut counts = BTreeMap::new();
+        let mut services = BTreeMap::new();
+        let mut actions = BTreeMap::new();
+        let mut executed = BTreeMap::new();
+        let mut registers = crate::native_state_tests::fresh(3)?;
+        let mut names = midori_state::EntryNames::default();
+        let mut controls = midori_control_parts::Definitions::default();
+        let mut draw_slots = midori_actor::Slots::default();
+        while script.remaining != 0 {
+            let (header, first, end) = branch::envelope(&script.bytes, pc)?;
+            let op = header as u16;
+            *counts.entry(op).or_insert(0) += 1;
+            if op == 0x47 {
+                let Action::DefineDebug(debug) = script.next()? else { bail!("expected packed debug definition") };
+                assert_eq!(debug.mode, 0);
+                assert_eq!(debug.pairs, [[-1, 0]; 8]);
+            } else if op == 0x42 {
+                let Action::DefineV3Dialog(_) = script.next()? else { bail!("expected installed dialog definition") };
+            } else if op == 0x100 {
+                let Action::DefineNotification(notification) = script.next()? else { bail!("expected installed notification definition") };
+                controls.set_notification(notification);
+            } else if op == 0x2c {
+                let Action::DefineNotifications(notifications) = script.next()? else { bail!("expected installed notification bundle") };
+                for notification in notifications {
+                    controls.set_notification(notification);
+                }
+            } else if op == 0x40 {
+                let Action::DefineV3Control(definition) = script.next()? else { bail!("expected installed local-control definition") };
+                controls.set_control(*definition);
+            } else if op == 0xfb {
+                let Action::DefineMidoriActorSlot(definition) = script.next()? else { bail!("expected installed portrait pair") };
+                draw_slots.define(definition)?;
+            } else if op == 0x3d {
+                let Action::Change(Change::MidoriDefineDb(db)) = script.next()
+                    .with_context(|| format!("{expected:?} definition at {pc:#x}, header {header:#x}"))?
+                else {
+                    bail!("expected installed integer table definition");
+                };
+                let id = db.table;
+                let (key, expected_value) = match id {
+                    0 => (38, 36),
+                    1 => (36, 38),
+                    _ => bail!("unexpected installed integer table index {id}"),
+                };
+                assert_eq!(db.rows.len(), 43);
+                registers.change(Change::MidoriDefineDb(db))?;
+                let lookup = format!("{id},{key},0,1,1,2");
+                registers.change(Change::MidoriGetDb(midori_state::DbLookup::parse(lookup.as_bytes())?))?;
+                assert_eq!(registers.read(Value::Local(1))?, expected_value);
+                assert_eq!(registers.read(Value::Local(2))?, 0);
+            } else if matches!(op, 0x0b | 0xbf) {
+                let selector = native_numbers::integer2011(first.context("missing selector")?
+                    .split(|b| *b == b',').next().unwrap_or_default());
+                let family = if op == 0x0b { &mut services } else { &mut actions };
+                *family.entry(selector).or_insert(0) += 1;
+                match (op, selector) {
+                    (0x0b, 30) => {
+                        let Action::MidoriEntryName(entry) = script.next()? else { bail!("expected entry name") };
+                        names.set(entry);
+                        *executed.entry((op, selector)).or_insert(0) += 1;
+                    }
+                    (0xbf, 342) => {
+                        let Action::Change(change) = script.next()? else { bail!("expected ruby fade") };
+                        registers.change(change)?;
+                        assert_ne!(registers.read(Value::System(42))? & 16, 0);
+                        *executed.entry((op, selector)).or_insert(0) += 1;
+                    }
+                    _ => {}
+                }
+            }
+            if script.pc == pc { script.pc = end; script.remaining -= 1; }
+            assert_eq!(script.pc, end);
+            pc = end;
+        }
+        assert_eq!(script.bytes.len(), pc);
+        assert!(names.count() > 0);
+        assert_eq!(controls.notification_slots().keys().copied().collect::<Vec<_>>(), [1, 10, 11, 12, 13]);
+        assert_eq!(controls.control_slots().len(), 13);
+        assert_eq!(draw_slots.startup_layers(), [Some([144, 145]), Some([146, 147]), Some([148, 149])]);
+        assert!(executed.contains_key(&(0xbf, 342)));
+        println!("{expected:?} def records={records}, top={counts:x?}, services={services:?}, actions={actions:?}, dispatched in isolation={executed:?}");
+        let mut start = storage.read(&script_path("start")?)?;
+        // Both supplied launchers have neither RT_BITMAP/152 nor RCG/152.
+        let before = start.clone();
+        seeds.decode("start", &mut start)?;
+        assert_eq!(before, start);
+        let ordinary = Script::new(start, 3)?;
+        assert!(word(&ordinary.bytes, ordinary.pc)? as u16 > 0x11e);
+
+    }
     Ok(())
 }

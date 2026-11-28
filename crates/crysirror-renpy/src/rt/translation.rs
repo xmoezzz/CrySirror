@@ -48,8 +48,17 @@ fn ti_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let s = r.script.borrow();
         let n = s.arena.get(id);
         let (lang, ident, block) = match &n.kind {
-            NodeKind::Translate { language, identifier, block, .. } => (language.clone(), identifier.clone(), block.clone()),
-            NodeKind::TranslateSay { language, identifier, .. } => (language.clone(), identifier.clone(), vec![id]),
+            NodeKind::Translate {
+                language,
+                identifier,
+                block,
+                ..
+            } => (language.clone(), identifier.clone(), block.clone()),
+            NodeKind::TranslateSay {
+                language,
+                identifier,
+                ..
+            } => (language.clone(), identifier.clone(), vec![id]),
             _ => (None, String::new(), Vec::new()),
         };
         let codes: Vec<String> = block
@@ -64,7 +73,12 @@ fn ti_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             .collect();
         (lang, ident, n.filename.to_string(), n.linenumber, codes)
     };
-    py::set(vm, this, "language", lang.map(|l| py::s(vm, &l)).unwrap_or(Value::None))?;
+    py::set(
+        vm,
+        this,
+        "language",
+        lang.map(|l| py::s(vm, &l)).unwrap_or(Value::None),
+    )?;
     py::set(vm, this, "identifier", py::s(vm, &ident))?;
     py::set(vm, this, "filename", py::s(vm, &filename))?;
     py::set(vm, this, "linenumber", Value::Int(line as i64))?;
@@ -82,7 +96,13 @@ fn st_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     py::set(vm, this, "language_translates", vm.types.new_dict())?;
     py::set(vm, this, "chain_worklist", vm.types.new_list(Vec::new()))?;
     let list = Value::Obj(vm.types.list.clone());
-    for n in ["file_translates", "block", "early_block", "python", "additional_strings"] {
+    for n in [
+        "file_translates",
+        "block",
+        "early_block",
+        "python",
+        "additional_strings",
+    ] {
         let d = defaultdict(vm, list.clone())?;
         py::set(vm, this, n, d)?;
     }
@@ -124,9 +144,15 @@ fn st_load(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             let n = s.arena.get(id);
             (n.kind.clone(), n.filename.to_string(), n.linenumber)
         };
-        let lang_v = |vm: &Vm, l: &Option<String>| l.as_ref().map(|l| vm.types.new_str(l)).unwrap_or(Value::None);
+        let lang_v = |vm: &Vm, l: &Option<String>| {
+            l.as_ref()
+                .map(|l| vm.types.new_str(l))
+                .unwrap_or(Value::None)
+        };
         match &kind {
-            NodeKind::TranslatePython { language, .. } | NodeKind::TranslateEarlyBlock { language, .. } | NodeKind::TranslateBlock { language, .. } => {
+            NodeKind::TranslatePython { language, .. }
+            | NodeKind::TranslateEarlyBlock { language, .. }
+            | NodeKind::TranslateBlock { language, .. } => {
                 if let Some(l) = language {
                     ops::set_add(vm, &langs, py::s(vm, l))?;
                 }
@@ -141,13 +167,28 @@ fn st_load(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             }
             NodeKind::Menu { items, .. } => {
                 for it in items {
-                    let s = if old_subs { it.label.replace("%%", "%") } else { it.label.clone() };
-                    let t = vm.types.new_tuple(vec![Value::Int(line as i64), py::s(vm, &s)]);
+                    let s = if old_subs {
+                        it.label.replace("%%", "%")
+                    } else {
+                        it.label.clone()
+                    };
+                    let t = vm
+                        .types
+                        .new_tuple(vec![Value::Int(line as i64), py::s(vm, &s)]);
                     let f = py::s(vm, &filename);
                     append_to(vm, this, "additional_strings", f, t)?;
                 }
             }
-            NodeKind::Translate { identifier, language, .. } | NodeKind::TranslateSay { identifier, language, .. } => {
+            NodeKind::Translate {
+                identifier,
+                language,
+                ..
+            }
+            | NodeKind::TranslateSay {
+                identifier,
+                language,
+                ..
+            } => {
                 let h = nodes::handle(vm, id)?;
                 match language {
                     None => {
@@ -158,7 +199,9 @@ fn st_load(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
                     }
                     Some(l) => {
                         ops::set_add(vm, &langs, py::s(vm, l))?;
-                        let k = vm.types.new_tuple(vec![py::s(vm, identifier), py::s(vm, l)]);
+                        let k = vm
+                            .types
+                            .new_tuple(vec![py::s(vm, identifier), py::s(vm, l)]);
                         ops::setitem(vm, &lt, k, h)?;
                     }
                 }
@@ -197,10 +240,16 @@ pub fn lookup_translate(vm: &mut Vm, identifier: &str, alternate: Option<&str>) 
         let s = r.script.borrow();
         let mut tl = None;
         if let Some(lang) = language.as_str() {
-            tl = s.language_translates.get(&(identifier.clone(), lang.to_owned())).copied();
+            tl = s
+                .language_translates
+                .get(&(identifier.clone(), lang.to_owned()))
+                .copied();
             if tl.is_none() {
                 if let Some(a) = alternate {
-                    tl = s.language_translates.get(&(a.to_owned(), lang.to_owned())).copied();
+                    tl = s
+                        .language_translates
+                        .get(&(a.to_owned(), lang.to_owned()))
+                        .copied();
                 }
             }
         }
@@ -252,7 +301,15 @@ fn f_encode_say_string(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn quote_unicode(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\u{7}', "\\a").replace('\u{8}', "\\b").replace('\u{c}', "\\f").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t").replace('\u{b}', "\\v")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\u{7}', "\\a")
+        .replace('\u{8}', "\\b")
+        .replace('\u{c}', "\\f")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+        .replace('\u{b}', "\\v")
 }
 
 fn f_quote_unicode(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -268,7 +325,12 @@ fn sts_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn sts_add(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let (this, old, new, newloc) = (&args[0], &args[1], &args[2], args.get(3).cloned().unwrap_or(Value::None));
+    let (this, old, new, newloc) = (
+        &args[0],
+        &args[1],
+        &args[2],
+        args.get(3).cloned().unwrap_or(Value::None),
+    );
     let tr = py::get(vm, this, "translations")?;
     let loc = py::get(vm, this, "translation_loc")?;
     if ops::contains(vm, &tr, old)? {
@@ -278,9 +340,21 @@ fn sts_add(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             let p = py::items(vm, &l)?;
             let f = py::string(vm, &p[0])?;
             let n = py::int(vm, &p[1])?;
-            return Err(py::error(vm, format!("A translation for \"{}\" already exists at {f}:{n}.", quote_unicode(&o))));
+            return Err(py::error(
+                vm,
+                format!(
+                    "A translation for \"{}\" already exists at {f}:{n}.",
+                    quote_unicode(&o)
+                ),
+            ));
         }
-        return Err(py::error(vm, format!("A translation for \"{}\" already exists.", quote_unicode(&o))));
+        return Err(py::error(
+            vm,
+            format!(
+                "A translation for \"{}\" already exists.",
+                quote_unicode(&o)
+            ),
+        ));
     }
     ops::setitem(vm, &tr, old.clone(), new.clone())?;
     if !py::is_none(&newloc) {
@@ -324,7 +398,13 @@ fn sts_write_updated_strings(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> 
     Ok(Value::None)
 }
 
-fn add_string_translation(vm: &mut Vm, language: Value, old: Value, new: Value, newloc: Value) -> PyResult<()> {
+fn add_string_translation(
+    vm: &mut Vm,
+    language: Value,
+    old: Value,
+    new: Value,
+    newloc: Value,
+) -> PyResult<()> {
     let tl = translator(vm)?;
     let strings = py::get(vm, &tl, "strings")?;
     let stl = ops::getitem(vm, &strings, language.clone())?;
@@ -335,7 +415,13 @@ fn add_string_translation(vm: &mut Vm, language: Value, old: Value, new: Value, 
 }
 
 fn f_add_string_translation(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    add_string_translation(vm, args[0].clone(), args[1].clone(), args[2].clone(), args.get(3).cloned().unwrap_or(Value::None))?;
+    add_string_translation(
+        vm,
+        args[0].clone(),
+        args[1].clone(),
+        args[2].clone(),
+        args.get(3).cloned().unwrap_or(Value::None),
+    )?;
     Ok(Value::None)
 }
 
@@ -354,7 +440,11 @@ pub fn translate_string(vm: &mut Vm, s: &Value, language: Option<Value>) -> PyRe
 fn f_translate_string(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let default = mget(vm, "Default")?;
     let lang = arg_or(args, kw, 1, "language", default.clone());
-    let lang = if py::same(&lang, &default) { None } else { Some(lang) };
+    let lang = if py::same(&lang, &default) {
+        None
+    } else {
+        Some(lang)
+    };
     translate_string(vm, &args[0], lang)
 }
 
@@ -369,7 +459,12 @@ fn load_rpt(vm: &mut Vm, name: &str) -> PyResult<()> {
         return Err(vm.exc_msg("IOError", &format!("Couldn't find file '{name}'.")));
     };
     let text = String::from_utf8_lossy(&bytes);
-    let language = name.rsplit('/').next().unwrap_or(name).trim_end_matches(".rpt").to_owned();
+    let language = name
+        .rsplit('/')
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches(".rpt")
+        .to_owned();
     let unquote = |s: &str| s.replace("\\n", "\n").replace("\\\\", "\\");
     let mut old: Option<String> = None;
     for l in text.lines() {
@@ -380,12 +475,18 @@ fn load_rpt(vm: &mut Vm, name: &str) -> PyResult<()> {
         let s = unquote(l.get(2..).unwrap_or(""));
         if l.starts_with('<') {
             if let Some(o) = &old {
-                return Err(py::error(vm, format!("{language} string {o:?} does not have a translation.")));
+                return Err(py::error(
+                    vm,
+                    format!("{language} string {o:?} does not have a translation."),
+                ));
             }
             old = Some(s);
         } else if l.starts_with('>') {
             let Some(o) = old.take() else {
-                return Err(py::error(vm, format!("{language} translation {s:?} doesn't belong to a string.")));
+                return Err(py::error(
+                    vm,
+                    format!("{language} translation {s:?} doesn't belong to a string."),
+                ));
             };
             let lv = py::s(vm, &language);
             let ov = py::s(vm, &o);
@@ -394,7 +495,10 @@ fn load_rpt(vm: &mut Vm, name: &str) -> PyResult<()> {
         }
     }
     if let Some(o) = old {
-        return Err(py::error(vm, format!("{language} string {o:?} does not have a translation.")));
+        return Err(py::error(
+            vm,
+            format!("{language} string {o:?} does not have a translation."),
+        ));
     }
     Ok(())
 }
@@ -407,7 +511,12 @@ fn f_load_rpt(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn f_load_all_rpts(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let r = rt(vm);
-    let mut names: Vec<String> = r.files.list().into_iter().filter(|n| n.ends_with(".rpt")).collect();
+    let mut names: Vec<String> = r
+        .files
+        .list()
+        .into_iter()
+        .filter(|n| n.ends_with(".rpt"))
+        .collect();
     names.sort();
     for n in names {
         load_rpt(vm, &n)?;
@@ -420,7 +529,15 @@ fn f_init_translation(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let b = vm.call(&backup, Vec::new(), Vec::new())?;
     let m = py::import(vm, MODULE)?;
     py::set(vm, &m, "style_backup", b)?;
-    f_load_all_rpts(vm, &[], &[])
+    f_load_all_rpts(vm, &[], &[])?;
+    // Before 7.8/8.3 the start-up language is set here (later releases
+    // set it from `_start_store`).
+    let p = &rt(vm).profile;
+    if !p.since_pair(8, 3) {
+        let f = py::import_attr(vm, "store", "_init_language")?;
+        vm.call(&f, Vec::new(), Vec::new())?;
+    }
+    Ok(Value::None)
 }
 
 // Language changes -------------------------------------------------------------------------------------
@@ -432,7 +549,12 @@ fn run_blocks(vm: &mut Vm, tl: &Value, attr: &str, language: &Value) -> PyResult
     if blocks.is_empty() {
         return Ok(());
     }
-    let f = py::closure(vm, "run_blocks", run_blocks_in_context, vm.types.new_list(blocks));
+    let f = py::closure(
+        vm,
+        "run_blocks",
+        run_blocks_in_context,
+        vm.types.new_list(blocks),
+    );
     let inv = py::import_attr(vm, "renpy.game", "invoke_in_new_context")?;
     vm.call(&inv, vec![f], Vec::new())?;
     Ok(())
@@ -460,7 +582,14 @@ fn run_python(vm: &mut Vm, tl: &Value, language: &Value) -> PyResult<()> {
             _ => None,
         };
         if let Some(code) = code {
-            let c = super::python::compile(vm, &code.source.text, "exec", &code.source.filename, code.source.line.max(1), code.py3.then_some(3))?;
+            let c = super::python::compile(
+                vm,
+                &code.source.text,
+                "exec",
+                &code.source.filename,
+                code.source.line.max(1),
+                code.py3.then_some(3),
+            )?;
             super::python::exec_bytecode(vm, c, false, &Value::None, &Value::None, "store")?;
         }
     }
@@ -478,6 +607,10 @@ fn language_callbacks(vm: &mut Vm, language: &Value) -> PyResult<()> {
 
 fn deferred_styles(vm: &mut Vm) -> PyResult<()> {
     let ds = mget(vm, "deferred_styles")?;
+    if std::env::var_os("CRYSIRROR_RENPY_TRACE").is_some() {
+        let n = ops::len(vm, &ds)?;
+        super::link::diagnostic(vm, format!("trace: applying {n} deferred styles"));
+    }
     for s in py::items(vm, &ds)? {
         let Some(id) = nodes::id_of(&s) else { continue };
         let r = rt(vm);
@@ -539,6 +672,13 @@ fn f_change_language(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let prefs = py::import_attr(vm, "renpy.game", "preferences")?;
     py::set(vm, &prefs, "language", language.clone())?;
     let old = mget(vm, "old_language")?;
+    if std::env::var_os("CRYSIRROR_RENPY_TRACE").is_some() {
+        let (o, l) = (ops::repr(vm, &old)?, ops::repr(vm, &language)?);
+        super::link::diagnostic(
+            vm,
+            format!("trace: change_language old={o} new={l} force={force}"),
+        );
+    }
     if ops::eq(vm, &old, &language)? && !force {
         return Ok(Value::None);
     }
@@ -653,38 +793,68 @@ fn f_detect_user_locale(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 const LOCALES: &str = "ab:abkhazian aa:afar af:afrikaans ak:akan sq:albanian am:amharic ar:arabic an:aragonese hy:armenian as:assamese av:avaric ae:avestan ay:aymara az:azerbaijani bm:bambara ba:bashkir eu:basque be:belarusian bn:bengali bh:bihari bi:bislama bs:bosnian br:breton bg:bulgarian my:burmese ca:catalan ch:chamorro ce:chechen ny:chewa cv:chuvash kw:cornish co:corsican cr:cree hr:croatian cs:czech da:danish dv:maldivian nl:dutch dz:dzongkha en:english et:estonian ee:ewe fo:faroese fj:fijian fi:finnish fr:french ff:fulah gl:galician ka:georgian de:german el:greek gn:guaran gu:gujarati ht:haitian ha:hausa he:hebrew hz:herero hi:hindi ho:hiri_motu hu:hungarian id:indonesian ga:irish ig:igbo ik:inupiaq is:icelandic it:italian iu:inuktitut ja:japanese jv:javanese kl:greenlandic kn:kannada kr:kanuri ks:kashmiri kk:kazakh km:khmer ki:kikuyu rw:kinyarwanda ky:kirghiz kv:komi kg:kongo ko:korean ku:kurdish kj:kuanyama la:latin lb:luxembourgish lg:ganda li:limburgan ln:lingala lo:lao lt:lithuanian lv:latvian gv:manx mk:macedonian mg:malagasy ms:malay ml:malayalam mt:maltese mi:maori mr:marathi mh:marshallese mn:mongolian na:nauru nv:navaho ne:nepali ng:ndonga no:norwegian ii:nuosu nr:ndebele oc:occitan oj:ojibwa om:oromo or:oriya os:ossetian pa:panjabi pi:pali fa:persian pl:polish ps:pashto pt:portuguese qu:quechua rm:romansh rn:rundi ro:romanian ru:russian sa:sanskrit sc:sardinian sd:sindhi se:sami sm:samoan sg:sango sr:serbian gd:gaelic sn:shona si:sinhala sk:slovak sl:slovene so:somali st:sotho es:spanish su:sundanese sw:swahili ss:swati sv:swedish ta:tamil te:telugu tg:tajik th:thai ti:tigrinya bo:tibetan tk:turkmen tl:tagalog tn:tswana to:tongan tr:turkish ts:tsonga tt:tatar tw:twi ty:tahitian ug:uighur uk:ukrainian ur:urdu uz:uzbek ve:venda vi:vietnamese wa:walloon cy:welsh wo:wolof fy:frisian xh:xhosa yi:yiddish yo:yoruba za:zhuang zu:zulu chs:simplified_chinese cht:traditional_chinese zh:traditional_chinese zh_tw:traditional_chinese zh_cn:simplified_chinese zh_hk:traditional_chinese zh_sg:simplified_chinese zh_mo:traditional_chinese";
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("encode_say_string", f_encode_say_string),
-        ("quote_unicode", f_quote_unicode),
-        ("add_string_translation", f_add_string_translation),
-        ("translate_string", f_translate_string),
-        ("write_updated_strings", f_write_updated_strings),
-        ("load_rpt", f_load_rpt),
-        ("load_all_rpts", f_load_all_rpts),
-        ("init_translation", f_init_translation),
-        ("clean_data", f_clean_data),
-        ("change_language", f_change_language),
-        ("check_language", f_check_language),
-        ("get_translation_identifier", f_get_translation_identifier),
-        ("get_translation_info", f_get_translation_info),
-        ("known_languages", f_known_languages),
-        ("detect_user_locale", f_detect_user_locale),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("encode_say_string", f_encode_say_string),
+            ("quote_unicode", f_quote_unicode),
+            ("add_string_translation", f_add_string_translation),
+            ("translate_string", f_translate_string),
+            ("write_updated_strings", f_write_updated_strings),
+            ("load_rpt", f_load_rpt),
+            ("load_all_rpts", f_load_all_rpts),
+            ("init_translation", f_init_translation),
+            ("clean_data", f_clean_data),
+            ("change_language", f_change_language),
+            ("check_language", f_check_language),
+            ("get_translation_identifier", f_get_translation_identifier),
+            ("get_translation_info", f_get_translation_info),
+            ("known_languages", f_known_languages),
+            ("detect_user_locale", f_detect_user_locale),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     let obj = Value::Obj(vm.types.object.clone());
-    let ti = py::class(vm, MODULE, "TranslateInfo", &[obj.clone()], &[("__init__", ti_init)], &[])?;
+    let ti = py::class(
+        vm,
+        MODULE,
+        "TranslateInfo",
+        &[obj.clone()],
+        &[("__init__", ti_init)],
+        &[],
+    )?;
     set(vm, "TranslateInfo", Value::Obj(ti));
-    let sts = py::class(vm, MODULE, "StringTranslator", &[obj.clone()], &[("__init__", sts_init), ("add", sts_add), ("translate", sts_translate), ("write_updated_strings", sts_write_updated_strings)], &[])?;
+    let sts = py::class(
+        vm,
+        MODULE,
+        "StringTranslator",
+        &[obj.clone()],
+        &[
+            ("__init__", sts_init),
+            ("add", sts_add),
+            ("translate", sts_translate),
+            ("write_updated_strings", sts_write_updated_strings),
+        ],
+        &[],
+    )?;
     set(vm, "StringTranslator", Value::Obj(sts));
-    let st = py::class(vm, MODULE, "ScriptTranslator", &[obj], &[
-        ("__init__", st_init),
-        ("load", st_load),
-        ("count_translates", st_count_translates),
-        ("take_translates", st_take_translates),
-        ("chain_translates", st_chain_translates),
-        ("lookup_translate", st_lookup_translate),
-        ("get_translate_info", st_get_translate_info),
-    ], &[])?;
+    let st = py::class(
+        vm,
+        MODULE,
+        "ScriptTranslator",
+        &[obj],
+        &[
+            ("__init__", st_init),
+            ("load", st_load),
+            ("count_translates", st_count_translates),
+            ("take_translates", st_take_translates),
+            ("chain_translates", st_chain_translates),
+            ("lookup_translate", st_lookup_translate),
+            ("get_translate_info", st_get_translate_info),
+        ],
+        &[],
+    )?;
     set(vm, "ScriptTranslator", Value::Obj(st));
     let sentinel = py::import_attr(vm, "renpy.object", "Sentinel")?;
     let d = vm.call(&sentinel, vec![py::s(vm, "default")], Vec::new())?;
@@ -700,6 +870,9 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
         }
     }
     set(vm, "locales", locales);
+    if !rt(vm).profile.at_least(6, 99) {
+        super::tlgen::install_618(vm, &m)?;
+    }
     Ok(m)
 }
 

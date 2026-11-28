@@ -127,11 +127,11 @@ impl Room {
     }
 }
 
-fn read_flags<T>(r: &mut Reader, read: impl FnMut(&mut Reader) -> Result<T>) -> Result<Vec<T>> {
+pub(super) fn read_flags<T>(r: &mut Reader, read: impl FnMut(&mut Reader) -> Result<T>) -> Result<Vec<T>> {
     r.expect_str(FLAGS)?;
     read_vec(r, read)
 }
-fn write_flags<T>(
+pub(super) fn write_flags<T>(
     w: &mut Writer,
     records: &[T],
     write: impl FnMut(&mut Writer, &T) -> Result<()>,

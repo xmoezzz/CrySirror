@@ -80,7 +80,12 @@ _MODULES = [
 def import_all():
     import importlib
     for name in _MODULES:
-        importlib.import_module(name)
+        try:
+            importlib.import_module(name)
+        except ModuleNotFoundError as e:
+            # Not part of the running release.
+            if e.name != name:
+                raise
     # Pre-7.0 pickles name the style class module renpy.styleclass.
     sys.modules["renpy.styleclass"] = sys.modules["renpy.style"]
     post_import()

@@ -104,10 +104,27 @@ pub fn compile_module(types: &Types, body: &[Stmt], opts: CompileOptions) -> Res
     let mut c = Compiler { types, st, opts, units: Vec::new() };
     c.enter(0, ScopeKind::Module, "<module>", "<module>", 1);
     c.docstring(body_ref, true);
+    c.setup_annotations(body_ref)?;
     c.stmts(body_ref)?;
     c.load_const(Value::None);
     c.emit(Op::Return);
     Ok(c.finish())
+}
+
+/// Whether a module or class body annotates a simple name (directly or in
+/// nested blocks, but not in nested scopes): CPython's SETUP_ANNOTATIONS.
+fn annotates(body: &[Stmt]) -> bool {
+    body.iter().any(|s| match &s.kind {
+        StmtKind::AnnAssign { simple, target, .. } => *simple && matches!(target.kind, ExprKind::Name { .. }),
+        StmtKind::For { body, orelse, .. } | StmtKind::While { body, orelse, .. } | StmtKind::If { body, orelse, .. } => {
+            annotates(body) || annotates(orelse)
+        }
+        StmtKind::With { body, .. } => annotates(body),
+        StmtKind::Try { body, handlers, orelse, finalbody } => {
+            annotates(body) || handlers.iter().any(|h| annotates(&h.body)) || annotates(orelse) || annotates(finalbody)
+        }
+        _ => false,
+    })
 }
 
 pub fn compile_eval(types: &Types, expr: &Expr, opts: CompileOptions) -> Result<Rc<Code>, CompileError> {
@@ -122,6 +139,15 @@ pub fn compile_eval(types: &Types, expr: &Expr, opts: CompileOptions) -> Result<
 }
 
 impl<'a> Compiler<'a> {
+    /// `__annotations__ = {}` before a body that annotates names.
+    fn setup_annotations(&mut self, body: &[Stmt]) -> Result<(), CompileError> {
+        if annotates(body) {
+            self.emit(Op::BuildMap(0));
+            self.name_op("__annotations__", Ctx::Store)?;
+        }
+        Ok(())
+    }
+
     fn u(&mut self) -> &mut Unit<'a> {
         self.units.last_mut().unwrap()
     }
@@ -157,7 +183,8 @@ impl<'a> Compiler<'a> {
             u.flags |= CO_NEWLOCALS;
             for v in &sc.varnames {
                 let i = u.varnames.len() as u32;
-                u.var_idx.insert(v.clone(), i);
+                // A repeated Python 2 parameter name reads its first slot.
+                u.var_idx.entry(v.clone()).or_insert(i);
                 u.varnames.push(v.clone());
             }
         }
@@ -1218,6 +1245,7 @@ impl<'a> Compiler<'a> {
         self.str_const(&qual);
         self.name_op("__qualname__", Ctx::Store)?;
         self.docstring(body, true);
+        self.setup_annotations(body)?;
         self.stmts(body)?;
         if let Some(i) = self.deref_index("__class__") {
             self.emit(Op::LoadClosure(i));

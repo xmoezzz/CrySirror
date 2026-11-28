@@ -25,13 +25,22 @@ fn get_menu_args(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn take(kw: &mut Vec<(Rc<str>, Value)>, n: &str) -> Option<Value> {
-    kw.iter().position(|(k, _)| &**k == n).map(|i| kw.remove(i).1)
+    kw.iter()
+        .position(|(k, _)| &**k == n)
+        .map(|i| kw.remove(i).1)
 }
 
 fn substitute(vm: &mut Vm, s: Value) -> PyResult<Value> {
     if py::config_bool(vm, "old_substitutions")? {
         let tqd = py::import_attr(vm, "renpy.exports", "tag_quoting_dict")?;
-        return ops::binary_op(vm, &s, &tqd, crysirror_python::ast::BinOp::Mod, false, false);
+        return ops::binary_op(
+            vm,
+            &s,
+            &tqd,
+            crysirror_python::ast::BinOp::Mod,
+            false,
+            false,
+        );
     }
     Ok(s)
 }
@@ -46,8 +55,16 @@ fn menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let margs = arg_or(args, kw, 2, "args", Value::None);
     let mkw = arg_or(args, kw, 3, "kwargs", Value::None);
     let item_arguments = arg_or(args, kw, 4, "item_arguments", Value::None);
-    let mut a = if py::truthy(vm, &margs)? { py::items(vm, &margs)? } else { Vec::new() };
-    let mut k = if py::truthy(vm, &mkw)? { py::str_items(vm, &mkw)? } else { Vec::new() };
+    let mut a = if py::truthy(vm, &margs)? {
+        py::items(vm, &margs)?
+    } else {
+        Vec::new()
+    };
+    let mut k = if py::truthy(vm, &mkw)? {
+        py::str_items(vm, &mkw)?
+    } else {
+        Vec::new()
+    };
     let nvl = take(&mut k, "nvl").unwrap_or(Value::Bool(false));
     let mac = py::config(vm, "menu_arguments_callback")?;
     if !py::is_none(&mac) {
@@ -101,7 +118,15 @@ fn menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             }
             if !py::is_none(&p[2]) {
                 let cr = py::import_attr(vm, "renpy.ui", "ChoiceReturn")?;
-                let action = vm.call(&cr, vec![label.clone(), p[2].clone(), location.clone()], vec![("sensitive".into(), condition), ("args".into(), iargs.clone()), ("kwargs".into(), ikw.clone())])?;
+                let action = vm.call(
+                    &cr,
+                    vec![label.clone(), p[2].clone(), location.clone()],
+                    vec![
+                        ("sensitive".into(), condition),
+                        ("args".into(), iargs.clone()),
+                        ("kwargs".into(), ikw.clone()),
+                    ],
+                )?;
                 new_items.push(vm.types.new_tuple(vec![label, action]));
             } else {
                 new_items.push(vm.types.new_tuple(vec![label, Value::None]));
@@ -134,7 +159,11 @@ fn menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let kd = py::kwargs_dict(vm, &k)?;
     py::set(vm, &m, "menu_kwargs", kd)?;
     let store = py::import(vm, "store")?;
-    let f = if py::truthy(vm, &nvl)? { py::get(vm, &store, "nvl_menu")? } else { py::get(vm, &store, "menu")? };
+    let f = if py::truthy(vm, &nvl)? {
+        py::get(vm, &store, "nvl_menu")?
+    } else {
+        py::get(vm, &store, "menu")?
+    };
     let r = vm.call(&f, vec![vm.types.new_list(new_items)], Vec::new());
     py::set(vm, &m, "menu_args", old_a)?;
     py::set(vm, &m, "menu_kwargs", old_k)?;
@@ -171,23 +200,53 @@ fn predict_menu(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     if !py::config_bool(vm, "choice_screen_chosen")? {
         return Ok(Value::None);
     }
-    let item = vm.types.new_tuple(vec![py::s(vm, "Menu Prediction"), Value::Bool(true), Value::Bool(false)]);
+    let item = vm.types.new_tuple(vec![
+        py::s(vm, "Menu Prediction"),
+        Value::Bool(true),
+        Value::Bool(false),
+    ]);
     let items = vm.types.new_list(vec![item]);
-    ex(vm, "predict_screen", vec![py::s(vm, "choice")], vec![("items".into(), items)])
+    ex(
+        vm,
+        "predict_screen",
+        vec![py::s(vm, "choice")],
+        vec![("items".into(), items)],
+    )
 }
 
 fn display_menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let mut kw: Vec<(Rc<str>, Value)> = kw.to_vec();
-    let items = args.first().cloned().or_else(|| take(&mut kw, "items")).unwrap_or(Value::None);
-    let mut opt = |n: &str, i: usize, d: Value, kw: &mut Vec<(Rc<str>, Value)>| args.get(i).cloned().or_else(|| take(kw, n)).unwrap_or(d);
+    let items = args
+        .first()
+        .cloned()
+        .or_else(|| take(&mut kw, "items"))
+        .unwrap_or(Value::None);
+    let mut opt = |n: &str, i: usize, d: Value, kw: &mut Vec<(Rc<str>, Value)>| {
+        args.get(i).cloned().or_else(|| take(kw, n)).unwrap_or(d)
+    };
     let window_style = opt("window_style", 1, py::s(vm, "menu_window"), &mut kw);
     let interact_v = opt("interact", 2, Value::Bool(true), &mut kw);
     let mut with_none = opt("with_none", 3, Value::None, &mut kw);
     let caption_style = opt("caption_style", 4, py::s(vm, "menu_caption"), &mut kw);
     let choice_style = opt("choice_style", 5, py::s(vm, "menu_choice"), &mut kw);
-    let choice_chosen_style = opt("choice_chosen_style", 6, py::s(vm, "menu_choice_chosen"), &mut kw);
-    let choice_button_style = opt("choice_button_style", 7, py::s(vm, "menu_choice_button"), &mut kw);
-    let choice_chosen_button_style = opt("choice_chosen_button_style", 8, py::s(vm, "menu_choice_chosen_button"), &mut kw);
+    let choice_chosen_style = opt(
+        "choice_chosen_style",
+        6,
+        py::s(vm, "menu_choice_chosen"),
+        &mut kw,
+    );
+    let choice_button_style = opt(
+        "choice_button_style",
+        7,
+        py::s(vm, "menu_choice_button"),
+        &mut kw,
+    );
+    let choice_chosen_button_style = opt(
+        "choice_chosen_button_style",
+        8,
+        py::s(vm, "menu_choice_chosen_button"),
+        &mut kw,
+    );
     let scope = opt("scope", 9, vm.types.new_tuple(Vec::new()), &mut kw);
     let widget_properties = opt("widget_properties", 10, Value::None, &mut kw);
     let mut screen = opt("screen", 11, py::s(vm, "choice"), &mut kw);
@@ -198,8 +257,16 @@ fn display_menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let k_arg = opt("_kwargs", 16, Value::None, &mut kw);
     let interact = py::truthy(vm, &interact_v)?;
     let (menu_args, mut menu_kwargs) = if !py::is_none(&a_arg) || !py::is_none(&k_arg) {
-        let mut a = if py::truthy(vm, &a_arg)? { py::items(vm, &a_arg)? } else { Vec::new() };
-        let mut k = if py::truthy(vm, &k_arg)? { py::str_items(vm, &k_arg)? } else { Vec::new() };
+        let mut a = if py::truthy(vm, &a_arg)? {
+            py::items(vm, &a_arg)?
+        } else {
+            Vec::new()
+        };
+        let mut k = if py::truthy(vm, &k_arg)? {
+            py::str_items(vm, &k_arg)?
+        } else {
+            Vec::new()
+        };
         let mac = py::config(vm, "menu_arguments_callback")?;
         if !py::is_none(&mac) {
             let r = vm.call(&mac, a.clone(), k.clone())?;
@@ -230,7 +297,11 @@ fn display_menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             let sl = py::get(vm, &c, "scene_lists")?;
             let sw = py::get_or_none(vm, &sl, "shown_window")?;
             if py::truthy(vm, &cew)? && !py::truthy(vm, &sw)? {
-                vm.call(&cew, vec![py::s(vm, "")], vec![("interact".into(), Value::Bool(false))])?;
+                vm.call(
+                    &cew,
+                    vec![py::s(vm, "")],
+                    vec![("interact".into(), Value::Bool(false))],
+                )?;
             }
         }
     }
@@ -270,7 +341,11 @@ fn display_menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let hs = ex(vm, "has_screen", vec![screen.clone()], Vec::new())?;
     if py::truthy(vm, &hs)? {
         let mut item_actions = Vec::new();
-        let props = if py::is_none(&widget_properties) { vm.types.new_dict() } else { widget_properties };
+        let props = if py::is_none(&widget_properties) {
+            vm.types.new_dict()
+        } else {
+            widget_properties
+        };
         let cr = py::import_attr(vm, "renpy.ui", "ChoiceReturn")?;
         let me_c = py::import_attr(vm, "renpy.exports", "MenuEntry")?;
         let chosen_cfg = py::config_bool(vm, "choice_screen_chosen")?;
@@ -285,20 +360,44 @@ fn display_menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
                 let v = py::get(vm, &value, "value")?;
                 let action = vm.call(&cr, vec![label.clone(), v, location.clone()], Vec::new())?;
                 let chosen = vm.call_method(&action, "get_chosen", Vec::new())?;
-                (action, chosen, py::get(vm, &value, "args")?, py::get(vm, &value, "kwargs")?)
+                (
+                    action,
+                    chosen,
+                    py::get(vm, &value, "args")?,
+                    py::get(vm, &value, "kwargs")?,
+                )
             } else if isinst(vm, &value, "renpy.ui", "ChoiceReturn")? {
                 let chosen = vm.call_method(&value, "get_chosen", Vec::new())?;
                 let a = py::get(vm, &value, "args")?;
                 let k = py::get(vm, &value, "kwargs")?;
                 (value.clone(), chosen, a, k)
             } else if !py::is_none(&value) {
-                let action = vm.call(&cr, vec![label.clone(), value.clone(), location.clone()], Vec::new())?;
+                let action = vm.call(
+                    &cr,
+                    vec![label.clone(), value.clone(), location.clone()],
+                    Vec::new(),
+                )?;
                 let chosen = vm.call_method(&action, "get_chosen", Vec::new())?;
-                (action, chosen, vm.types.new_tuple(Vec::new()), vm.types.new_dict())
+                (
+                    action,
+                    chosen,
+                    vm.types.new_tuple(Vec::new()),
+                    vm.types.new_dict(),
+                )
             } else {
-                (Value::None, Value::Bool(false), vm.types.new_tuple(Vec::new()), vm.types.new_dict())
+                (
+                    Value::None,
+                    Value::Bool(false),
+                    vm.types.new_tuple(Vec::new()),
+                    vm.types.new_dict(),
+                )
             };
-            let t = if chosen_cfg { vm.types.new_tuple(vec![label.clone(), action.clone(), chosen.clone()]) } else { vm.types.new_tuple(vec![label.clone(), action.clone()]) };
+            let t = if chosen_cfg {
+                vm.types
+                    .new_tuple(vec![label.clone(), action.clone(), chosen.clone()])
+            } else {
+                vm.types.new_tuple(vec![label.clone(), action.clone()])
+            };
             let me = vm.call(&me_c, vec![t], Vec::new())?;
             py::set(vm, &me, "caption", label)?;
             py::set(vm, &me, "action", action)?;
@@ -308,7 +407,11 @@ fn display_menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             item_actions.push(me);
         }
         if py::is_none(&layer) {
-            layer = if ty.as_str() == Some("nvl") { py::config(vm, "nvl_choice_layer")? } else { py::config(vm, "choice_layer")? };
+            layer = if ty.as_str() == Some("nvl") {
+                py::config(vm, "nvl_choice_layer")?
+            } else {
+                py::config(vm, "choice_layer")?
+            };
         }
         let mut a = vec![screen.clone()];
         a.extend(menu_args);
@@ -320,7 +423,15 @@ fn display_menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         ex(vm, "show_screen", a, k)?;
     } else {
         ex(vm, "shown_window", Vec::new(), Vec::new())?;
-        ui(vm, "window", Vec::new(), vec![("style".into(), window_style), ("focus".into(), py::s(vm, "menu"))])?;
+        ui(
+            vm,
+            "window",
+            Vec::new(),
+            vec![
+                ("style".into(), window_style),
+                ("focus".into(), py::s(vm, "menu")),
+            ],
+        )?;
         let mut k = kw.clone();
         k.extend([
             ("location".into(), location.clone()),
@@ -330,7 +441,10 @@ fn display_menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             ("choice_style".into(), choice_style),
             ("choice_chosen_style".into(), choice_chosen_style),
             ("choice_button_style".into(), choice_button_style),
-            ("choice_chosen_button_style".into(), choice_chosen_button_style),
+            (
+                "choice_chosen_button_style".into(),
+                choice_chosen_button_style,
+            ),
         ]);
         ui(vm, "menu", vec![items.clone()], k)?;
     }
@@ -354,7 +468,16 @@ fn display_menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !interact {
         return Ok(Value::None);
     }
-    let rv = ui(vm, "interact", Vec::new(), vec![("mouse".into(), py::s(vm, "menu")), ("type".into(), ty), ("roll_forward".into(), rf)])?;
+    let rv = ui(
+        vm,
+        "interact",
+        Vec::new(),
+        vec![
+            ("mouse".into(), py::s(vm, "menu")),
+            ("type".into(), ty),
+            ("roll_forward".into(), rf),
+        ],
+    )?;
     let mut chose = false;
     for it in &items_l {
         let p = py::items(vm, it)?;

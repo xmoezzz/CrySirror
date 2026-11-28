@@ -70,10 +70,17 @@ script and widget fixtures cover daytime and night results, the income panel,
 and the second day’s management menu. Muku can keep her original night work
 10000 and reach day two by cancelling the character selection. The schedule
 supports ordinary paid facilities, room selection, roster dragging and manual
-facility upgrades with owned materials. Title Continue and the daily slot panels
-list v1040 saves, edit comments and support confirmed slot deletion.
-Whole-slot creation and gameplay restoration
-remain open. The last full opening replay reached the first daytime menu call.
+facility upgrades with owned materials. The daytime and night menus write
+standalone v1040 slots. Title Continue and the daily Load panel restore those
+slots through the saved KAG label. The panels also list slots, edit comments
+and confirm deletion. An installed-data fixture saves the daytime menu,
+reloads from the title and asserts the restored player, staff and schedule.
+The last full opening replay reached the first daytime menu call.
+
+Title Guest opens the campaign slot list followed by the selected campaign's
+guest slot list. It can resume existing guest data or register a new guest.
+The guest club's Save and Load buttons use the original five-page panel.
+Guest writes preserve the surrounding campaign and casino records.
 
 The standalone profile binds the 128 names registered by its retail
 `ScriptManager.Initialize`. The [registration list](src/tjs/standalone.rs)
@@ -83,6 +90,14 @@ fonts and audio. Character, activity and save controllers also supply live
 state to these methods. The player editor returns to the label supplied by the calling scenario.
 See the [behavior and coverage record](../../docs/validation/com3d2.md)
 and [remaining work](SATD.md#satd-com3d2-standalone).
+
+The COM3D2 project client accepts an optional `linked_cm3d2` object for
+the original `FileSystemOld` sources. Its `archives` list contains separate
+mounted asset directories in the legacy load order. `paths_dat` and
+`plugin` are client-relative asset paths to the linked installation's
+`GameData/paths.dat` and native DLL. The old stage selector uses this source
+for its stage catalogue, previews and BGM. The new stage selector continues
+to use the standalone game's own tables and resources.
 
 ## Source provenance
 

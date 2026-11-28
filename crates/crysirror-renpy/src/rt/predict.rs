@@ -86,14 +86,28 @@ fn soft(vm: &mut Vm, r: PyResult<()>) -> PyResult<()> {
 
 enum Phase {
     Start,
-    PredictSet { items: Vec<Value>, i: usize },
-    Context { iter: Option<Value> },
+    PredictSet {
+        items: Vec<Value>,
+        i: usize,
+    },
+    Context {
+        iter: Option<Value>,
+    },
     Layers,
     WaitExpensive,
-    Expensive { callbacks: Vec<Value>, i: usize },
-    Screens { items: Vec<(Value, Value, Value)>, i: usize },
+    Expensive {
+        callbacks: Vec<Value>,
+        i: usize,
+    },
+    Screens {
+        items: Vec<(Value, Value, Value)>,
+        i: usize,
+    },
     Actions,
-    Queue { i: usize, waiting: bool },
+    Queue {
+        i: usize,
+        waiting: bool,
+    },
     Final,
     Done,
 }
@@ -107,7 +121,8 @@ struct Coroutine {
 struct CoRef(Rc<RefCell<Coroutine>>);
 
 fn co_of(vm: &Vm, v: &Value) -> PyResult<Rc<RefCell<Coroutine>>> {
-    py::native::<CoRef, _>(v, |c| c.0.clone()).ok_or_else(|| vm.type_error("prediction coroutine expected"))
+    py::native::<CoRef, _>(v, |c| c.0.clone())
+        .ok_or_else(|| vm.type_error("prediction coroutine expected"))
 }
 
 fn take_phase(co: &Rc<RefCell<Coroutine>>) -> Phase {
@@ -129,7 +144,11 @@ fn resume(vm: &mut Vm, co: &Rc<RefCell<Coroutine>>, sent: &Value) -> PyResult<Op
                     vm.call(&f, Vec::new(), Vec::new())?;
                 }
                 let set = py::import_attr(vm, "store", "_predict_set").unwrap_or(Value::None);
-                let items = if py::is_none(&set) { Vec::new() } else { ops::collect(vm, &set)? };
+                let items = if py::is_none(&set) {
+                    Vec::new()
+                } else {
+                    ops::collect(vm, &set)?
+                };
                 set_phase(co, Phase::PredictSet { items, i: 0 });
                 return Ok(Some(Value::Bool(true)));
             }
@@ -240,7 +259,13 @@ fn resume(vm: &mut Vm, co: &Rc<RefCell<Coroutine>>, sent: &Value) -> PyResult<Op
                 let r = vm.call_method(&root, "visit_all", vec![cb]).map(|_| ());
                 soft(vm, r)?;
                 set_predicting(vm, false)?;
-                set_phase(co, Phase::Queue { i: 0, waiting: true });
+                set_phase(
+                    co,
+                    Phase::Queue {
+                        i: 0,
+                        waiting: true,
+                    },
+                );
             }
             Phase::Queue { i, waiting } => {
                 let screens = mget(vm, "screens")?;
@@ -276,7 +301,13 @@ fn resume(vm: &mut Vm, co: &Rc<RefCell<Coroutine>>, sent: &Value) -> PyResult<Op
                         set_predicting(vm, false)?;
                     }
                 }
-                set_phase(co, Phase::Queue { i: i + 1, waiting: true });
+                set_phase(
+                    co,
+                    Phase::Queue {
+                        i: i + 1,
+                        waiting: true,
+                    },
+                );
                 sent_truthy = false;
             }
             Phase::Final => {
@@ -323,25 +354,49 @@ fn co_close(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn f_prediction_coroutine(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let c = mget(vm, "PredictionCoroutine")?;
-    let c = c.obj().cloned().ok_or_else(|| vm.type_error("PredictionCoroutine"))?;
-    let co = Coroutine { root: args.first().cloned().unwrap_or(Value::None), phase: Phase::Start, predicted_screens: Vec::new() };
-    Ok(vm.types.new_native(&c, Box::new(CoRef(Rc::new(RefCell::new(co))))))
+    let c = c
+        .obj()
+        .cloned()
+        .ok_or_else(|| vm.type_error("PredictionCoroutine"))?;
+    let co = Coroutine {
+        root: args.first().cloned().unwrap_or(Value::None),
+        phase: Phase::Start,
+        predicted_screens: Vec::new(),
+    };
+    Ok(vm
+        .types
+        .new_native(&c, Box::new(CoRef(Rc::new(RefCell::new(co))))))
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("displayable", f_displayable),
-        ("screen", f_screen),
-        ("reset", f_reset),
-        ("prediction_coroutine", f_prediction_coroutine),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("displayable", f_displayable),
+            ("screen", f_screen),
+            ("reset", f_reset),
+            ("prediction_coroutine", f_prediction_coroutine),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     set(vm, "image", Value::None);
     set(vm, "predicted", vm.types.new_set(Default::default()));
     set(vm, "predicting", Value::Bool(false));
     set(vm, "screens", vm.types.new_list(Vec::new()));
-    let c = vm.types.new_builtin_type("PredictionCoroutine", &vm.types.object.clone(), crysirror_python::object::BaseKind::Native, true);
-    for (n, f) in [("send", co_send as crysirror_python::object::NativeFn), ("__next__", co_next), ("next", co_next), ("__iter__", co_iter), ("close", co_close)] {
+    let c = vm.types.new_builtin_type(
+        "PredictionCoroutine",
+        &vm.types.object.clone(),
+        crysirror_python::object::BaseKind::Native,
+        true,
+    );
+    for (n, f) in [
+        ("send", co_send as crysirror_python::object::NativeFn),
+        ("__next__", co_next),
+        ("next", co_next),
+        ("__iter__", co_iter),
+        ("close", co_close),
+    ] {
         vm.types.add_method(&c, n, f);
     }
     let mn = vm.types.new_str(MODULE);

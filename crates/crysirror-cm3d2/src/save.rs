@@ -3,9 +3,12 @@
 //! / `Deserialize` with `CharacterMgr`, `Maid` and `ScriptManager` sections
 //! in their `BinaryWriter` encoding. Slot −1 (`SaveData-01.save`) is the
 //! title's return point.
-pub(crate) mod stock_1040;
 pub mod facility_v5;
+pub(crate) mod management_1040;
 pub mod player_1040;
+pub mod slot_1040;
+pub(crate) mod status_1040;
+pub(crate) mod stock_1040;
 
 use crate::{
     adapter::{Game, Opener},

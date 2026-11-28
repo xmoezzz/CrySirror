@@ -5,7 +5,7 @@ const LIMIT: i64 = 999_999;
 #[derive(Default)]
 pub(super) struct CasinoMenu {
     venues: Vec<(usize, String)>,
-    exchange: Option<i64>,
+    pub(super) exchange: Option<i64>,
     dealer_list: bool,
     dealers: Vec<usize>,
     pending_dealer: Option<usize>,
@@ -116,7 +116,7 @@ impl Game {
         )?;
         self.casino_widgets()
     }
-    fn casino_widgets(&mut self) -> Result<()> {
+    pub(super) fn casino_widgets(&mut self) -> Result<()> {
         let vm = self
             .script
             .tjs
@@ -344,8 +344,8 @@ impl Game {
                         Response::Dismiss,
                     );
                 }
-                p if p.starts_with("/CasinoMenu/") => {
-                    let key = match &p[11..] {
+                p if let Some(button) = p.strip_prefix("/CasinoMenu/") => {
+                    let key = match button {
                         "BlackJack" => "Blackjack",
                         "CasinoSlot" => "Slot",
                         key => key,

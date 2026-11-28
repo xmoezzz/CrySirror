@@ -7,7 +7,7 @@
 use crate::ast::*;
 use crate::engine::{Engine, ExecError, Flow, Then, Wait};
 use crate::lexer::PyExpr;
-use crysirror_python::{ops, PyErr, TaskOutcome, Value};
+use crysirror_python::{PyErr, TaskOutcome, Value, ops};
 use std::rc::Rc;
 
 type R = Result<Flow, ExecError>;
@@ -33,7 +33,11 @@ fn opt_str(e: &Engine, v: &Option<String>) -> Value {
 }
 
 /// Evaluated argument tuple and keyword dict of an ArgumentInfo.
-pub fn eval_arguments(e: &mut Engine, id: NodeId, info: &Option<ArgumentInfo>) -> Result<(Value, Value), ExecError> {
+pub fn eval_arguments(
+    e: &mut Engine,
+    id: NodeId,
+    info: &Option<ArgumentInfo>,
+) -> Result<(Value, Value), ExecError> {
     let args = e.vm.types.new_list(Vec::new());
     let kwargs = e.vm.types.new_dict();
     if let Some(a) = info {
@@ -70,20 +74,49 @@ fn task(e: &mut Engine, id: NodeId, name: &str, args: Vec<Value>, next: Option<N
     run_task(e, id, &f, args, next)
 }
 
-pub fn run_task(e: &mut Engine, id: NodeId, f: &Value, args: Vec<Value>, _next: Option<NodeId>) -> R {
+pub fn run_task(
+    e: &mut Engine,
+    id: NodeId,
+    f: &Value,
+    args: Vec<Value>,
+    _next: Option<NodeId>,
+) -> R {
     match e.vm.start_task(f, args, Vec::new()) {
         TaskOutcome::Done(value) => Ok(e.complete_task(id, value)),
         TaskOutcome::Error(exc) => Err(ExecError::Python(PyErr::Exc(exc))),
-        TaskOutcome::Suspended(task, req) => Ok(Flow::Wait(Box::new(suspended(e, task, req, Then::Node(id))))),
+        TaskOutcome::Suspended(task, req) => Ok(Flow::Wait(Box::new(suspended(
+            e,
+            task,
+            req,
+            Then::Node(id),
+        )))),
     }
 }
 
-pub fn suspended(_e: &mut Engine, task: crysirror_python::Task, req: Box<dyn std::any::Any>, then: Then) -> Wait {
+pub fn suspended(
+    _e: &mut Engine,
+    task: crysirror_python::Task,
+    req: Box<dyn std::any::Any>,
+    then: Then,
+) -> Wait {
     match req.downcast::<crate::engine::Request>() {
         Ok(r) => match *r {
-            crate::engine::Request::Interact(request) => Wait::Interaction { task, then, request },
-            crate::engine::Request::CallInNewContext { label, args, kwargs } =>
-                Wait::NestedCall { task, then, label, args, kwargs },
+            crate::engine::Request::Interact(request) => Wait::Interaction {
+                task,
+                then,
+                request,
+            },
+            crate::engine::Request::CallInNewContext {
+                label,
+                args,
+                kwargs,
+            } => Wait::NestedCall {
+                task,
+                then,
+                label,
+                args,
+                kwargs,
+            },
             _ => Wait::Task { task, then },
         },
         Err(_) => Wait::Task { task, then },
@@ -102,15 +135,30 @@ fn imspec_args(e: &mut Engine, id: NodeId, spec: &ImSpec) -> Result<Vec<Value>, 
     }
     let at = e.vm.types.new_list(at);
     let zorder = opt_expr(e, id, 2, &spec.zorder)?;
-    let behind = e.vm.types.new_list(spec.behind.iter().map(|b| s(e, b)).collect());
-    Ok(vec![name, expression, opt_str(e, &spec.tag), at, opt_str(e, &spec.layer), zorder, behind])
+    let behind =
+        e.vm.types
+            .new_list(spec.behind.iter().map(|b| s(e, b)).collect());
+    Ok(vec![
+        name,
+        expression,
+        opt_str(e, &spec.tag),
+        at,
+        opt_str(e, &spec.layer),
+        zorder,
+        behind,
+    ])
 }
 
 fn atl_value(e: &mut Engine, atl: &Option<Rc<crate::atl::RawBlock>>) -> Result<Value, ExecError> {
     match atl {
         Some(a) => {
             let globals = e.store_dict("store");
-            Ok(crate::natives::atl_transform(&mut e.vm, (**a).clone(), None, globals))
+            Ok(crate::natives::atl_transform(
+                &mut e.vm,
+                (**a).clone(),
+                None,
+                globals,
+            ))
         }
         None => Ok(Value::None),
     }
@@ -119,8 +167,15 @@ fn atl_value(e: &mut Engine, atl: &Option<Rc<crate::atl::RawBlock>>) -> Result<V
 pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
     let next = node.next;
     match &node.kind {
-        NodeKind::Pass | NodeKind::Init { .. } | NodeKind::EarlyPython { .. } | NodeKind::Rpy { .. } | NodeKind::Testcase { .. } | NodeKind::TranslateEarlyBlock { .. } => Ok(Flow::Next(next)),
-        NodeKind::Label { name, parameters, .. } => {
+        NodeKind::Pass
+        | NodeKind::Init { .. }
+        | NodeKind::EarlyPython { .. }
+        | NodeKind::Rpy { .. }
+        | NodeKind::Testcase { .. }
+        | NodeKind::TranslateEarlyBlock { .. } => Ok(Flow::Next(next)),
+        NodeKind::Label {
+            name, parameters, ..
+        } => {
             bind_label(e, node, parameters.as_ref())?;
             let name = s(e, name);
             task(e, id, "_stmt_label", vec![name], next)
@@ -128,25 +183,65 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
         NodeKind::Python { code, hide, store } => {
             let c = e.compile_code(id, code)?;
             let g = e.ensure_store(store);
-            let locals = if *hide { Some(e.vm.types.new_dict()) } else { None };
+            let locals = if *hide {
+                Some(e.vm.types.new_dict())
+            } else {
+                None
+            };
             match e.vm.start_code_task(c, g, locals) {
                 TaskOutcome::Done(_) => Ok(Flow::Next(e.next_node(next))),
                 TaskOutcome::Error(exc) => Err(ExecError::Python(PyErr::Exc(exc))),
-                TaskOutcome::Suspended(task, req) => Ok(Flow::Wait(Box::new(suspended(e, task, req, Then::Node(id))))),
+                TaskOutcome::Suspended(task, req) => Ok(Flow::Wait(Box::new(suspended(
+                    e,
+                    task,
+                    req,
+                    Then::Node(id),
+                )))),
             }
         }
-        NodeKind::Say { who, what, with_, interact, attributes, temporary_attributes, arguments, .. } => {
+        NodeKind::Say {
+            who,
+            what,
+            with_,
+            interact,
+            attributes,
+            temporary_attributes,
+            arguments,
+            ..
+        } => {
             let w = match who {
                 Some(x) => e.eval_cached(id, 0, x)?,
                 None => Value::None,
             };
             let with = opt_expr(e, id, 1, with_)?;
             let (args, kwargs) = eval_arguments(e, id, arguments)?;
-            let attrs = attributes.as_ref().map(|a| str_list(e, a)).unwrap_or(Value::None);
-            let tattrs = temporary_attributes.as_ref().map(|a| str_list(e, a)).unwrap_or(Value::None);
+            let attrs = attributes
+                .as_ref()
+                .map(|a| str_list(e, a))
+                .unwrap_or(Value::None);
+            let tattrs = temporary_attributes
+                .as_ref()
+                .map(|a| str_list(e, a))
+                .unwrap_or(Value::None);
             let wv = s(e, what);
             let who_name = who.as_ref().map(|w| s(e, &w.text)).unwrap_or(Value::None);
-            task(e, id, "_stmt_say", vec![w, wv, Value::Bool(*interact), attrs, tattrs, args, kwargs, with, who_name], next)
+            task(
+                e,
+                id,
+                "_stmt_say",
+                vec![
+                    w,
+                    wv,
+                    Value::Bool(*interact),
+                    attrs,
+                    tattrs,
+                    args,
+                    kwargs,
+                    with,
+                    who_name,
+                ],
+                next,
+            )
         }
         NodeKind::Image { name, code, atl } => {
             let img = match code {
@@ -156,9 +251,19 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
             let n = str_list(e, name);
             task(e, id, "_stmt_image", vec![n, img], next)
         }
-        NodeKind::Transform { store, name, atl, parameters } => {
+        NodeKind::Transform {
+            store,
+            name,
+            atl,
+            parameters,
+        } => {
             let g = e.ensure_store(store);
-            let t = crate::natives::atl_transform(&mut e.vm, (**atl).clone(), parameters.clone(), g.clone());
+            let t = crate::natives::atl_transform(
+                &mut e.vm,
+                (**atl).clone(),
+                parameters.clone(),
+                g.clone(),
+            );
             g.dict_set_raw(&e.vm.types, e.vm.types.new_str(name), t);
             Ok(Flow::Next(next))
         }
@@ -176,7 +281,16 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
             a.push(opt_str(e, layer));
             task(e, id, "_stmt_scene", a, next)
         }
-        NodeKind::ShowLayer { layer, at_list, atl } | NodeKind::Camera { layer, at_list, atl } => {
+        NodeKind::ShowLayer {
+            layer,
+            at_list,
+            atl,
+        }
+        | NodeKind::Camera {
+            layer,
+            at_list,
+            atl,
+        } => {
             let mut at = Vec::new();
             for (i, x) in at_list.iter().enumerate() {
                 at.push(e.eval_cached(id, 10 + i as u8, x)?);
@@ -195,7 +309,12 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
             let p = opt_expr(e, id, 1, paired)?;
             task(e, id, "_stmt_with", vec![t, p], next)
         }
-        NodeKind::Call { label, expression, arguments, .. } => {
+        NodeKind::Call {
+            label,
+            expression,
+            arguments,
+            ..
+        } => {
             let target = if *expression {
                 let f = node.filename.clone();
                 let v = e.eval_cached(id, 0, &PyExpr::new(label.as_str(), f, node.linenumber))?;
@@ -205,8 +324,22 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
             };
             let (args, kwargs) = eval_arguments(e, id, arguments)?;
             let t = e.call_label(&target, next)?;
-            e.set_store("_args", if arguments.is_some() { args } else { Value::None });
-            e.set_store("_kwargs", if arguments.is_some() { kwargs } else { Value::None });
+            e.set_store(
+                "_args",
+                if arguments.is_some() {
+                    args
+                } else {
+                    Value::None
+                },
+            );
+            e.set_store(
+                "_kwargs",
+                if arguments.is_some() {
+                    kwargs
+                } else {
+                    Value::None
+                },
+            );
             Ok(Flow::Jump(t))
         }
         NodeKind::Return { expression } => {
@@ -224,7 +357,9 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
                 None => Ok(Flow::Halt),
             }
         }
-        NodeKind::Jump { target, expression, .. } => {
+        NodeKind::Jump {
+            target, expression, ..
+        } => {
             let t = if *expression {
                 let f = node.filename.clone();
                 let v = e.eval_cached(id, 0, &PyExpr::new(target.as_str(), f, node.linenumber))?;
@@ -250,22 +385,43 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
             }
             Ok(Flow::Next(next))
         }
-        NodeKind::Menu { items, set, with_, has_caption, arguments } => {
+        NodeKind::Menu {
+            items,
+            set,
+            with_,
+            has_caption,
+            arguments,
+        } => {
             let mut list = Vec::new();
             for (i, it) in items.iter().enumerate() {
                 let label = s(e, &it.label);
                 let cond = e.eval_cached(id, 20 + i as u8, &it.condition)?;
                 let ok = ops::truthy(&mut e.vm, &cond)?;
-                let val = if it.block.is_some() { Value::Int(i as i64) } else { Value::None };
+                let val = if it.block.is_some() {
+                    Value::Int(i as i64)
+                } else {
+                    Value::None
+                };
                 list.push(e.vm.types.new_tuple(vec![label, Value::Bool(ok), val]));
             }
             let l = e.vm.types.new_list(list);
             let st = opt_expr(e, id, 0, set)?;
             let w = opt_expr(e, id, 1, with_)?;
             let (args, kwargs) = eval_arguments(e, id, arguments)?;
-            task(e, id, "_stmt_menu", vec![l, st, w, Value::Bool(*has_caption), args, kwargs], next)
+            task(
+                e,
+                id,
+                "_stmt_menu",
+                vec![l, st, w, Value::Bool(*has_caption), args, kwargs],
+                next,
+            )
         }
-        NodeKind::UserStatement { line, parsed, block, .. } => {
+        NodeKind::UserStatement {
+            line,
+            parsed,
+            block,
+            ..
+        } => {
             let p = match parsed {
                 Some(p) => p.clone(),
                 None => crate::statements::parse(&mut e.vm, node, line, block.clone())?,
@@ -279,7 +435,13 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
             };
             task(e, id, "_stmt_post_user", vec![p], next)
         }
-        NodeKind::Define { store, name, index, operator, code } => {
+        NodeKind::Define {
+            store,
+            name,
+            index,
+            operator,
+            code,
+        } => {
             e.ensure_definition_store(store);
             let v = e.eval_cached(id, 0, &code.source)?;
             let idx = opt_expr(e, id, 1, index)?;
@@ -287,7 +449,13 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
             let n = s(e, name);
             let op = s(e, operator);
             let has_index = Value::Bool(index.is_some());
-            task(e, id, "_stmt_define", vec![st, n, idx, op, v, has_index], next)
+            task(
+                e,
+                id,
+                "_stmt_define",
+                vec![st, n, idx, op, v, has_index],
+                next,
+            )
         }
         NodeKind::Default { store, name, code } => {
             e.ensure_definition_store(store);
@@ -297,7 +465,13 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
             let f = node.filename.clone();
             let src = s(e, &code.source.text);
             let fv = s(e, &f);
-            task(e, id, "_stmt_default", vec![st, n, src, fv, Value::Int(code.source.line as i64)], next)
+            task(
+                e,
+                id,
+                "_stmt_default",
+                vec![st, n, src, fv, Value::Int(code.source.line as i64)],
+                next,
+            )
         }
         NodeKind::Screen { screen } => {
             crate::screens::define(&mut e.vm, screen.clone())?;
@@ -307,11 +481,18 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
             crate::style::apply_statement(e, id, style)?;
             Ok(Flow::Next(next))
         }
-        NodeKind::Translate { identifier, block, .. } => {
+        NodeKind::Translate {
+            identifier, block, ..
+        } => {
             let lang = task_value(e, "_translate_language")?;
             if !lang.is_none() {
                 let l = ops::str(&mut e.vm, &lang)?;
-                let t = e.st.script.borrow().language_translates.get(&(identifier.clone(), l)).copied();
+                let t =
+                    e.st.script
+                        .borrow()
+                        .language_translates
+                        .get(&(identifier.clone(), l))
+                        .copied();
                 if let Some(t) = t {
                     let b = match &e.st.script.borrow().arena.get(t).kind {
                         NodeKind::Translate { block, .. } => block.first().copied(),
@@ -329,14 +510,19 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
             drop(cs);
             Ok(Flow::Next(block.first().copied().or(next)))
         }
-        NodeKind::TranslateSay { say, identifier, .. } => {
+        NodeKind::TranslateSay {
+            say, identifier, ..
+        } => {
             {
                 let mut cs = e.st.contexts.borrow_mut();
                 if let Some(c) = cs.last_mut() {
                     c.translate_identifier = Some(identifier.clone());
                 }
             }
-            let n = Node { kind: (**say).clone(), ..node.clone() };
+            let n = Node {
+                kind: (**say).clone(),
+                ..node.clone()
+            };
             execute(e, id, &n)
         }
         NodeKind::EndTranslate => {
@@ -358,7 +544,9 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
             match e.vm.start_code_task(c, g, None) {
                 TaskOutcome::Done(_) => Ok(Flow::Next(next)),
                 TaskOutcome::Error(exc) => Err(ExecError::Python(PyErr::Exc(exc))),
-                TaskOutcome::Suspended(..) => Err(ExecError::Msg("interaction in translate python".into())),
+                TaskOutcome::Suspended(..) => {
+                    Err(ExecError::Msg("interaction in translate python".into()))
+                }
             }
         }
         NodeKind::TranslateBlock { block, .. } => Ok(Flow::Next(block.first().copied().or(next))),
@@ -367,18 +555,32 @@ pub fn execute(e: &mut Engine, id: NodeId, node: &Node) -> R {
 
 fn bind_label(e: &mut Engine, node: &Node, signature: Option<&Signature>) -> Result<(), ExecError> {
     let store = e.store_dict("store");
-    let args = store.dict_get_str_raw("_args").filter(|value| !value.is_none());
-    let args = args.as_ref().map_or(Ok(Vec::new()), |args| ops::collect(&mut e.vm, args))?;
-    let kwargs = store.dict_get_str_raw("_kwargs").filter(|value| !value.is_none());
-    let kwargs = kwargs.as_ref().map_or(Ok(Vec::new()), |args| ops::mapping_items(&mut e.vm, args))?;
+    let args = store
+        .dict_get_str_raw("_args")
+        .filter(|value| !value.is_none());
+    let args = args
+        .as_ref()
+        .map_or(Ok(Vec::new()), |args| ops::collect(&mut e.vm, args))?;
+    let kwargs = store
+        .dict_get_str_raw("_kwargs")
+        .filter(|value| !value.is_none());
+    let kwargs = kwargs
+        .as_ref()
+        .map_or(Ok(Vec::new()), |args| ops::mapping_items(&mut e.vm, args))?;
     let Some(signature) = signature else {
-        return if args.is_empty() && kwargs.is_empty() { Ok(()) } else {
-            Err(ExecError::Msg("arguments supplied to a label without parameters".into()))
+        return if args.is_empty() && kwargs.is_empty() {
+            Ok(())
+        } else {
+            Err(ExecError::Msg(
+                "arguments supplied to a label without parameters".into(),
+            ))
         };
     };
     let mut words = std::collections::BTreeMap::new();
     for (key, value) in kwargs {
-        let name = key.as_str().ok_or_else(|| e.vm.type_error("label keyword must be a string"))?;
+        let name = key
+            .as_str()
+            .ok_or_else(|| e.vm.type_error("label keyword must be a string"))?;
         words.insert(name.to_owned(), value);
     }
     let mut rest = args.into_iter();
@@ -387,9 +589,18 @@ fn bind_label(e: &mut Engine, node: &Node, signature: Option<&Signature>) -> Res
         let value = match parameter.kind {
             0..=1 => {
                 let by_position = rest.next();
-                let by_name = if parameter.kind == 1 { words.remove(&parameter.name) } else { None };
+                let by_name = if parameter.kind == 1 {
+                    words.remove(&parameter.name)
+                } else {
+                    None
+                };
                 match (by_position, by_name) {
-                    (Some(_), Some(_)) => return Err(ExecError::Msg(format!("parameter {} has two values", parameter.name))),
+                    (Some(_), Some(_)) => {
+                        return Err(ExecError::Msg(format!(
+                            "parameter {} has two values",
+                            parameter.name
+                        )));
+                    }
                     (value, named) => value.or(named),
                 }
             }
@@ -407,18 +618,34 @@ fn bind_label(e: &mut Engine, node: &Node, signature: Option<&Signature>) -> Res
         };
         let value = match (value, &parameter.default) {
             (Some(value), _) => value,
-            (None, Some(default)) => e.eval(&PyExpr::new(default.as_str(), node.filename.clone(), node.linenumber))?,
-            (None, None) => return Err(ExecError::Msg(format!("required parameter {} has no value", parameter.name))),
+            (None, Some(default)) => e.eval(&PyExpr::new(
+                default.as_str(),
+                node.filename.clone(),
+                node.linenumber,
+            ))?,
+            (None, None) => {
+                return Err(ExecError::Msg(format!(
+                    "required parameter {} has no value",
+                    parameter.name
+                )));
+            }
         };
         bindings.push((parameter.name.clone(), value));
     }
-    if rest.next().is_some() { return Err(ExecError::Msg("too many positional label arguments".into())); }
-    if !words.is_empty() { return Err(ExecError::Msg(format!(
-        "unknown label arguments: {}", words.keys().cloned().collect::<Vec<_>>().join(", ")
-    ))); }
+    if rest.next().is_some() {
+        return Err(ExecError::Msg("too many positional label arguments".into()));
+    }
+    if !words.is_empty() {
+        return Err(ExecError::Msg(format!(
+            "unknown label arguments: {}",
+            words.keys().cloned().collect::<Vec<_>>().join(", ")
+        )));
+    }
     {
         let mut contexts = e.st.contexts.borrow_mut();
-        let scope = contexts.last_mut().and_then(|c| c.dynamic_stack.last_mut())
+        let scope = contexts
+            .last_mut()
+            .and_then(|c| c.dynamic_stack.last_mut())
             .ok_or_else(|| ExecError::Msg("no dynamic scope for label".into()))?;
         for (name, value) in bindings {
             if !scope.iter().any(|(key, _)| key == &name) {
@@ -439,12 +666,21 @@ fn task_value(e: &mut Engine, name: &str) -> Result<Value, ExecError> {
 }
 
 impl Engine {
-    pub fn compile_code(&mut self, id: NodeId, code: &PyCode) -> Result<Rc<crysirror_python::code::Code>, ExecError> {
+    pub fn compile_code(
+        &mut self,
+        id: NodeId,
+        code: &PyCode,
+    ) -> Result<Rc<crysirror_python::code::Code>, ExecError> {
         if let Some(c) = self.st.code_cache.borrow().get(&(id, 200)) {
             return Ok(c.clone());
         }
-        let d = if code.py3 { crysirror_python::Dialect::Py3 } else { self.st.profile.dialect };
-        let c = crate::pycompile::compile(&self.vm, &code.source, code.mode, d).map_err(ExecError::Msg)?;
+        let d = if code.py3 {
+            crysirror_python::Dialect::Py3
+        } else {
+            self.st.profile.dialect
+        };
+        let c = crate::pycompile::compile(&self.vm, &code.source, code.mode, d)
+            .map_err(ExecError::Msg)?;
         self.st.code_cache.borrow_mut().insert((id, 200), c.clone());
         Ok(c)
     }
@@ -452,13 +688,24 @@ impl Engine {
     /// A Python statement may have redirected the next node (renpy.jump is
     /// an exception; `next_node` is set by user statements).
     pub fn next_node(&self, default: Option<NodeId>) -> Option<NodeId> {
-        self.st.contexts.borrow().last().and_then(|c| c.next_node).or(default)
+        self.st
+            .contexts
+            .borrow()
+            .last()
+            .and_then(|c| c.next_node)
+            .or(default)
     }
 
     pub fn pop_dynamic(&mut self) -> Result<(), ExecError> {
         let scope = {
             let mut cs = self.st.contexts.borrow_mut();
-            cs.last_mut().and_then(|c| if c.dynamic_stack.len() > 1 { c.dynamic_stack.pop() } else { None })
+            cs.last_mut().and_then(|c| {
+                if c.dynamic_stack.len() > 1 {
+                    c.dynamic_stack.pop()
+                } else {
+                    None
+                }
+            })
         };
         if let Some(scope) = scope {
             restore_scope(self, scope.into_iter().rev());
@@ -467,7 +714,10 @@ impl Engine {
     }
 }
 
-pub(crate) fn restore_scope(engine: &mut Engine, scope: impl IntoIterator<Item=(String, Option<Value>)>) {
+pub(crate) fn restore_scope(
+    engine: &mut Engine,
+    scope: impl IntoIterator<Item = (String, Option<Value>)>,
+) {
     let store = engine.store_dict("store");
     for (key, value) in scope {
         if let Some(value) = value {

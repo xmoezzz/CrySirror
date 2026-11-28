@@ -26,11 +26,16 @@ pub fn name_value(vm: &Vm, n: &NodeName) -> Value {
         NodeName::Label(l) => vm.types.new_str(l),
         NodeName::Other(o) => vm.types.new_str(o),
         NodeName::Generated { .. } | NodeName::Tuple(_) => {
-            let items = n.atoms().unwrap_or_default().iter().map(|a| match a {
-                NameAtom::Str(s) => vm.types.new_str(s),
-                NameAtom::Int(i) => Value::Int(*i),
-                NameAtom::Float(b) => Value::Float(f64::from_bits(*b)),
-            }).collect();
+            let items = n
+                .atoms()
+                .unwrap_or_default()
+                .iter()
+                .map(|a| match a {
+                    NameAtom::Str(s) => vm.types.new_str(s),
+                    NameAtom::Int(i) => Value::Int(*i),
+                    NameAtom::Float(b) => Value::Float(f64::from_bits(*b)),
+                })
+                .collect();
             vm.types.new_tuple(items)
         }
     }
@@ -50,7 +55,9 @@ pub fn find(vm: &mut Vm, name: &Value) -> PyResult<Option<NodeId>> {
         }
         return Ok(script.namemap.get(&NodeName::Other(s)).copied());
     }
-    let Some(parts) = py::seq(name) else { return Ok(None) };
+    let Some(parts) = py::seq(name) else {
+        return Ok(None);
+    };
     let mut atoms = Vec::with_capacity(parts.len());
     for p in &parts {
         atoms.push(match p {
@@ -136,7 +143,9 @@ fn block_list(vm: &mut Vm, b: &[NodeId]) -> PyResult<Value> {
 }
 
 fn opt_str(vm: &Vm, s: &Option<String>) -> Value {
-    s.as_ref().map(|s| vm.types.new_str(s)).unwrap_or(Value::None)
+    s.as_ref()
+        .map(|s| vm.types.new_str(s))
+        .unwrap_or(Value::None)
 }
 
 fn strs(vm: &Vm, v: &[String]) -> Value {
@@ -155,13 +164,21 @@ fn opt_expr(vm: &Vm, e: &Option<crate::lexer::PyExpr>) -> Value {
 /// Attribute reads of a node handle.
 fn n_getattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let id = id_of(&args[0]).ok_or_else(|| vm.type_error("node handle expected"))?;
-    let name = args.get(1).and_then(|v| v.as_str()).unwrap_or("").to_owned();
+    let name = args
+        .get(1)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_owned();
     let r = rt(vm);
     let node = r.script.borrow().arena.get(id).clone();
     let v = match name.as_str() {
         "filename" => vm.types.new_str(&node.filename),
         "linenumber" => Value::Int(node.linenumber as i64),
-        "name" => node.name.as_ref().map(|n| name_value(vm, n)).unwrap_or(Value::None),
+        "name" => node
+            .name
+            .as_ref()
+            .map(|n| name_value(vm, n))
+            .unwrap_or(Value::None),
         "next" => opt_handle(vm, node.next)?,
         "statement_start" => match node.statement_start {
             Some(s) => handle(vm, s)?,
@@ -181,14 +198,34 @@ fn kind_attr(vm: &mut Vm, kind: &NodeKind, name: &str) -> PyResult<Value> {
     let missing = |vm: &Vm| Err(vm.exc_msg("AttributeError", name));
     Ok(match (kind, name) {
         (NodeKind::Say { who, .. }, "who") => opt_expr(vm, who),
-        (NodeKind::Say { who, .. }, "who_fast") => Value::Bool(who.as_ref().is_some_and(|w| crate::lexer::is_name(&w.text))),
+        (NodeKind::Say { who, .. }, "who_fast") => {
+            Value::Bool(who.as_ref().is_some_and(|w| crate::lexer::is_name(&w.text)))
+        }
         (NodeKind::Say { what, .. }, "what") => vm.types.new_str(what),
         (NodeKind::Say { with_, .. }, "with_") => opt_expr(vm, with_),
         (NodeKind::Say { interact, .. }, "interact") => Value::Bool(*interact),
-        (NodeKind::Say { attributes, .. }, "attributes") => attributes.as_ref().map(|a| strs(vm, a)).unwrap_or(Value::None),
-        (NodeKind::Say { temporary_attributes, .. }, "temporary_attributes") => temporary_attributes.as_ref().map(|a| strs(vm, a)).unwrap_or(Value::None),
+        (NodeKind::Say { attributes, .. }, "attributes") => attributes
+            .as_ref()
+            .map(|a| strs(vm, a))
+            .unwrap_or(Value::None),
+        (
+            NodeKind::Say {
+                temporary_attributes,
+                ..
+            },
+            "temporary_attributes",
+        ) => temporary_attributes
+            .as_ref()
+            .map(|a| strs(vm, a))
+            .unwrap_or(Value::None),
         (NodeKind::Say { identifier, .. }, "identifier") => opt_str(vm, identifier),
-        (NodeKind::Say { explicit_identifier, .. }, "explicit_identifier") => Value::Bool(*explicit_identifier),
+        (
+            NodeKind::Say {
+                explicit_identifier,
+                ..
+            },
+            "explicit_identifier",
+        ) => Value::Bool(*explicit_identifier),
         (NodeKind::Say { arguments, .. }, "arguments") => Value::Bool(arguments.is_some()),
         (NodeKind::Label { name, .. }, "label") => vm.types.new_str(name),
         (NodeKind::Label { hide, .. }, "hide") => Value::Bool(*hide),
@@ -196,12 +233,37 @@ fn kind_attr(vm: &mut Vm, kind: &NodeKind, name: &str) -> PyResult<Value> {
             Some(p) => super::atlrt::signature_value(vm, p.clone())?,
             None => Value::None,
         },
-        (NodeKind::Label { block, .. } | NodeKind::Init { block, .. } | NodeKind::While { block, .. } | NodeKind::Translate { block, .. } | NodeKind::TranslateBlock { block, .. } | NodeKind::TranslateEarlyBlock { block, .. }, "block") => block_list(vm, block)?,
+        (
+            NodeKind::Label { block, .. }
+            | NodeKind::Init { block, .. }
+            | NodeKind::While { block, .. }
+            | NodeKind::Translate { block, .. }
+            | NodeKind::TranslateBlock { block, .. }
+            | NodeKind::TranslateEarlyBlock { block, .. },
+            "block",
+        ) => block_list(vm, block)?,
         (NodeKind::Init { priority, .. }, "priority") => Value::Int(*priority as i64),
-        (NodeKind::Python { hide, .. } | NodeKind::EarlyPython { hide, .. }, "hide") => Value::Bool(*hide),
-        (NodeKind::Python { store, .. } | NodeKind::EarlyPython { store, .. } | NodeKind::Define { store, .. } | NodeKind::Default { store, .. } | NodeKind::Transform { store, .. }, "store") => vm.types.new_str(store),
-        (NodeKind::Python { code, .. } | NodeKind::EarlyPython { code, .. } | NodeKind::Define { code, .. } | NodeKind::Default { code, .. }, "code") => pycode(vm, code)?,
-        (NodeKind::Define { name, .. } | NodeKind::Default { name, .. }, "varname") => vm.types.new_str(name),
+        (NodeKind::Python { hide, .. } | NodeKind::EarlyPython { hide, .. }, "hide") => {
+            Value::Bool(*hide)
+        }
+        (
+            NodeKind::Python { store, .. }
+            | NodeKind::EarlyPython { store, .. }
+            | NodeKind::Define { store, .. }
+            | NodeKind::Default { store, .. }
+            | NodeKind::Transform { store, .. },
+            "store",
+        ) => vm.types.new_str(store),
+        (
+            NodeKind::Python { code, .. }
+            | NodeKind::EarlyPython { code, .. }
+            | NodeKind::Define { code, .. }
+            | NodeKind::Default { code, .. },
+            "code",
+        ) => pycode(vm, code)?,
+        (NodeKind::Define { name, .. } | NodeKind::Default { name, .. }, "varname") => {
+            vm.types.new_str(name)
+        }
         (NodeKind::Define { operator, .. }, "operator") => vm.types.new_str(operator),
         (NodeKind::Define { index, .. }, "index") => opt_expr(vm, index),
         (NodeKind::Image { name, .. }, "imgname") => strs(vm, name),
@@ -209,8 +271,13 @@ fn kind_attr(vm: &mut Vm, kind: &NodeKind, name: &str) -> PyResult<Value> {
         (NodeKind::With { expr: e, .. }, "expr") => opt_expr(vm, e),
         (NodeKind::With { paired, .. }, "paired") => opt_expr(vm, paired),
         (NodeKind::Call { label, .. }, "label") => vm.types.new_str(label),
-        (NodeKind::Call { expression, .. } | NodeKind::Jump { expression, .. }, "expression") => Value::Bool(*expression),
-        (NodeKind::Call { global_label, .. } | NodeKind::Jump { global_label, .. }, "global_label") => vm.types.new_str(global_label),
+        (NodeKind::Call { expression, .. } | NodeKind::Jump { expression, .. }, "expression") => {
+            Value::Bool(*expression)
+        }
+        (
+            NodeKind::Call { global_label, .. } | NodeKind::Jump { global_label, .. },
+            "global_label",
+        ) => vm.types.new_str(global_label),
         (NodeKind::Jump { target, .. }, "target") => vm.types.new_str(target),
         (NodeKind::Return { expression }, "expression") => opt_expr(vm, expression),
         (NodeKind::Menu { items, .. }, "items") => {
@@ -255,15 +322,30 @@ fn kind_attr(vm: &mut Vm, kind: &NodeKind, name: &str) -> PyResult<Value> {
             }
             vm.types.new_list(v)
         }
-        (NodeKind::UserStatement { init_priority, .. }, "init_priority") => Value::Int(*init_priority as i64),
-        (NodeKind::UserStatement { translatable, .. }, "translatable") => Value::Bool(*translatable),
+        (NodeKind::UserStatement { init_priority, .. }, "init_priority") => {
+            Value::Int(*init_priority as i64)
+        }
+        (NodeKind::UserStatement { translatable, .. }, "translatable") => {
+            Value::Bool(*translatable)
+        }
         (NodeKind::UserStatement { atl, .. }, "atl") => match atl {
             Some(a) => super::atlrt::raw_value(vm, a.clone())?,
             None => Value::None,
         },
         (NodeKind::Screen { screen }, "screen") => super::slast::screen_value(vm, screen.clone())?,
-        (NodeKind::Translate { identifier, .. } | NodeKind::TranslateSay { identifier, .. }, "identifier") => vm.types.new_str(identifier),
-        (NodeKind::Translate { language, .. } | NodeKind::TranslateSay { language, .. } | NodeKind::TranslateString { language, .. } | NodeKind::TranslatePython { language, .. } | NodeKind::TranslateBlock { language, .. } | NodeKind::TranslateEarlyBlock { language, .. }, "language") => opt_str(vm, language),
+        (
+            NodeKind::Translate { identifier, .. } | NodeKind::TranslateSay { identifier, .. },
+            "identifier",
+        ) => vm.types.new_str(identifier),
+        (
+            NodeKind::Translate { language, .. }
+            | NodeKind::TranslateSay { language, .. }
+            | NodeKind::TranslateString { language, .. }
+            | NodeKind::TranslatePython { language, .. }
+            | NodeKind::TranslateBlock { language, .. }
+            | NodeKind::TranslateEarlyBlock { language, .. },
+            "language",
+        ) => opt_str(vm, language),
         (NodeKind::Translate { alternate, .. }, "alternate") => opt_str(vm, alternate),
         (NodeKind::TranslateString { old, .. }, "old") => vm.types.new_str(old),
         (NodeKind::TranslateString { new, .. }, "new") => vm.types.new_str(new),
@@ -276,7 +358,9 @@ fn pycode(vm: &mut Vm, code: &crate::ast::PyCode) -> PyResult<Value> {
     let c = py::import_attr(vm, AST, "PyCode")?;
     let src = vm.types.new_str(&code.source.text);
     let f = vm.types.new_str(&code.source.filename);
-    let loc = vm.types.new_tuple(vec![f, Value::Int(code.source.line as i64)]);
+    let loc = vm
+        .types
+        .new_tuple(vec![f, Value::Int(code.source.line as i64)]);
     let mode = vm.types.new_str(code.mode);
     vm.call(&c, vec![src, loc, mode], Vec::new())
 }
@@ -300,7 +384,10 @@ fn n_diff_info(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let script = r.script.borrow();
         let n = script.arena.get(id);
         let extra = match &n.kind {
-            NodeKind::Say { who, what, .. } => vec![who.as_ref().map(|w| w.text.to_string()).unwrap_or_default(), what.clone()],
+            NodeKind::Say { who, what, .. } => vec![
+                who.as_ref().map(|w| w.text.to_string()).unwrap_or_default(),
+                what.clone(),
+            ],
             NodeKind::Label { name, .. } => vec![name.to_string()],
             NodeKind::Jump { target, .. } => vec![target.clone()],
             NodeKind::Call { label, .. } => vec![label.clone()],
@@ -322,7 +409,17 @@ fn n_get_code(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let code = {
         let script = r.script.borrow();
         match &script.arena.get(id).kind {
-            NodeKind::Say { who, what, attributes, temporary_attributes, with_, interact, identifier, explicit_identifier, arguments } => {
+            NodeKind::Say {
+                who,
+                what,
+                attributes,
+                temporary_attributes,
+                with_,
+                interact,
+                identifier,
+                explicit_identifier,
+                arguments,
+            } => {
                 let mut rv = Vec::new();
                 if let Some(w) = who {
                     rv.push(w.text.to_string());
@@ -405,9 +502,146 @@ fn n_get_children(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
+/// `Node.get_reachable()` (8.4+): the nodes statically reachable from a
+/// node, per node class: `next`; static call/jump targets before it; menu
+/// and if branches (an always-true branch hides `next`); `while` bodies
+/// (`while True` hides `next`); translate blocks of every language; and a
+/// creator statement's `reachable` callback (or upstream's default set).
+fn n_get_reachable(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+    let id = id_of(&args[0]).ok_or_else(|| vm.type_error("node"))?;
+    let node = rt(vm).script.borrow().arena.get(id).clone();
+    let next: Vec<NodeId> = node.next.into_iter().collect();
+    let first = |b: &[NodeId]| b.first().copied();
+    let mut ids: Vec<NodeId> = Vec::new();
+    match &node.kind {
+        NodeKind::Call { label, expression: false, .. } | NodeKind::Jump { target: label, expression: false, .. } => {
+            let l = py::s(vm, label);
+            if let Some(t) = find(vm, &l)? {
+                ids.push(t);
+            }
+            ids.extend(next);
+        }
+        NodeKind::Menu { items, .. } => {
+            ids.extend(items.iter().filter_map(|i| i.block.as_deref().and_then(first)));
+            ids.extend(next);
+        }
+        NodeKind::While { condition, block } => {
+            ids.extend(first(block));
+            if &*condition.text != "True" {
+                ids.extend(next);
+            }
+        }
+        NodeKind::If { entries } => {
+            let mut always = false;
+            for (c, b) in entries {
+                ids.extend(first(b));
+                if &*c.text == "True" {
+                    always = true;
+                    break;
+                }
+            }
+            if !always {
+                ids.extend(next);
+            }
+        }
+        NodeKind::UserStatement { .. } => {
+            let this = args[0].clone();
+            let names = user_reachable(vm, &this)?;
+            let mut out = Vec::new();
+            for n in names {
+                if py::is_none(&n) || matches!(n, Value::Bool(true)) {
+                    continue;
+                }
+                if let Some(b) = py::get_opt(vm, &n, "block")? {
+                    if let Some(f) = py::items(vm, &b)?.into_iter().next() {
+                        out.push(f);
+                    }
+                    continue;
+                }
+                if let Some(t) = find(vm, &n)? {
+                    out.push(handle(vm, t)?);
+                }
+            }
+            return Ok(vm.types.new_list(out));
+        }
+        NodeKind::Translate { identifier, language: None, .. } => {
+            ids.extend(next);
+            let tr = py::import_attr(vm, "renpy.game", "script")?;
+            let tr = py::get(vm, &tr, "translator")?;
+            let ident = py::s(vm, identifier);
+            if let Ok(all) = py::method(vm, &tr, "get_all_translates", vec![ident]) {
+                let values = py::method(vm, &all, "values", Vec::new())?;
+                let mut extra = Vec::new();
+                for t in py::items(vm, &values)? {
+                    let b = py::get(vm, &t, "block")?;
+                    if let Some(f) = py::items(vm, &b)?.into_iter().next() {
+                        extra.push(f);
+                    }
+                }
+                let mut out = Vec::new();
+                for i in ids {
+                    out.push(handle(vm, i)?);
+                }
+                out.extend(extra);
+                return Ok(vm.types.new_list(out));
+            }
+        }
+        _ => ids.extend(next),
+    }
+    let mut out = Vec::new();
+    for i in ids {
+        out.push(handle(vm, i)?);
+    }
+    Ok(vm.types.new_list(out))
+}
+
+/// `UserStatement.reachable(True)`.
+fn user_reachable(vm: &mut Vm, this: &Value) -> PyResult<Vec<Value>> {
+    let parsed = py::get(vm, this, "parsed")?;
+    let name = py::get(vm, this, "name")?;
+    let next = py::get(vm, this, "next")?;
+    let next_name = if py::is_none(&next) { Value::None } else { py::get(vm, &next, "name")? };
+    let code_block = py::get_or_none(vm, this, "code_block")?;
+    let cb_first = if py::truthy(vm, &code_block)? { py::items(vm, &code_block)?.into_iter().next() } else { None };
+    let cb_name = match &cb_first {
+        Some(n) => py::get(vm, n, "name")?,
+        None => Value::None,
+    };
+    let rv = super::statements::call_method(
+        vm,
+        "reachable",
+        &parsed,
+        vec![Value::Bool(true), name.clone(), next_name.clone(), cb_name.clone()],
+        &[],
+    )?;
+    if !py::is_none(&rv) {
+        return py::items(vm, &rv);
+    }
+    let mut out = Vec::new();
+    let label = super::statements::call_method(vm, "label", &parsed, Vec::new(), &[])?;
+    if py::truthy(vm, &label)? {
+        out.push(name);
+    }
+    if cb_first.is_some() {
+        out.push(cb_name);
+    }
+    let subparses = py::get_or_none(vm, this, "subparses")?;
+    if py::truthy(vm, &subparses)? {
+        for sp in py::items(vm, &subparses)? {
+            out.push(sp);
+        }
+    }
+    if !py::is_none(&next) {
+        out.push(next_name);
+    }
+    Ok(out)
+}
+
 fn n_eq(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let _ = vm;
-    Ok(Value::Bool(id_of(&args[0]).is_some() && id_of(&args[0]) == id_of(&args[1])))
+    Ok(Value::Bool(
+        id_of(&args[0]).is_some() && id_of(&args[0]) == id_of(&args[1]),
+    ))
 }
 
 fn n_hash(_: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -415,7 +649,10 @@ fn n_hash(_: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn n_reduce(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
-    Err(py::error(vm, "Script nodes are saved by name, not pickled."))
+    Err(py::error(
+        vm,
+        "Script nodes are saved by name, not pickled.",
+    ))
 }
 
 fn no_new(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
@@ -426,8 +663,18 @@ fn no_new(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn pc_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    py::set(vm, this, "source", py::arg_or(args, kw, 1, "source", Value::None))?;
-    py::set(vm, this, "location", py::arg_or(args, kw, 2, "loc", Value::None))?;
+    py::set(
+        vm,
+        this,
+        "source",
+        py::arg_or(args, kw, 1, "source", Value::None),
+    )?;
+    py::set(
+        vm,
+        this,
+        "location",
+        py::arg_or(args, kw, 2, "loc", Value::None),
+    )?;
     let mode = py::arg_or(args, kw, 3, "mode", vm.types.new_str("exec"));
     py::set(vm, this, "mode", mode)?;
     py::set(vm, this, "bytecode", Value::None)?;
@@ -531,8 +778,19 @@ fn nm_len(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::Int(rt(vm).script.borrow().namemap.len() as i64))
 }
 
-fn native_type(vm: &mut Vm, module: &str, name: &str, base: &ObjRef, methods: py::Methods) -> ObjRef {
-    let c = vm.types.new_builtin_type(name, base, crysirror_python::object::BaseKind::Native, false);
+fn native_type(
+    vm: &mut Vm,
+    module: &str,
+    name: &str,
+    base: &ObjRef,
+    methods: py::Methods,
+) -> ObjRef {
+    let c = vm.types.new_builtin_type(
+        name,
+        base,
+        crysirror_python::object::BaseKind::Native,
+        false,
+    );
     for (n, f) in methods {
         vm.types.add_method(&c, n, *f);
     }
@@ -542,27 +800,68 @@ fn native_type(vm: &mut Vm, module: &str, name: &str, base: &ObjRef, methods: py
 }
 
 const NODE_CLASSES: &[&str] = &[
-    "Say", "Init", "Label", "Python", "EarlyPython", "Image", "Transform", "Show", "ShowLayer", "Camera", "Scene", "Hide", "With", "Call", "Return", "Menu", "Jump", "Pass", "While", "If", "UserStatement", "PostUserStatement", "Define", "Default", "Screen", "Style", "Testcase", "RPY", "Translate", "TranslateSay", "EndTranslate", "TranslateString", "TranslatePython", "TranslateBlock", "TranslateEarlyBlock",
+    "Say",
+    "Init",
+    "Label",
+    "Python",
+    "EarlyPython",
+    "Image",
+    "Transform",
+    "Show",
+    "ShowLayer",
+    "Camera",
+    "Scene",
+    "Hide",
+    "With",
+    "Call",
+    "Return",
+    "Menu",
+    "Jump",
+    "Pass",
+    "While",
+    "If",
+    "UserStatement",
+    "PostUserStatement",
+    "Define",
+    "Default",
+    "Screen",
+    "Style",
+    "Testcase",
+    "RPY",
+    "Translate",
+    "TranslateSay",
+    "EndTranslate",
+    "TranslateString",
+    "TranslatePython",
+    "TranslateBlock",
+    "TranslateEarlyBlock",
 ];
 
 /// Adds the node classes and `PyCode` to `renpy.ast` (whose runtime
 /// functions live in `astexec`).
 pub fn add_ast_classes(vm: &mut Vm, m: &ObjRef) -> PyResult<()> {
     let object = vm.types.object.clone();
-    let node = native_type(vm, AST, "Node", &object, &[
-        ("__getattr__", n_getattr),
-        ("__repr__", n_repr),
-        ("__eq__", n_eq),
-        ("__hash__", n_hash),
-        ("__reduce__", n_reduce),
-        ("__reduce_ex__", n_reduce),
-        ("diff_info", n_diff_info),
-        ("get_code", n_get_code),
-        ("execute", n_execute),
-        ("predict", n_predict),
-        ("get_children", n_get_children),
-        ("scry", n_scry),
-    ]);
+    let node = native_type(
+        vm,
+        AST,
+        "Node",
+        &object,
+        &[
+            ("__getattr__", n_getattr),
+            ("__repr__", n_repr),
+            ("__eq__", n_eq),
+            ("__hash__", n_hash),
+            ("__reduce__", n_reduce),
+            ("__reduce_ex__", n_reduce),
+            ("diff_info", n_diff_info),
+            ("get_code", n_get_code),
+            ("execute", n_execute),
+            ("predict", n_predict),
+            ("get_children", n_get_children),
+            ("get_reachable", n_get_reachable),
+            ("scry", n_scry),
+        ],
+    );
     let nn = vm.types.new_builtin("__new__", no_new);
     let nn = py::staticmethod(vm, nn);
     vm.types.set_attr(&node, "__new__", nn);
@@ -572,12 +871,32 @@ pub fn add_ast_classes(vm: &mut Vm, m: &ObjRef) -> PyResult<()> {
         crysirror_python::modules::set(vm, m, n, Value::Obj(c));
     }
     let obj = Value::Obj(vm.types.object.clone());
-    let pc = py::class(vm, AST, "PyCode", &[obj.clone()], &[("__init__", pc_init)], &[])?;
+    let pc = py::class(
+        vm,
+        AST,
+        "PyCode",
+        &[obj.clone()],
+        &[("__init__", pc_init)],
+        &[],
+    )?;
     crysirror_python::modules::set(vm, m, "PyCode", Value::Obj(pc));
     let f = Value::Bool(false);
-    let scry = py::class(vm, AST, "Scry", &[obj], &[("__getattr__", scry_getattr), ("next", scry_next)], &[
-        ("_next", Value::None), ("interacts", Value::None), ("say", f.clone()), ("menu_with_caption", f), ("who", Value::None), ("extend_text", Value::None), ("multiple", Value::None),
-    ])?;
+    let scry = py::class(
+        vm,
+        AST,
+        "Scry",
+        &[obj],
+        &[("__getattr__", scry_getattr), ("next", scry_next)],
+        &[
+            ("_next", Value::None),
+            ("interacts", Value::None),
+            ("say", f.clone()),
+            ("menu_with_caption", f),
+            ("who", Value::None),
+            ("extend_text", Value::None),
+            ("multiple", Value::None),
+        ],
+    )?;
     crysirror_python::modules::set(vm, m, "Scry", Value::Obj(scry));
     Ok(())
 }
@@ -588,14 +907,20 @@ fn init_script(vm: &mut Vm) -> PyResult<ObjRef> {
     let se = py::class(vm, SCRIPT, "ScriptError", &[exc], &[], &[])?;
     crysirror_python::modules::set(vm, &m, "ScriptError", Value::Obj(se));
     let object = vm.types.object.clone();
-    let nm = native_type(vm, SCRIPT, "NameMap", &object, &[
-        ("__contains__", nm_contains),
-        ("__getitem__", nm_getitem),
-        ("get", nm_get),
-        ("keys", nm_keys),
-        ("__iter__", nm_iter),
-        ("__len__", nm_len),
-    ]);
+    let nm = native_type(
+        vm,
+        SCRIPT,
+        "NameMap",
+        &object,
+        &[
+            ("__contains__", nm_contains),
+            ("__getitem__", nm_getitem),
+            ("get", nm_get),
+            ("keys", nm_keys),
+            ("__iter__", nm_iter),
+            ("__len__", nm_len),
+        ],
+    );
     crysirror_python::modules::set(vm, &m, "NameMap", Value::Obj(nm));
     let obj = Value::Obj(vm.types.object.clone());
     let namemap = vm.types.new_builtin("namemap", s_namemap);
@@ -611,7 +936,14 @@ fn init_script(vm: &mut Vm) -> PyResult<ObjRef> {
         ("scan_script_files", s_noop),
     ];
     methods.extend_from_slice(super::loader::SCRIPT_METHODS);
-    let sc = py::class(vm, SCRIPT, "Script", &[obj], &methods, &[("namemap", namemap)])?;
+    let sc = py::class(
+        vm,
+        SCRIPT,
+        "Script",
+        &[obj],
+        &methods,
+        &[("namemap", namemap)],
+    )?;
     crysirror_python::modules::set(vm, &m, "Script", Value::Obj(sc));
     // Module constants of renpy/script.py. The bytecode cache is named by
     // the Python of the game's release (3.9 for 8.0-8.3, 3.12 from 8.4).
@@ -625,8 +957,17 @@ fn init_script(vm: &mut Vm) -> PyResult<ObjRef> {
         crysirror_python::modules::set(vm, &m, "MAGIC", magic);
         "cache/bytecode.rpyb".to_owned()
     } else {
-        crysirror_python::modules::set(vm, &m, "OLD_BYTECODE_FILE", vm.types.new_str("cache/bytecode.rpyb"));
-        let py = if r.profile.at_least(8, 4) { "312" } else { "39" };
+        crysirror_python::modules::set(
+            vm,
+            &m,
+            "OLD_BYTECODE_FILE",
+            vm.types.new_str("cache/bytecode.rpyb"),
+        );
+        let py = if r.profile.at_least(8, 4) {
+            "312"
+        } else {
+            "39"
+        };
         format!("cache/bytecode-{py}.rpyb")
     };
     crysirror_python::modules::set(vm, &m, "BYTECODE_FILE", vm.types.new_str(&file));

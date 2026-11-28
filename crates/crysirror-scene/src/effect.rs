@@ -78,6 +78,13 @@ pub enum ShaderEffect {
     /// slots carry linear RGB radiance and encoded direction/normalization
     /// respectively. UV0 is mapped into the atlas independently of base UV.
     DirectionalLightmap { scale: [f32; 2], offset: [f32; 2] },
+    /// Multiply the base by an RGB lightmap in the emissive slot. Secondary
+    /// UVs are stored in `_AUX.xy`; the sun's shadow blends toward `shadow_color`.
+    RgbLightmap {
+        scale: [f32; 2],
+        offset: [f32; 2],
+        shadow_color: [f32; 3],
+    },
     /// Two-layer blend by the primitive's `_AUX` vertex stream: the base
     /// texture weighted by `aux.x`, the emissive-slot texture by
     /// `1 − aux.x`; the emissive slot then contributes no emission.
@@ -100,6 +107,18 @@ pub enum ShaderEffect {
         /// the softness; the occlusion slot then gives no occlusion.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mask_layer: Option<MaskLayer>,
+    },
+    /// Two opaque albedo layers lit by a directional Blinn lobe and a
+    /// second Blinn lobe from per-vertex irradiance (`_AUX.rgb`). The
+    /// occlusion texture's green channel and vertex mask (`_AUX.w`) mix
+    /// the base and emissive-slot albedos, and the green specular masks in
+    /// the metallic-roughness (base) and opacity (upper layer) slots.
+    LayeredBlinn {
+        intensity: f32,
+        softness: f32,
+        mask_power: f32,
+        specular_scale: f32,
+        specular_exponent: f32,
     },
     /// Two albedo layers by surface slope: the base texture on walls, the
     /// emissive-slot texture (white when unbound) × `tint` on upward-facing
@@ -161,6 +180,11 @@ impl ShaderEffect {
             Self::DirectionalLightmap { scale, offset } => ensure!(
                 scale.iter().chain(offset).all(|v| v.is_finite()), "non-finite lightmap transform"
             ),
+            Self::RgbLightmap { scale, offset, shadow_color } => ensure!(
+                scale.iter().chain(offset).all(|v| v.is_finite())
+                    && shadow_color.iter().all(|v| range(*v, 0., 16.)),
+                "RGB lightmap parameter range"
+            ),
             Self::VertexLayerBlend => {}
             Self::BakedVertexIrradiance { intensity, slope_layer, mask_layer } => ensure!(
                 intensity.is_finite()
@@ -169,6 +193,11 @@ impl ShaderEffect {
                     && mask_layer.iter().all(|m| m.tint.iter().all(|x| range(*x, 0., 16.)) && range(m.softness, 1e-4, 16.))
                     && !(slope_layer.is_some() && mask_layer.is_some()),
                 "baked irradiance parameter range"
+            ),
+            Self::LayeredBlinn { intensity, softness, mask_power, specular_scale, specular_exponent } => ensure!(
+                range(*intensity, 0., 64.) && range(*softness, 1e-4, 16.) && range(*mask_power, 1e-4, 128.)
+                    && range(*specular_scale, 0., 64.) && range(*specular_exponent, 1e-4, 4096.),
+                "layered Blinn parameter range"
             ),
             Self::SlopeLayerBlend { tint } => ensure!(tint.iter().all(|x| range(*x, 0., 16.)), "slope layer tint range"),
             Self::Custom { asset, parameters } => {
@@ -238,6 +267,11 @@ impl ShaderEffect {
                 p[0] = [scale[0], scale[1], offset[0], offset[1]];
                 6.
             }
+            Self::RgbLightmap { scale, offset, shadow_color } => {
+                p[0] = [scale[0], scale[1], offset[0], offset[1]];
+                p[1] = [shadow_color[0], shadow_color[1], shadow_color[2], 0.];
+                10.
+            }
             Self::VertexLayerBlend => 7.,
             Self::BakedVertexIrradiance { intensity, slope_layer, mask_layer } => {
                 p[0][0] = *intensity;
@@ -249,6 +283,11 @@ impl ShaderEffect {
                     p[2][0] = m.softness;
                 }
                 8.
+            }
+            Self::LayeredBlinn { intensity, softness, mask_power, specular_scale, specular_exponent } => {
+                p[0] = [*intensity, *softness, *specular_scale, *specular_exponent];
+                p[1][0] = *mask_power;
+                11.
             }
             Self::SlopeLayerBlend { tint } => {
                 p[1] = [tint[0], tint[1], tint[2], 1.];

@@ -70,7 +70,8 @@ pub fn exc_value(e: &PyErr) -> Option<Value> {
 }
 
 pub fn is_jump_or_call(vm: &mut Vm, e: &PyErr) -> bool {
-    super::super::execution::exc_isinstance(vm, e, "renpy.game", "JumpException") || super::super::execution::exc_isinstance(vm, e, "renpy.game", "CallException")
+    super::super::execution::exc_isinstance(vm, e, "renpy.game", "JumpException")
+        || super::super::execution::exc_isinstance(vm, e, "renpy.game", "CallException")
 }
 
 pub fn kwb(vm: &mut Vm, v: Option<&Value>, d: bool) -> PyResult<bool> {

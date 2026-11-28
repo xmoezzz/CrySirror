@@ -9,10 +9,12 @@ Python and the script-facing Ren'Py modules maintained here. The adapter owns
 script execution and native state. CrySirror owns asset mounts, retained
 layers, text, audio, input, and the window.
 
-The installed-game launcher recognizes **6.99.12.4**. Source fixtures exercise
-dialogue, branching, ATL motion, screen callbacks and persistent data. The
-[validation record](../../docs/validation/renpy.md) records the latest
-installed DDLC result and the limits of the release profile.
+The installed-game launcher detects Ren'Py 6.7 through 8.6 installations
+(`renpy/__init__.py`, `vc_version.py`; through 6.11 the version string
+`"Ren'Py 6.10.2d"`, whose letter orders the builds) and selects the matching
+release profile. The common directory is `renpy/common` from 6.15 and
+`common/` beside `renpy/` before. The [validation record](../../docs/validation/renpy.md) records
+behavior evidence; this README describes the implementation.
 
 ## Source identity
 
@@ -48,18 +50,85 @@ Container decoding and source parsing are broader than the installed-game launch
 
 ## Implementation status
 
-| Area | Current behavior |
+### Runtime architecture
+
+The script thread (`src/rt/boot.rs`, `src/adapter.rs`) owns one Python VM per
+session and runs upstream's control flow literally: `renpy.main.main`, the
+init phase, `Interface.interact` and nested interactions block on the host
+link (`rt/link.rs`) instead of returning to the host. `Adapter::step` sends
+input and time ticks and applies the returned layer, audio, title and speech
+commands to the host services.
+
+Every upstream engine module is a native module registered under its upstream
+name in `src/rt/` (owner decision 2026-11-27: reimplement, never host the
+upstream Python). Minimal Python shells live in `py/rt/renpy`. Release
+differences are gated on the running profile (`rt::state`), and names follow
+the release that defines them:
+
+| Layer | Modules |
 | --- | --- |
-| Source and compiled scripts | Source lexer/parser, RPC2 slots, pickle shells and AST conversion. Original 6.99 DDLC archive scripts decode through shared Resources. |
-| Bootstrap | Profile detection, loose and mounted archive data, startup `.rpym[c]` modules, early Python, scoped Python packages and priority-ordered init. |
-| Script execution | Labels, parameter binding, dynamic scope restoration, conditional branches, `call`, `return`, `jump` and registered statement parse/execute callbacks. |
-| Interaction | Dialogue, conditional choices, timed or input waits and nested label calls through suspendable Python tasks. |
-| Images | Named image definitions, tag/layer order, image/solid/text displayables and shared cross-dissolve. |
-| Audio | Registered channels and aliases, single-asset playback, looping, and fades through CrySirror's channel audio service. |
-| ATL | Sequential placement, scaling, opacity and child steps use the host clock and shared layer presentation. Parallel blocks, event handlers, splines and custom displayables require additional execution paths. |
-| Screens | SL2 text, buttons, containers, conditionals, iteration and screen inclusion use retained widgets. Activated widgets invoke script actions. Authored dialogue screens can replace the built-in dialogue panel. |
-| State | Dialogue and menu rollback restore mutable objects and preserve the excluded persistent and `NoRollback` graphs. Persistent data and preferences use the 6.99 zlib-wrapped pickle format. Native game save slots and runtime snapshots remain unsupported. |
-| Platforms | macOS release and offscreen validation. Windows, Linux, mobile, browser and console execution are unverified. |
+| Script | `renpy.ast` (arena node handles), `parser`, `lexer`, `lexersupport`, `statements`, `script`, `loader`, `python`, `execution`, `rollback`, `revertable`, `translation` (+ `generation`, `scanstrings`, `dialogue`, `extract`, `merge`), `substitutions`, `character`, `exports` (+ the 7.8 / 8.3+ `*exports` submodules) |
+| Display | `render`, `core`, `layout`, `transform`, `atl`, `motion`, `transition`, `movetransition`, `behavior`, `viewport`, `dragdrop`, `particle`, `imagemap`, `im`, `image`, `screen`, `scenelists`, `predict`, `focus`, `emulator`/`controller`/`gesture`/`joystick`, `quaternion`, `error` |
+| Screens | SL2 parser, executor and displayables (`renpy.sl2.*`), `renpy.ui` |
+| Text | `renpy.text.{text,font,textsupport,texwrap,shader,extras,emoji_trie,bidi}`, FreeType/HarfBuzz font objects over the shared font service |
+| Audio/media | `renpy.audio.{audio,music,sound,filter,renpysound}`, `display.video`, `display.tts` |
+| State | `persistent`, `preferences`, `savelocation`, `loadsave`, `savetoken`, `encryption` |
+| pygame | `pygame_sdl2` (and the vendored `renpy.pygame` of 8.5+, SDL3 names in 8.6): event, key, mouse, time, scrap, display, joystick, controller, surface, image, transform, draw, gfxdraw, rwobject/iostream, locals |
+| Software surfaces | `_renpy`, `renpy.display.{module,pgrender,scale,accelerator}` over `crysirror_image::fixed_raster` (core.c's fixed-point arithmetic) |
+| GL drivers | `renpy.gl*`, `renpy.gl2.*`, `renpy.uguu*` with each release's names and literals (`rt/gl_api.json`); GL, Live2D Cubism and assimp operations raise naming the missing host |
+| Tooling | `performance`, `debug`, `lint`, `memory`, `editor`, `scriptedit`, `test.*`, `arguments`, `dump`, `warp` |
+
+Names a module only imports from elsewhere resolve lazily through a module
+`__getattr__` from the generated `rt/import_aliases.rs`
+(`tools/import_aliases.py`). `tools/api_inventory.py` and the ignored
+`api_surface_matches_reference_releases` test compare every module's names
+with the reference releases.
+
+### Releases before 6.18
+
+Each release line from 6.7 has a generated configuration profile
+(`py/renpy/_profiles/config_6_7.py` ... `config_6_17.py`). Release gates
+follow upstream's changes: the 6.7 – 6.11 `main()` (script before
+persistent data and styles, `renpy.game.init_phase`, no `_errorhandling`),
+the 6.12 – 6.18 post-init steps, `renpy.game.options` and
+`RestartException` through 6.13, the pre-6.17 `sound` style property,
+numbered audio channels 0 – 7 through 6.8, `ATLTransform.show()` through
+6.10, `renpy.display.prefer_renderers` in 6.11 – 6.12. Python 2 `print`
+statements use the softspace rules, and a repeated parameter name is
+accepted as the `compiler` package of Ren'Py through 6.10 did.
+
+Screens of 6.11 – 6.16 (screen language 1) are parsed by the SL2 parser and
+run by the SL2 executor. `renpy.screenlang` itself, which the pickled
+screens of compiled 6.11 – 6.16 scripts reference, is not implemented yet.
+
+### Shared capabilities added for Ren'Py
+
+`crysirror-text`: WOFF/WOFF2 font sources (`webfont`), pair line breaking,
+emoji segmentation, bidi reordering, Arabic presentation forms, Thai C90.
+`crysirror-core` `FontLibrary`: kerning, OpenType shaping and variation
+metadata. `crysirror-image`: `fixed_raster` (Ren'Py's software raster
+operations).
+
+### Unavailable hosts
+
+CrySirror owns the window, presentation and devices. Operations that need a
+host this runtime does not have raise an exception that names it: OpenGL
+contexts and programs, Live2D Cubism, assimp model loading, presenting a
+pygame window surface, SDL joysticks/gamepads as devices (the host maps
+gamepads to input itself), non-text clipboard formats, Steam.
+
+### Remaining work
+
+`renpy.screenlang` (SL1 screens of pre-6.18 games), `renpy.display.swdraw`,
+`renpy.display.model` and the mesh/shader pipeline (`mesh`, `shader`,
+`blur` transform properties), `renpy.compat.fixes`, 8.6 `renpy.util` helpers,
+`renpy.versions`, `renpy.add_from`, web/mobile audio and loader backends,
+`renpy.update`.
+
+| Area | Validation |
+| --- | --- |
+| Fixtures | `the_question` (6.7.1b, 6.9.3c) and both games for 6.10.2d, 6.11.2b, 6.12.2, 6.13.12, 6.14.1, 6.15.7, 6.16.5 and 6.17.7 boot to the first interaction headless. `the_question` and `tutorial` (MIT, from the reference tags) for 6.18.3, 6.99.12.4, 7.0, 7.3.5, 7.4.11, 7.5.3, 7.6.3, 7.8.7, 8.0.3, 8.1.3, 8.2.3, 8.3.7, 8.4.1, 8.5.3 and 8.6.1 boot through init to the first interaction headless; see the validation record. |
+| Platforms | macOS release builds. Other hosts are unverified. |
 
 The [native contract](../../docs/native-api/renpy.md) describes profile
 selection, script continuations and supported service mappings.

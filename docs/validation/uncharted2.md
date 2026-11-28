@@ -196,3 +196,225 @@ Render settings (2026-11-25):
   No gameplay replay was run. Joint tests cover object transforms composed
   with bind joints. Shader tests cover state writes. Animated skeletal joints
   and shader parameter effects on the rendered materials have no coverage here.
+
+## Installed-disc soundtrack
+
+2026-11-26, BCAS20097 01.00, Apple M4 Max. The installed-game launcher
+mounts the original music, streams and English speech archives. XVAG codec 6
+uses the shared audio decoder on the mixer’s preparation and playback paths.
+Each decoder holds its ADPCM predictor history, one 28-frame stereo row and
+a 64 KiB encoded buffer. Logo and story mixes use different channel orders.
+
+The release player took ordinary menu input from boot to New Game.
+The offline mixer produced nonzero samples for `sce-ndi-logos.xvag`,
+`81_UNCH2_NatesTheme.xvag` and `intro-cliffhanger.xvag`. Skipping the logo
+cleared its voice before menu playback. Starting the story cleared the menu
+voice, and skipping the story film cleared its voice at `train-wreck-climb`.
+An 8,200-frame menu run finished Nate’s Theme and played `64_TrainRun.xvag`.
+All five final headless runs reported zero mixer underrun frames. The adapter
+library passed 51 tests, the XVAG group passed three, and the explicitly
+invoked installed-disc regression passed.
+A separate unmuted 180-frame window run exited successfully on Metal.
+Physical speaker output and frame-exact synchronization against original
+hardware were not compared. This pass does not verify the adaptive music
+director or every Scream grain and mixer snapshot.
+
+The installed-data regression opened all 47 matching film companions and all
+446 music entries through their PSARC readers. Each produced nonzero stereo
+PCM within its first 20 seconds. The probe stops at the first signal and does
+not assert full-length playback. The music corpus includes 210 entries with
+XVAG flags 0x03, seven stereo files with right before left, and a 96 MiB
+entry. The launch profile allows 128 MiB logical entries with block reads.
+
+To run the installed-data regression with the read-only disc root:
+
+```sh
+UNCHARTED2_ROOT="$HOME/Downloads/game-Uncharted2" cargo test --release --offline --locked \
+    -p crysirror-naughty-dog --example level_resources installed_movie_and_music_audio -- --ignored
+```
+
+
+## 2026-11-27 — Opening train traversal and player action sounds
+
+BCAS20097 01.00 on Apple M4 Max. The release player took ordinary menu and
+game inputs from boot through the damaged train. The input track is
+`crates/crysirror-naughty-dog/tests/data/train-wreck-climb.json`. Replay with
+an empty scratch save directory:
+
+```sh
+./target/release/crysirror play "$HOME/Downloads/game-Uncharted2" \
+  --headless --no-audio --frames 5530 --data-dir "$(mktemp -d)" \
+  --input-track crates/crysirror-naughty-dog/tests/data/train-wreck-climb.json
+```
+
+The player took the left outside corner, entered `rs-shift-00` and rode the
+scripted carriage movement. Alternating handholds and a lateral adjustment
+reached `rs-hint-jump-1`. The script displayed `HINT_X_JUMP` at 84.6 seconds.
+The jump left the region and the last grip was edge 95, with no script errors.
+This route crosses the hint using controller input and the original script.
+
+The local disc fixture `installed_wall_rope_controls_play_native_clips` drives
+the production player controller with the original state table and decoded
+actor clips. It checks both transfer directions on each side, continuous root
+placement through the two clips, the apex turn and its auto return, a mirrored
+release and catch, and the final hanging state. The geometry fixture covers
+parallel and reversed edge normals and verifies the ballistic endpoint. These
+fixtures start on a rope or an edge and do not traverse a retail level.
+
+The separate `crates/crysirror-naughty-dog/tests/data/dig-wall-rope.json`
+track starts at the retail task `dig-dropdown-post-pit-fight` with the
+complete install mounted. The checkpoint places the player at
+(−9.54, −0.53, −132.45). Walking and jumping reaches
+`dig-pit-fight-rope-1` at (−10.58, 3.95, −134.22), whose authored
+length is 4 m. A release trace with 470 frames at 16 ms recorded the
+bottom grab, settle, swing, mirrored `wall-vine-run-r-turn-180`, return
+to the other side, and `wall-vine-run-right^jump-right-miss` after
+the jump input at frame 450. The player took off at (−10.48, 0.33,
+−134.50). In a second trace, holding the climb input reached 1.75 m
+root height. Four high releases in this approach missed. A targeted jump
+to another ledge therefore has controller and geometry fixture coverage
+only.
+
+The train replay reported 129 player animation sound requests. Its last
+request was 0.40 seconds into the ending clip of a long ledge jump. The
+installed-data mixer test checked these original cues and measured peak
+absolute stereo PCM output:
+
+| Action clip | Original 30 Hz event frame | Sound | Peak |
+| --- | ---: | --- | ---: |
+| Hurt run | 1 | drake-heel-metal-sheet | 0.37735 |
+| Hard landing to idle | 0.5 | drake-impact-foot | 0.17719 |
+| Soft landing to idle | 1.5 | drake-heel-metal-sheet | 0.37735 |
+| Two-hand ledge contact | 7 | drake-grab-metal-sheet | 0.46749 |
+| One-hand ledge impact | 4 | imp-body-fall | 0.07943 |
+
+Before the host cache fix, the full dig checkpoint failed with 255 MiB of
+encoded generated resources and zero cached file-read bytes. After the fix
+the same checkpoint loaded from the full install and reported 430,682,548
+bytes of generated model backing. The model backing and prepared cache have
+separate residency counters. These measurements refer to CPU bytes.
+
+## 2026-11-27 — Retail title actors
+
+BCAS20097 01.00 `menu-temple` has 45 spawners. Twenty-three are SimpleActors, consisting of 14 pigeons, eight cloth banners and one vine. The other 22 are the camera and 21 PartSpawners. The default task sequence and ordinary Enter input at frames 200, 500 and 800 reached the New Game menu. Apple M4 Max Metal rendered the release build headlessly at 1280 × 720 with audio muted.
+
+| Frame | Rendered and runtime observations |
+| --- | --- |
+| 1150 | All 14 spawners played distinct clips on the 19-joint pigeon rig. Two pigeons crossed the statue at projected head positions around (347, 229) and (346, 491). All eight 117-joint banners and the 26-joint vine had their native `idle` layers. Before the fix all 23 entities had zero animation layers. |
+| 1200 | A pigeon crossed the banner with its wings raised. The banner silhouette and vine pose advanced. |
+| 2848 | The second flight pass reached 10.2733 s, within 0.002 s of the 10.2720 s sampled at frame 1150. Both captures retained all 14 scripted clips and nine prop idles. The intermediate one-shot implementation stalled at the end of the first pass. |
+
+All three captures reported task `menu`, 14 state-script processes and zero script errors. The installed disc supplies the skeletons, geometry and clips. This run verifies CrySirror's rendering and timing on Metal. Direct pixel comparison against original PS3 video remains unverified. The captures, logs and input track are local under `target/uncharted2-validation/title-1127/actors/`.
+
+### Temple lighting and title captures
+
+On BCAS20097 01.00 all 37 placed temple fragments carry vertex lighting.
+Their 12,383 colours reach the shared baked-irradiance material, including
+the two fragments with kind 6 quantization. The level sets the live
+baked-vertex multiplier to 6.99962. The Metal world snapshot identifies a
+generated probe-radiance HDR and keeps sky display off.
+
+On the M4 Max the ordinary launcher entered the title from an empty save
+directory, with Enter at frames 200 and 500. Before and after images use the
+same 1280 × 720 headless frame 2050. On the 640 × 360 previews the statue
+cheek rectangle (30,162)–(139,261) changed from mean display RGB (51,46,43)
+to (74,54,29). The raised hand rectangle (224,151)–(254,193) changed from
+(68,61,53) to (137,122,98). These are measurements of the port's two
+captures. The supplied 640 × 426 reference is cropped and has no menu UI or
+frame number. The broad upper shafts remain brighter in the port.
+
+The new build also replayed the full 5,530-frame train input track without
+a script error or an audio underrun. Captures, input and world snapshots
+are in the ignored local directory `target/uncharted2-validation/title-1127/`
+(`before.png`, `after.png`, `actors/menu-1200.png`, `train.png`).
+
+### Temple particle coverage
+
+On the M4 Max, a controlled 1280 × 720 Metal capture used the disc's 24
+temple shafts, their original placements, camera and textures, against a
+shared procedural sky. Both renders used frame 30 and fixed exposure;
+changing only the blend from direct additive colour to accumulation and
+a single coverage composite changed mean display RGB from (108,123,149)
+to (74,80,89). The luma difference reached 8/255 on 680,050 of 921,600
+pixels. Both runs drew 24 of 24 particles with zero pending textures.
+The 512 × 512 mask retains the green channel at its native dimensions.
+The three installed-particle tests passed, including the descriptor
+pass nibble, material blend factors and scroll parameters.
+The five release VFX renderer tests passed on Metal. The overlap test
+checks the pixel from two colours over a blue background after the combined
+coverage reduces the blue channel to 127/255.
+These measurements isolate the compositor. The original temple background and
+the PS3 adaptive low-resolution buffers are outside that comparison.
+In the normal title capture, enabling the experimental layer on all 24
+shafts produced dark rectangular borders. The 1280 × 720 intermediate used
+7,372,800 bytes; the real scene drew 35 batches, one composite, and 755
+visible particles. The adapter keeps the independent additive colour path
+until the source of the material's low-resolution alpha is verified.
+After restoring that path the final release entered the menu normally at
+frame 950, drawing 755 particles in 35 batches, with zero pending textures
+and zero bytes allocated to the experimental target. The rectangular
+borders were absent in `/private/tmp/u2-rope-fixture-1127/title-final-default.png`.
+The locally generated A/B images and reports are in
+`/private/tmp/u2-rope-fixture-1127/shaft-isolated/` as
+`additive_color` and `additive_coverage_layer`.
+
+### Root menu colour and metallic highlights
+
+The owner's 2406 × 1348 YouTube capture `222.png` includes the menu UI.
+The area record `*menu-temple-render-settings-01*` has a neutral global
+tint (1, 1, 1), yellow-green world fog (2.6, 2.75, 1.5) and a warm-white
+sun (1.24, 1.11, 0.92) with intensity 6.2083. Its shadow distance is 20 m.
+The direction and colour now come from the selected area record. Previously
+the player always used the orange light in the level package.
+The menu overlays its own blue-green edge board below the lettering.
+The installed-data regression checks both the real root-page flags and
+the decoded edge pixels. Original textures and fonts stay on the disc.
+
+During full-title validation the experimental RGBA particle layer introduced
+black polygons behind the logo. At 640 × 360 the background patch
+(335,212)–(355,234) fell to RGB (6,5,3), compared with (112,116,71) in
+the video capture. The title uses its direct additive path pending evidence
+for the original low-resolution target's colour and alpha writes. The
+standalone compositor's pixel tests exercise its blend equation separately.
+
+The final desktop release re-entered the regular title on M4 Max / Metal.
+`present.png` is the 1280 × 720 output at frame 2050. At 640 × 360 the
+chin patch (14,235)–(69,271) averages (29,31,23), against (26,31,20)
+in `222.png` and (24,15,5) before the menu board. The forehead patch
+(70,136)–(130,169) averages (116,103,79) against the reference's
+(161,153,113). The central background patch recovered to (79,70,37).
+The top shafts remain too bright, the background too brown and the
+forehead too dark. These are comparisons with the supplied video frame.
+The final build drew 35 particle batches, loaded 14 pigeons and finished
+the 5,530-frame train regression with 129 motion sound requests and no
+script errors. All 66 adapter library tests ran and passed with the disc
+mounted, including the gold material, menu board and font regressions.
+
+
+
+## 2026-11-27 — Title gold and layer masks
+
+On Apple M4 Max / Metal, six separate 96 × 96 renders exercised the shared
+`layered_blinn` material with a black cube, full red or full green mask
+textures, a fixed front camera, and bloom and screen-space AO disabled.
+The center red byte for disabled, half-weight base and full-weight upper
+masks was 0 / 181 / 240 under the directional light alone, and
+0 / 97 / 144 under baked light alone. Both channels of illumination use the
+green specular masks and respond to the independent layer bindings.
+The explicitly executed Metal test
+`layered_blinn_lobes_and_green_specular_masks_reach_pixels` passed.
+`installed_temple_uses_placed_lighting_in_render_primitives` opened the
+local BCAS20097 installation and checked all 13 generated materials. Six
+gold materials use scale 1.33, the statue's accessory uses 1.32 and all
+seven use exponent 194.5. It also checked the gold mask/image bindings,
+two-channel normal encoding and placed vertex-light stream.
+
+The normal title input track on the desktop release reached frame 1150
+from fresh save directories on Metal. In the 640 × 360 preview the left
+face crop (7,125)–(134,234) moved from mean display luma 62.3 to 71.2
+and P90 from 121 to 133. The supplied title reference gives 87.1 and 170
+over the same rectangle, with a slightly different composition. The
+forehead still lacks the broad highlight in the reference. Both port
+captures include the other scene changes made between those releases.
+Local evidence is in `target/uncharted2-validation/title-1127/gold/`
+(`before.png`, `final.png`, `gold-detail.png`).

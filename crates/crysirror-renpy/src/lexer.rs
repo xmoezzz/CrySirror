@@ -22,7 +22,11 @@ pub struct ParseError {
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "File \"{}\", line {}: {}", self.filename, self.line, self.msg)?;
+        write!(
+            f,
+            "File \"{}\", line {}: {}",
+            self.filename, self.line, self.msg
+        )?;
         if let Some(t) = &self.text {
             write!(f, "\n    {}", t.lines().next().unwrap_or("").trim())?;
         }
@@ -87,10 +91,16 @@ fn match_operator(d: &[char], pos: usize) -> Option<usize> {
     let c1 = d.get(pos).copied().unwrap_or('\0');
     let c2 = d.get(pos + 1).copied().unwrap_or('\0');
     let c3 = d.get(pos + 2).copied().unwrap_or('\0');
-    if (c1 == '.' && c2 == '.' && c3 == '.') || (c3 == '=' && matches!((c1, c2), ('/', '/') | ('>', '>') | ('<', '<') | ('*', '*'))) {
+    if (c1 == '.' && c2 == '.' && c3 == '.')
+        || (c3 == '=' && matches!((c1, c2), ('/', '/') | ('>', '>') | ('<', '<') | ('*', '*')))
+    {
         return Some(pos + 3);
     }
-    if matches!((c1, c2), ('/', '/') | ('>', '>') | ('<', '<') | ('<', '>') | ('*', '*') | ('-', '>')) || (c2 == '=' && "+-*/%@&|^:<>=!".contains(c1)) {
+    if matches!(
+        (c1, c2),
+        ('/', '/') | ('>', '>') | ('<', '<') | ('<', '>') | ('*', '*') | ('-', '>')
+    ) || (c2 == '=' && "+-*/%@&|^:<>=!".contains(c1))
+    {
         return Some(pos + 2);
     }
     if "+-*/%@&|^,:!.;=~<>$?[]{}()".contains(c1) && c1 != '\0' {
@@ -116,7 +126,10 @@ pub fn match_string(d: &[char], prefix_pos: usize, pos: usize) -> Result<Option<
     if !matches!(c, '"' | '\'' | '`') {
         return Ok(None);
     }
-    let prefix: String = d[prefix_pos..pos].iter().collect::<String>().to_ascii_lowercase();
+    let prefix: String = d[prefix_pos..pos]
+        .iter()
+        .collect::<String>()
+        .to_ascii_lowercase();
     let f_string = match prefix.as_str() {
         "" | "r" | "u" | "b" | "rb" | "br" => false,
         "f" | "rf" | "fr" => true,
@@ -131,7 +144,12 @@ pub fn match_string(d: &[char], prefix_pos: usize, pos: usize) -> Result<Option<
             quote_size = 3;
             p += 1;
         } else {
-            return Ok(Some(StringMatch { end: p, need_munge: false, newlines: 0, line_start: None }));
+            return Ok(Some(StringMatch {
+                end: p,
+                need_munge: false,
+                newlines: 0,
+                line_start: None,
+            }));
         }
     }
     let mut newlines = 0;
@@ -201,7 +219,10 @@ pub fn match_string(d: &[char], prefix_pos: usize, pos: usize) -> Result<Option<
                     depth += 1;
                 } else if ch == '}' {
                     depth -= 1;
-                } else if ch == '_' && d.get(p + 1) == Some(&'_') && (p == 0 || !is_ident_char(d[p - 1])) {
+                } else if ch == '_'
+                    && d.get(p + 1) == Some(&'_')
+                    && (p == 0 || !is_ident_char(d[p - 1]))
+                {
                     need_munge = true;
                 }
                 p += 1;
@@ -223,7 +244,12 @@ pub fn match_string(d: &[char], prefix_pos: usize, pos: usize) -> Result<Option<
             need_munge = true;
         }
     }
-    Ok(Some(StringMatch { end: p, need_munge, newlines, line_start }))
+    Ok(Some(StringMatch {
+        end: p,
+        need_munge,
+        newlines,
+        line_start,
+    }))
 }
 
 fn munge_names_in(text: &[char], prefix: &str, in_string: bool) -> String {
@@ -320,17 +346,25 @@ pub fn ren_py_to_rpy(text: &str, filename: Option<&str>) -> Result<String, Strin
     }
     if let Some(f) = filename {
         if state == St::Ignore {
-            return Err(format!("In {f:?}, there are no \"\"\"renpy blocks, so every line is ignored."));
+            return Err(format!(
+                "In {f:?}, there are no \"\"\"renpy blocks, so every line is ignored."
+            ));
         }
         if state == St::Renpy {
-            return Err(format!("In {f:?}, there is a \"\"\"renpy block at line {open_line} that is not terminated by \"\"\"."));
+            return Err(format!(
+                "In {f:?}, there is a \"\"\"renpy block at line {open_line} that is not terminated by \"\"\"."
+            ));
         }
     }
     Ok(out.join("\n"))
 }
 
 /// Splits source text into logical lines `(line number, text)`.
-pub fn list_logical_lines(filename: &Rc<str>, data: &str, first_line: u32) -> PResult<Vec<(u32, String)>> {
+pub fn list_logical_lines(
+    filename: &Rc<str>,
+    data: &str,
+    first_line: u32,
+) -> PResult<Vec<(u32, String)>> {
     let mut chars: Vec<char> = data.chars().filter(|c| *c != '\r').collect();
     if chars.first() == Some(&'\u{feff}') {
         chars.remove(0);
@@ -338,7 +372,13 @@ pub fn list_logical_lines(filename: &Rc<str>, data: &str, first_line: u32) -> PR
     chars.extend(['\n', '\n']);
     let d = &chars[..];
     let prefix = munge_prefix(filename);
-    let err = |msg: &str, line: u32| ParseError { msg: msg.into(), filename: filename.clone(), line, offset: None, text: None };
+    let err = |msg: &str, line: u32| ParseError {
+        msg: msg.into(),
+        filename: filename.clone(),
+        line,
+        offset: None,
+        text: None,
+    };
     let mut out = Vec::new();
     let mut pos = 0;
     let mut number = first_line;
@@ -446,7 +486,12 @@ pub fn list_logical_lines(filename: &Rc<str>, data: &str, first_line: u32) -> PR
                 return Err(err(&format!("unmatched '{c}'"), number));
             };
             if !matches!((open, c), ('(', ')') | ('[', ']') | ('{', '}')) {
-                return Err(err(&format!("closing parenthesis '{c}' does not match opening parenthesis '{open}'"), number));
+                return Err(err(
+                    &format!(
+                        "closing parenthesis '{c}' does not match opening parenthesis '{open}'"
+                    ),
+                    number,
+                ));
             }
             pos += 1;
             continue;
@@ -457,14 +502,20 @@ pub fn list_logical_lines(filename: &Rc<str>, data: &str, first_line: u32) -> PR
         }
         if c == '\\' {
             if d.get(pos + 1) != Some(&'\n') {
-                return Err(err("unexpected character after line continuation character.", number));
+                return Err(err(
+                    "unexpected character after line continuation character.",
+                    number,
+                ));
             }
             number += 1;
             pos += 2;
             continue;
         }
         if c == '\t' {
-            return Err(err("Tab character is not allowed in Ren'Py scripts.", number));
+            return Err(err(
+                "Tab character is not allowed in Ren'Py scripts.",
+                number,
+            ));
         }
         // Other characters (e.g. '"' handled above) are passed through.
         pos += 1;
@@ -476,7 +527,10 @@ pub fn list_logical_lines(filename: &Rc<str>, data: &str, first_line: u32) -> PR
 }
 
 /// Groups logical lines into indentation blocks.
-pub fn group_logical_lines(filename: &Rc<str>, lines: Vec<(u32, String)>) -> PResult<Vec<GroupedLine>> {
+pub fn group_logical_lines(
+    filename: &Rc<str>,
+    lines: Vec<(u32, String)>,
+) -> PResult<Vec<GroupedLine>> {
     struct Frame {
         indent: usize,
         lines: Vec<GroupedLine>,
@@ -488,26 +542,50 @@ pub fn group_logical_lines(filename: &Rc<str>, lines: Vec<(u32, String)>) -> PRe
     }
     if let Some((n, t)) = lines.first() {
         if t.starts_with(' ') {
-            return Err(ParseError { msg: "Unexpected indentation at start of file.".into(), filename: filename.clone(), line: *n, offset: None, text: Some(t.clone()) });
+            return Err(ParseError {
+                msg: "Unexpected indentation at start of file.".into(),
+                filename: filename.clone(),
+                line: *n,
+                offset: None,
+                text: Some(t.clone()),
+            });
         }
     }
-    let mut stack = vec![Frame { indent: 0, lines: Vec::new() }];
+    let mut stack = vec![Frame {
+        indent: 0,
+        lines: Vec::new(),
+    }];
     for (number, text) in lines {
         let rest = text.trim_start_matches(' ');
         let indent = text.len() - rest.len();
         let cur = stack.last().unwrap().indent;
         if indent > cur {
-            stack.push(Frame { indent, lines: Vec::new() });
+            stack.push(Frame {
+                indent,
+                lines: Vec::new(),
+            });
         } else if indent < cur {
             while stack.last().unwrap().indent > indent {
                 let f = stack.pop().unwrap();
                 close(f, stack.last_mut().unwrap());
             }
             if stack.last().unwrap().indent != indent {
-                return Err(ParseError { msg: "unindent does not match any outer indentation level".into(), filename: filename.clone(), line: number, offset: Some(indent + 1), text: Some(rest.into()) });
+                return Err(ParseError {
+                    msg: "unindent does not match any outer indentation level".into(),
+                    filename: filename.clone(),
+                    line: number,
+                    offset: Some(indent + 1),
+                    text: Some(rest.into()),
+                });
             }
         }
-        let gl = GroupedLine { filename: filename.clone(), number, indent, text: rest.trim_end().chars().collect::<Vec<_>>().into(), block: Rc::new(Vec::new()) };
+        let gl = GroupedLine {
+            filename: filename.clone(),
+            number,
+            indent,
+            text: rest.trim_end().chars().collect::<Vec<_>>().into(),
+            block: Rc::new(Vec::new()),
+        };
         stack.last_mut().unwrap().lines.push(gl);
     }
     while stack.len() > 1 {
@@ -527,7 +605,11 @@ pub struct PyExpr {
 
 impl PyExpr {
     pub fn new(text: impl Into<Rc<str>>, filename: Rc<str>, line: u32) -> PyExpr {
-        PyExpr { text: text.into(), filename, line }
+        PyExpr {
+            text: text.into(),
+            filename,
+            line,
+        }
     }
 }
 
@@ -540,7 +622,10 @@ fn program(pat: &str) -> Rc<sre::Program> {
         if let Some(p) = c.borrow().get(pat) {
             return p.clone();
         }
-        let p = Rc::new(sre::compile(pat, sre::S | sre::U).unwrap_or_else(|e| panic!("bad lexer regexp {pat}: {e}")));
+        let p = Rc::new(
+            sre::compile(pat, sre::S | sre::U)
+                .unwrap_or_else(|e| panic!("bad lexer regexp {pat}: {e}")),
+        );
         c.borrow_mut().insert(pat.to_string(), p.clone());
         p
     })
@@ -584,7 +669,10 @@ pub struct Lexer {
 
 impl Lexer {
     pub fn new(block: Rc<Vec<GroupedLine>>, init: bool) -> Lexer {
-        let filename = block.first().map(|l| l.filename.clone()).unwrap_or_else(|| "<string>".into());
+        let filename = block
+            .first()
+            .map(|l| l.filename.clone())
+            .unwrap_or_else(|| "<string>".into());
         Lexer {
             block,
             init,
@@ -634,11 +722,25 @@ impl Lexer {
 
     pub fn error<T>(&self, msg: impl Into<String>) -> PResult<T> {
         let (filename, number, text) = if self.line == -1 && !self.block.is_empty() {
-            (self.block[0].filename.clone(), self.block[0].number, self.block[0].text.iter().collect())
+            (
+                self.block[0].filename.clone(),
+                self.block[0].number,
+                self.block[0].text.iter().collect(),
+            )
         } else {
-            (self.filename.clone(), self.number, self.text.iter().collect::<String>())
+            (
+                self.filename.clone(),
+                self.number,
+                self.text.iter().collect::<String>(),
+            )
         };
-        Err(ParseError { msg: msg.into(), filename, line: number, offset: Some(self.pos + 1), text: Some(text) })
+        Err(ParseError {
+            msg: msg.into(),
+            filename,
+            line: number,
+            offset: Some(self.pos + 1),
+            text: Some(text),
+        })
     }
 
     pub fn skip_whitespace(&mut self) {
@@ -748,7 +850,9 @@ impl Lexer {
                             i += 1;
                         }
                         if !hex.is_empty() {
-                            if let Some(ch) = char::from_u32(u32::from_str_radix(&hex, 16).unwrap_or(0xfffd)) {
+                            if let Some(ch) =
+                                char::from_u32(u32::from_str_radix(&hex, 16).unwrap_or(0xfffd))
+                            {
                                 out.push(ch);
                             }
                         }
@@ -787,7 +891,10 @@ impl Lexer {
 
     /// A single-quoted Ren'Py string (dialogue form, whitespace collapsed).
     pub fn string(&mut self) -> Option<String> {
-        let s = self.match_re(r#"r?"([^\\"]|\\.)*""#).or_else(|| self.match_re(r"r?'([^\\']|\\.)*'")).or_else(|| self.match_re(r"r?`([^\\`]|\\.)*`"))?;
+        let s = self
+            .match_re(r#"r?"([^\\"]|\\.)*""#)
+            .or_else(|| self.match_re(r"r?'([^\\']|\\.)*'"))
+            .or_else(|| self.match_re(r"r?`([^\\`]|\\.)*`"))?;
         let (raw, s) = match s.strip_prefix('r') {
             Some(r) => (true, r.to_string()),
             None => (false, s),
@@ -801,7 +908,10 @@ impl Lexer {
 
     /// Triple-quoted string: returns either a raw string or monologue parts.
     pub fn triple_string(&mut self) -> Option<TripleString> {
-        let s = self.match_re(r#"r?"""([^\\"]|\\.|"(?!""))*""""#).or_else(|| self.match_re(r"r?'''([^\\']|\\.|'(?!''))*'''")).or_else(|| self.match_re(r"r?```([^\\`]|\\.|`(?!``))*```"))?;
+        let s = self
+            .match_re(r#"r?"""([^\\"]|\\.|"(?!""))*""""#)
+            .or_else(|| self.match_re(r"r?'''([^\\']|\\.|'(?!''))*'''"))
+            .or_else(|| self.match_re(r"r?```([^\\`]|\\.|`(?!``))*```"))?;
         let (raw, s) = match s.strip_prefix('r') {
             Some(r) => (true, r.to_string()),
             None => (false, s),
@@ -821,18 +931,27 @@ impl Lexer {
             norm.push_str(l.trim_end_matches(' '));
         }
         let mondel = self.monologue_delimiter.clone();
-        let parts: Vec<&str> = if mondel.is_empty() { vec![&norm[..]] } else { norm.split(mondel.as_str()).collect() };
+        let parts: Vec<&str> = if mondel.is_empty() {
+            vec![&norm[..]]
+        } else {
+            norm.split(mondel.as_str()).collect()
+        };
         let mut rv = Vec::new();
         let mut pos = 0;
         for part in parts {
             let leading = part.len() - part.trim_start().len();
-            let line_offset = norm[..pos.min(norm.len())].matches('\n').count() + part[..leading].matches('\n').count();
+            let line_offset = norm[..pos.min(norm.len())].matches('\n').count()
+                + part[..leading].matches('\n').count();
             pos += part.len() + mondel.len();
             let p = part.trim();
             if p.is_empty() {
                 continue;
             }
-            let p = if mondel.is_empty() { Self::collapse(p, "space") } else { Self::collapse(p, "space_nl") };
+            let p = if mondel.is_empty() {
+                Self::collapse(p, "space")
+            } else {
+                Self::collapse(p, "space_nl")
+            };
             rv.push((line_offset as u32, Self::dequote(&p)));
         }
         Some(TripleString::Parts(rv))
@@ -856,7 +975,8 @@ impl Lexer {
         let w: String = self.text[self.pos..np].iter().collect();
         let mut it = w.chars();
         let first = it.next()?;
-        if !(first == '_' || first.is_alphabetic()) || !it.all(|c| c == '_' || c.is_alphanumeric()) {
+        if !(first == '_' || first.is_alphabetic()) || !it.all(|c| c == '_' || c.is_alphanumeric())
+        {
             return None;
         }
         self.pos = np;
@@ -955,7 +1075,9 @@ impl Lexer {
     }
 
     pub fn dotted_name(&mut self) -> PResult<Option<String>> {
-        let Some(mut rv) = self.name() else { return Ok(None) };
+        let Some(mut rv) = self.name() else {
+            return Ok(None);
+        };
         while self.match_re(r"\.").is_some() {
             match self.name() {
                 Some(n) => {
@@ -1014,7 +1136,9 @@ impl Lexer {
     }
 
     pub fn parenthesised_python(&mut self) -> PResult<bool> {
-        let Some(&c) = self.text.get(self.pos) else { return Ok(false) };
+        let Some(&c) = self.text.get(self.pos) else {
+            return Ok(false);
+        };
         let close = match c {
             '(' => ")",
             '[' => "]",
@@ -1027,24 +1151,31 @@ impl Lexer {
         Ok(true)
     }
 
-    pub fn simple_expression_text(&mut self, comma: bool, operator: bool, image: bool) -> PResult<Option<String>> {
+    pub fn simple_expression_text(
+        &mut self,
+        comma: bool,
+        operator: bool,
+        image: bool,
+    ) -> PResult<Option<String>> {
         let start = self.pos;
         loop {
             while self.match_re(OPERATOR_REGEXP).is_some() {}
             if self.eol() {
                 break;
             }
-            let ok = self.python_string()? || {
-                let old = self.pos;
-                match self.name() {
-                    Some(n) if image && IMAGE_KEYWORDS.contains(&n.as_str()) => {
-                        self.pos = old;
-                        false
+            let ok = self.python_string()?
+                || {
+                    let old = self.pos;
+                    match self.name() {
+                        Some(n) if image && IMAGE_KEYWORDS.contains(&n.as_str()) => {
+                            self.pos = old;
+                            false
+                        }
+                        Some(_) => true,
+                        None => false,
                     }
-                    Some(_) => true,
-                    None => false,
                 }
-            } || self.float().is_some()
+                || self.float().is_some()
                 || self.parenthesised_python()?;
             if !ok {
                 break;
@@ -1078,23 +1209,34 @@ impl Lexer {
     }
 
     pub fn simple_expression(&mut self) -> PResult<Option<PyExpr>> {
-        Ok(self.simple_expression_text(false, true, false)?.map(|s| self.expr(s)))
+        Ok(self
+            .simple_expression_text(false, true, false)?
+            .map(|s| self.expr(s)))
     }
 
     pub fn image_simple_expression(&mut self) -> PResult<Option<PyExpr>> {
-        Ok(self.simple_expression_text(false, true, true)?.map(|s| self.expr(s)))
+        Ok(self
+            .simple_expression_text(false, true, true)?
+            .map(|s| self.expr(s)))
     }
 
     pub fn comma_expression(&mut self) -> PResult<Option<PyExpr>> {
-        Ok(self.simple_expression_text(true, true, false)?.map(|s| self.expr(s)))
+        Ok(self
+            .simple_expression_text(true, true, false)?
+            .map(|s| self.expr(s)))
     }
 
     pub fn say_expression(&mut self) -> PResult<Option<PyExpr>> {
-        Ok(self.simple_expression_text(false, false, false)?.map(|s| self.expr(s)))
+        Ok(self
+            .simple_expression_text(false, false, false)?
+            .map(|s| self.expr(s)))
     }
 
     pub fn checkpoint(&self) -> Checkpoint {
-        Checkpoint { line: self.line, pos: self.pos }
+        Checkpoint {
+            line: self.line,
+            pos: self.pos,
+        }
     }
 
     pub fn revert(&mut self, c: &Checkpoint) {
@@ -1199,7 +1341,10 @@ mod tests {
         let b = lex_file("game/script.rpy", src).unwrap();
         assert_eq!(b.len(), 1);
         assert_eq!(b[0].block.len(), 3);
-        assert_eq!(b[0].block[1].text.iter().collect::<String>(), "$ x = (1,\n        2)");
+        assert_eq!(
+            b[0].block[1].text.iter().collect::<String>(),
+            "$ x = (1,\n        2)"
+        );
         let mut l = Lexer::new(b.clone(), false);
         l.advance();
         assert!(l.keyword("label"));
@@ -1236,7 +1381,10 @@ pub fn is_name(s: &str) -> bool {
 
 /// `renpy.translation.encode_say_string`.
 pub fn encode_say_string(s: &str) -> String {
-    let s = s.replace('\\', "\\\\").replace('\n', "\\n").replace('"', "\\\"");
+    let s = s
+        .replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace('"', "\\\"");
     // `re.sub(r'(?<= ) ', '\\ ', s)`: a space preceded by a space.
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');

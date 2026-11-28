@@ -4,9 +4,9 @@ use super::*;
 
 #[derive(Clone, Default)]
 pub(super) struct SlotBackup {
-    guid: String,
-    work: [i32; 2],
-    communication: [bool; 2],
+    pub(super) guid: String,
+    pub(super) work: [i32; 2],
+    pub(super) communication: [bool; 2],
 }
 
 pub(super) fn fill_empty_roster(state: &mut TjsState) -> Result<()> {
@@ -38,7 +38,12 @@ pub(crate) fn close_daily(state: &mut TjsState, day: bool) -> Result<()> {
         state.player.schedule_slot.len() == 40,
         "invalid standalone schedule length"
     );
-    let mut slots = state.retail.schedule_backup.clone();
+    let legacy = state.player.flag("2.0モード") == 1;
+    let mut slots = if legacy {
+        state.retail.legacy_schedule_backup.clone()
+    } else {
+        state.retail.schedule_backup.clone()
+    };
     slots.resize_with(40, Default::default);
     let mut writes = Vec::new();
     for (i, slot) in slots.iter_mut().enumerate() {
@@ -60,7 +65,11 @@ pub(crate) fn close_daily(state: &mut TjsState, day: bool) -> Result<()> {
                 .insert(format!("Morning_{key}"), value);
         }
     }
-    state.retail.schedule_backup = slots;
+    if legacy {
+        state.retail.legacy_schedule_backup = slots;
+    } else {
+        state.retail.schedule_backup = slots;
+    }
     if let Some(refreshed) = facilities {
         state.retail.facilities = refreshed;
     }
@@ -132,9 +141,14 @@ pub(super) fn backup(state: &mut TjsState, slot: usize, phase: &str) -> Result<(
 }
 
 pub(super) fn restore(state: &mut TjsState) {
+    let bank = if state.player.flag("2.0モード") == 1 {
+        &state.retail.legacy_schedule_backup
+    } else {
+        &state.retail.schedule_backup
+    };
     for (slot, target) in state.player.schedule_slot.iter_mut().enumerate() {
         target.maid_guid.clear();
-        let Some(saved) = state.retail.schedule_backup.get(slot) else { continue; };
+        let Some(saved) = bank.get(slot) else { continue; };
         let Some(id) = state.stock.iter().copied().find(|id| state.maids.get(id).is_some_and(|m| m.guid_id == saved.guid)) else { continue; };
         let m = state.maids.get_mut(&id).unwrap();
         target.maid_guid.clone_from(&m.guid_id);

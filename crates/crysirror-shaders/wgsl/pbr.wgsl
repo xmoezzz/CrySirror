@@ -10,6 +10,7 @@ struct VertexOut {
     @location(3) tangent: vec4<f32>,
     /// Per-vertex auxiliary vector (`_AUX`); ones when the primitive has none.
     @location(4) aux: vec4<f32>,
+    @location(5) blinn_view: vec3<f32>,
 };
 
 // Optional second vertex stream of primitives with an `_AUX` attribute.
@@ -26,6 +27,9 @@ fn vs_main(v: VertexIn) -> VertexOut {
 fn vs_aux(v: VertexIn, a: AuxIn) -> VertexOut {
     var o = transform_vertex(v);
     o.aux = a.aux;
+    if material.surface.y == 11.0 {
+        o.aux.w = pow(clamp(a.aux.w, 0.0, 1.0), material.effect_params[1].x);
+    }
     return o;
 }
 // Entry points cannot call each other; both vertex paths share this.
@@ -38,6 +42,11 @@ fn transform_vertex(v: VertexIn) -> VertexOut {
     o.tangent = vec4<f32>((object.model * vec4<f32>(v.tangent.xyz, 0.0)).xyz, v.tangent.w);
     o.uv = v.uv + object.uv.xy;
     o.aux = vec4<f32>(1.0);
+    if material.surface.y == 11.0 {
+        o.normal = normalize(o.normal);
+        let view = frame.camera_pos.xyz - world.xyz;
+        o.blinn_view = view / max(length(view), 1e-8);
+    }
     return o;
 }
 
@@ -658,19 +667,39 @@ fn fs_main(i: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec
     // × tint on upward-facing surfaces, the base on walls. Height-mask
     // layers (effect 8, mode 2): the base where the occlusion-slot mask's
     // green channel rises above the vertex mask (`_AUX` w).
-    let mask_layer = material.surface.y == 8.0 && material.effect_params[1].w > 1.5;
+    let dual_blinn = material.surface.y == 11.0;
+    let mask_layer = (material.surface.y == 8.0 && material.effect_params[1].w > 1.5) || dual_blinn;
     let layer_mask = textureSample(t_occlusion, s_material, uv).g;
-    if material.surface.y == 9.0 || (material.surface.y == 8.0 && material.effect_params[1].w > 0.5) {
+    var layer_weight = 1.0;
+    if material.surface.y == 9.0 || (material.surface.y == 8.0 && material.effect_params[1].w > 0.5) || dual_blinn {
         var w = clamp(1.0 - normalize(i.normal).y, 0.0, 1.0);
         if mask_layer {
-            let soft = max(material.effect_params[2].x, 1e-4);
+            let soft = max(select(material.effect_params[2].x, material.effect_params[0].y, dual_blinn), 1e-4);
             w = clamp((layer_mask - (1.0 + soft) * i.aux.w + 2.0 * soft) / (2.0 * soft), 0.0, 1.0);
         }
-        let top = layer_b.rgb * material.effect_params[1].rgb * material.base_color.rgb;
+        layer_weight = w;
+        let tint = select(material.effect_params[1].rgb, vec3<f32>(1.0), dual_blinn);
+        let top = layer_b.rgb * tint * material.base_color.rgb;
         surface.color = vec4<f32>(mix(top, surface.color.rgb, w), surface.color.a);
         surface.emission = vec3<f32>(0.0);
     }
     let base=surface.color;
+    let lm_uv = i.aux.xy * material.effect_params[0].xy + material.effect_params[0].zw;
+    let lm_dx = dpdx(lm_uv);
+    let lm_dy = dpdy(lm_uv);
+    if material.surface.y == 10.0 {
+        if material.alpha.x == 1.0 && base.a < material.alpha.y { discard; }
+        let baked = textureSampleGrad(t_emissive, s_material, lm_uv, lm_dx, lm_dy).rgb;
+        var attenuation = 1.0;
+        if frame.sun_color.w > 0.0 {
+            let nl = max(dot(normalize(i.normal), normalize(-frame.sun_dir.xyz)), 0.0);
+            attenuation = mix(1.0, sun_shadow(i.world, nl, i.clip.xy), frame.sun_color.w);
+        }
+        let key = frame.sun_color.rgb * frame.sun_dir.w;
+        let color = mix(material.effect_params[1].rgb, base.rgb * baked, attenuation) * key;
+        let fog = height_fog(i.world);
+        return vec4<f32>(mix(color, fog.rgb, fog.a), 1.0);
+    }
     let tn = decode_normal(textureSample(t_normal, s_material, uv));
     let specular_color = textureSample(t_specular, s_material, uv).rgb * material.surface.w;
     let occ_sample = textureSample(t_occlusion, s_material, uv);
@@ -739,7 +768,7 @@ fn fs_main(i: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec
         if frame.misc.w > 0.5 {
             return gi_capture(color, i.world, front);
         }
-        return vec4<f32>(select(color,color*alpha,material.alpha.x==4.0),alpha);
+        return vec4<f32>(select(color,color*alpha,material.alpha.x>=4.0),alpha);
     }
     if material.alpha.z > 1.5 {
         let p = material.effect_params;
@@ -860,7 +889,7 @@ fn fs_main(i: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec
         if frame.misc.w > 0.5 {
             return gi_capture(color, i.world, front);
         }
-        return vec4<f32>(select(color, color * alpha, material.alpha.x == 4.0), alpha);
+        return vec4<f32>(select(color, color * alpha, material.alpha.x >= 4.0), alpha);
     }
     let roughness = surface.roughness;
     let metallic = surface.metallic;
@@ -871,6 +900,40 @@ fn fs_main(i: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec
     let t = normalize(i.tangent.xyz - ng * dot(ng, i.tangent.xyz));
     let b = cross(ng, t) * i.tangent.w;
     let n = normalize(mat3x3<f32>(t, b, ng) * vec3<f32>(tn.xy * material.params.z, tn.z));
+    if dual_blinn {
+        // V and the geometric normal are normalised at the vertices, then
+        // interpolated before the two half vectors are normalised.
+        let light = normalize(-frame.sun_dir.xyz);
+        let sun_half = i.blinn_view + light;
+        let ambient_half = i.blinn_view + i.normal;
+        let sun_dot = clamp(dot(n, sun_half / max(length(sun_half), 1e-8)), 0.0, 1.0);
+        let ambient_dot = clamp(dot(n, ambient_half / max(length(ambient_half), 1e-8)), 0.0, 1.0);
+        let parameters = material.effect_params[0];
+        let side_mask = textureSample(t_mr, s_material, uv).g;
+        let top_mask = textureSample(t_opacity, s_material, uv).g;
+        let strength = mix(top_mask, side_mask, layer_weight) * parameters.z;
+        let sun_spec = strength * pow(sun_dot, parameters.w);
+        let ambient_spec = strength * pow(ambient_dot, parameters.w);
+        let nl = max(dot(n, light), 0.0);
+        var visibility = 1.0;
+        if frame.sun_color.w > 0.0 && nl > 0.0 {
+            visibility = mix(1.0, sun_shadow(i.world, max(dot(ng, light), 0.0), i.clip.xy), frame.sun_color.w);
+        }
+        var ao = 1.0;
+        if frame.misc.x > 0.0 {
+            ao = mix(1.0, textureLoad(ao_texture, vec2<i32>(i.clip.xy), 0).r, min(frame.misc.x, 1.0));
+        }
+        let alignment = max(dot(n, ng), 0.0);
+        let baked = i.aux.rgb * (parameters.x * frame.baked_lighting.x / PI) * (ao * alignment * alignment);
+        let direct = frame.sun_color.rgb * (frame.sun_dir.w * nl * visibility);
+        let rgb = (base.rgb + vec3<f32>(sun_spec)) * direct + (base.rgb + vec3<f32>(ao * ambient_spec)) * baked;
+        let fog = height_fog(i.world);
+        let color = mix(rgb, fog.rgb, fog.a);
+        if frame.misc.w > 0.5 {
+            return gi_capture(color, i.world, front);
+        }
+        return vec4<f32>(color, 1.0);
+    }
     let v = normalize(frame.camera_pos.xyz - i.world);
     let nv = max(dot(n, v), 1e-4);
     let f0 = mix(min(vec3<f32>(0.04) * specular_color, vec3<f32>(1.0)), base.rgb, metallic);
@@ -929,7 +992,7 @@ fn fs_main(i: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec
     }
     // Baked vertex irradiance (effect 8) from the `_AUX` stream.
     if material.surface.y == 8.0 {
-        diffuse_irr = i.aux.rgb * material.effect_params[0].x;
+        diffuse_irr = i.aux.rgb * material.effect_params[0].x * frame.baked_lighting.x;
     }
     let ambient = (kd_ibl * base.rgb * diffuse_irr / PI + specular_ibl) * occlusion;
     let local = local_lights(i.world, i.clip.xy, ng, n, v, base.rgb, metallic, f0, max(a, 0.002), nv);
@@ -938,5 +1001,5 @@ fn fs_main(i: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec
     if frame.misc.w > 0.5 {
         return gi_capture(color, i.world, front);
     }
-    return vec4<f32>(select(color,color*alpha,material.alpha.x==4.0),alpha);
+    return vec4<f32>(select(color,color*alpha,material.alpha.x>=4.0),alpha);
 }

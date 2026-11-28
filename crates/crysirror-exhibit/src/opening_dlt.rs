@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-//! The witnessed v1 opening DLT on native channel 0, layer 4.
+//! Numbered v1 DLT clips on native channel zero.
 use anyhow::{Context, Result, ensure};
 use crysirror_core::{
     image_processing::RgbaImage,
@@ -12,33 +12,48 @@ use crysirror_tasks::{Task, TaskPool};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-pub(super) const SLOT: u8 = 4;
-pub(super) const ID: i32 = 1239;
-const LAYER: u32 = 256 + SLOT as u32;
-const FADE_MS: u64 = 800;
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub(super) struct Placement {
+    pub id: i32,
+    pub slot: u8,
+    pub origin: [i32; 2],
+}
 
 struct Fade {
     start: u64,
-    showing: bool,
+    duration: u32,
+    from: u8,
+    to: u8,
+    retiring: bool,
 }
 
-type Decoded = (DltDecoder, Arc<RgbaImage>);
+impl Fade {
+    fn level(&self, now: u64) -> u8 {
+        let duration = u64::from(self.duration);
+        if duration == 0 {
+            return self.to;
+        }
+        let age = now.saturating_sub(self.start).min(duration);
+        ((u64::from(self.from) * (duration - age) + u64::from(self.to) * age) / duration) as u8
+    }
+}
+
+type Decoded = (DltDecoder, Option<Arc<RgbaImage>>, bool);
 
 pub(super) struct OpeningDlt {
+    placement: Placement,
+    size: [u32; 2],
     opening: Option<Task<DltDecoder>>,
     work: Option<Task<Decoded>>,
+    worker: TaskPool,
     decoder: Option<DltDecoder>,
     path: Option<String>,
     frame: Option<u64>,
     fade: Option<Fade>,
     level: u8,
     playing: bool,
+    finished: bool,
     retired: bool,
-}
-
-fn layer(paint: Value, level: u8) -> Value {
-    json!({"op":"put","layer":{"id":LAYER,"order":[2,SLOT],"rect":[0,0,800,600],
-        "paint":paint,"opacity":level.saturating_mul(16)}})
 }
 
 fn send(h: &mut dyn HostServices, c: ClientId, op: Value) -> Result<()> {
@@ -53,17 +68,38 @@ fn native_steps(last: Option<u64>, now: u64, interval: u32) -> usize {
     }
 }
 
-fn fade_level(age: u64, showing: bool) -> u8 {
-    let age = age.min(FADE_MS);
-    (16 * if showing { age } else { FADE_MS - age } / FADE_MS) as u8
-}
-
 impl OpeningDlt {
-    pub fn prepare(h: &mut dyn HostServices, c: ClientId, pool: &TaskPool) -> Result<Self> {
+    pub fn preparing_cg(&self) -> Option<i32> {
+        self.opening.as_ref().map(|_| self.placement.id)
+    }
+
+    pub fn slot(&self) -> u8 {
+        self.placement.slot
+    }
+
+    fn layer_id(&self) -> u32 {
+        256 + u32::from(self.slot())
+    }
+
+    fn layer(&self, paint: Value, level: u8) -> Value {
+        let [x, y] = self.placement.origin;
+        let [w, h] = self.size;
+        json!({"op":"put","layer":{"id":self.layer_id(),"order":[2,self.slot()],"rect":[x,y,w,h],
+            "paint":paint,"opacity":level.saturating_mul(16)}})
+    }
+
+    pub fn prepare(h: &mut dyn HostServices, c: ClientId, placement: Placement) -> Result<Self> {
         let storage = h.storage(c)?;
-        let opening = pool.spawn(move |cancel| {
+        // The loop runs during dialogue, so it must never occupy the only
+        // foreground slot used for voice and script resources.
+        let worker = TaskPool::new("exhibit-opening-dlt", 1, 1)?;
+        let opening = worker.spawn(move |cancel| {
             cancel.check()?;
-            let asset = VfsPath::new(Mount::Asset, "res/g/ev/12/1239.dlt")?;
+            let id = placement.id;
+            let asset = VfsPath::new(
+                Mount::Asset,
+                &format!("res/g/ev/{:02}/{id:04}.dlt", id / 100),
+            )?;
             let reader = storage.open_read(&asset)?;
             let bytes = crysirror_resource::read_all(reader.as_ref(), 32 << 20)?;
             cancel.check()?;
@@ -71,31 +107,32 @@ impl OpeningDlt {
                 bytes.starts_with(&0x0101u32.to_le_bytes()),
                 "unsupported v1 opening DLT version"
             );
-            let decoder = DltDecoder::open(bytes.into())?;
-            let info = decoder.info();
-            ensure!(
-                info.size == [800, 600]
-                    && info.interval_ms == 80
-                    && info.frames > 1
-                    && info.loop_hint,
-                "unsupported v1 opening DLT layout"
-            );
-            Ok(decoder)
+            DltDecoder::open(bytes.into())
         })?;
         Ok(Self {
+            placement,
+            size: [0; 2],
             opening: Some(opening),
             work: None,
+            worker,
             decoder: None,
             path: None,
             frame: None,
             fade: None,
             level: 0,
             playing: false,
+            finished: false,
             retired: false,
         })
     }
 
-    pub fn start(&mut self, h: &mut dyn HostServices, c: ClientId, pool: &TaskPool) -> Result<()> {
+    pub fn start(
+        &mut self,
+        h: &mut dyn HostServices,
+        c: ClientId,
+        level: u8,
+        duration: u32,
+    ) -> Result<()> {
         ensure!(
             self.opening.is_none() && self.decoder.is_some() && !self.playing,
             "invalid ExHibit opening DLT start"
@@ -103,19 +140,22 @@ impl OpeningDlt {
         self.playing = true;
         self.fade = Some(Fade {
             start: h.now_ms(),
-            showing: true,
+            from: self.level,
+            to: level,
+            duration,
+            retiring: false,
         });
-        self.request_frame(h.now_ms(), c, pool)
+        self.request_frame(h.now_ms(), c)
     }
 
-    pub fn stop(&mut self, now: u64) -> Result<()> {
-        ensure!(
-            self.playing && self.fade.is_none() && self.level == 16,
-            "invalid ExHibit opening DLT stop"
-        );
+    pub fn stop(&mut self, now: u64, duration: u32) -> Result<()> {
+        ensure!(self.fade.is_none(), "invalid ExHibit opening DLT stop");
         self.fade = Some(Fade {
             start: now,
-            showing: false,
+            from: self.level,
+            to: 0,
+            duration,
+            retiring: true,
         });
         Ok(())
     }
@@ -124,8 +164,8 @@ impl OpeningDlt {
         self.retired
     }
 
-    fn request_frame(&mut self, now: u64, c: ClientId, pool: &TaskPool) -> Result<()> {
-        if self.work.is_some() {
+    fn request_frame(&mut self, now: u64, c: ClientId) -> Result<()> {
+        if self.work.is_some() || self.finished {
             return Ok(());
         }
         let Some(decoder) = &self.decoder else {
@@ -135,44 +175,49 @@ impl OpeningDlt {
         if count == 0 {
             return Ok(());
         }
+        let permit = self.worker.reserve()?;
         let mut decoder = self.decoder.take().context("missing ExHibit DLT decoder")?;
-        self.work = Some(pool.spawn(move |cancel| {
+        self.work = Some(permit.spawn(move |cancel| {
             let mut latest = None;
+            let mut finished = false;
             for _ in 0..count {
                 cancel.check()?;
-                latest = Some(
-                    decoder
-                        .next_looped_frame()?
-                        .context("unexpected end of opening DLT")?,
-                );
+                let Some(frame) = decoder.next_looped_frame()? else {
+                    finished = true;
+                    break;
+                };
+                latest = Some(frame);
             }
-            let latest = latest.context("empty ExHibit DLT frame request")?;
-            let image = Arc::new(RgbaImage::new(c, decoder.info().size, latest.rgba.into())?);
-            Ok((decoder, image))
+            let image = latest
+                .map(|frame| {
+                    RgbaImage::new(c, decoder.info().size, frame.rgba.into()).map(Arc::new)
+                })
+                .transpose()?;
+            Ok((decoder, image, finished))
         })?);
         self.frame = Some(now);
         Ok(())
     }
 
-    pub fn present(
-        &mut self,
-        h: &mut dyn HostServices,
-        c: ClientId,
-        pool: &TaskPool,
-    ) -> Result<bool> {
+    pub fn present(&mut self, h: &mut dyn HostServices, c: ClientId) -> Result<bool> {
         if let Some(task) = &mut self.opening {
             let Some(decoder) = task.try_take()? else {
                 return Ok(false);
             };
-            send(h, c, layer(json!({"kind":"solid","color":[0,0,0,0]}), 0))?;
+            self.size = decoder.info().size;
+            send(
+                h,
+                c,
+                self.layer(json!({"kind":"solid","color":[0,0,0,0]}), 0),
+            )?;
             self.decoder = Some(decoder);
             self.opening = None;
         }
         let now = h.now_ms();
         if let Some(fade) = &self.fade {
-            let level = fade_level(now.saturating_sub(fade.start), fade.showing);
-            if level == 0 && !fade.showing {
-                send(h, c, json!({"op":"remove","id":LAYER}))?;
+            let level = fade.level(now);
+            if level == 0 && fade.retiring {
+                send(h, c, json!({"op":"remove","id":self.layer_id()}))?;
                 if let Some(path) = self.path.take() {
                     h.release_image_resource(c, &path)?;
                 }
@@ -187,35 +232,38 @@ impl OpeningDlt {
                 send(
                     h,
                     c,
-                    json!({"op":"set_opacity","id":LAYER,"opacity":level.saturating_mul(16)}),
+                    json!({"op":"set_opacity","id":self.layer_id(),"opacity":level.saturating_mul(16)}),
                 )?;
                 self.level = level;
             }
-            if fade.showing && level == 16 && self.path.is_some() {
+            if !fade.retiring && level == fade.to && self.path.is_some() {
                 self.fade = None;
             }
         }
         if let Some(work) = &mut self.work {
-            if let Some((decoder, image)) = work.try_take()? {
-                let uploaded = h.publish_image_resource(c, LAYER, image)?;
-                let path = uploaded.path.relative().to_owned();
-                if let Err(error) = send(
-                    h,
-                    c,
-                    layer(json!({"kind":"image","asset":path}), self.level),
-                ) {
-                    let _ = h.release_image_resource(c, &path);
-                    return Err(error);
-                }
-                if let Some(old) = self.path.replace(path) {
-                    h.release_image_resource(c, &old)?;
+            if let Some((decoder, image, finished)) = work.try_take()? {
+                self.finished = finished;
+                if let Some(image) = image {
+                    let uploaded = h.publish_image_resource(c, self.layer_id(), image)?;
+                    let path = uploaded.path.relative().to_owned();
+                    if let Err(error) = send(
+                        h,
+                        c,
+                        self.layer(json!({"kind":"image","asset":path}), self.level),
+                    ) {
+                        let _ = h.release_image_resource(c, &path);
+                        return Err(error);
+                    }
+                    if let Some(old) = self.path.replace(path) {
+                        h.release_image_resource(c, &old)?;
+                    }
                 }
                 self.decoder = Some(decoder);
                 self.work = None;
             }
         }
         if self.playing {
-            self.request_frame(now, c, pool)?;
+            self.request_frame(now, c)?;
         }
         Ok(self.fade.is_none())
     }
@@ -296,24 +344,31 @@ mod tests {
 
     #[test]
     fn async_clip_publishes_replaces_and_retires_owned_images_without_a_game() -> Result<()> {
-        let worker = TaskPool::new("opening-dlt-fixture", 1, 1)?;
         let mut clip = OpeningDlt {
+            placement: Placement {
+                id: 1180,
+                slot: 40,
+                origin: [200, 50],
+            },
+            size: [1, 1],
             opening: None,
             work: None,
+            worker: TaskPool::new("opening-dlt-fixture", 1, 1)?,
             decoder: Some(minimal_stream()?),
             path: None,
             frame: None,
             fade: None,
             level: 0,
             playing: false,
+            finished: false,
             retired: false,
         };
         let mut host = Host::default();
         let client = ClientId(1);
-        clip.start(&mut host, client, &worker)?;
+        clip.start(&mut host, client, 16, 800)?;
         let until = Instant::now() + Duration::from_secs(10);
         while host.frames == 0 {
-            assert!(!clip.present(&mut host, client, &worker)?);
+            assert!(!clip.present(&mut host, client)?);
             ensure!(Instant::now() < until, "fixture frame was not produced");
             std::thread::yield_now();
         }
@@ -321,14 +376,17 @@ mod tests {
             host.submissions.last().unwrap()["layers"][0]["layer"]["opacity"],
             0
         );
+        let layer = &host.submissions.last().unwrap()["layers"][0]["layer"];
+        assert_eq!(layer["id"], 296);
+        assert_eq!(layer["rect"], json!([200, 50, 1, 1]));
         host.clock = 400;
-        assert!(!clip.present(&mut host, client, &worker)?);
+        assert!(!clip.present(&mut host, client)?);
         assert_eq!(
             host.submissions.last().unwrap()["layers"][0]["opacity"],
             128
         );
         while host.frames < 2 {
-            assert!(!clip.present(&mut host, client, &worker)?);
+            assert!(!clip.present(&mut host, client)?);
             ensure!(
                 Instant::now() < until,
                 "fixture catchup frame was not produced"
@@ -337,14 +395,14 @@ mod tests {
         }
         assert_eq!(host.released, ["fixture/dlt-1"]);
         host.clock = 800;
-        assert!(clip.present(&mut host, client, &worker)?);
-        clip.stop(800)?;
+        assert!(clip.present(&mut host, client)?);
+        clip.stop(800, 800)?;
         host.clock = 1551;
-        assert!(clip.present(&mut host, client, &worker)?);
+        assert!(clip.present(&mut host, client)?);
         assert!(clip.retired());
         assert_eq!(
             host.submissions.last().unwrap()["layers"][0],
-            json!({"op":"remove","id":260})
+            json!({"op":"remove","id":296})
         );
         assert_eq!(host.released, ["fixture/dlt-1", "fixture/dlt-2"]);
         Ok(())
@@ -358,8 +416,15 @@ mod tests {
         assert_eq!(native_steps(Some(16), 176, 80), 2);
         assert_eq!(native_steps(Some(16), 2016, 80), 25);
         assert_eq!(native_steps(Some(16), 2017, 80), 1);
-        assert_eq!(fade_level(400, true), 8);
-        assert_eq!(fade_level(750, false), 1);
-        assert_eq!(fade_level(751, false), 0);
+        let fade = Fade {
+            start: 0,
+            duration: 800,
+            from: 16,
+            to: 0,
+            retiring: true,
+        };
+        assert_eq!(fade.level(400), 8);
+        assert_eq!(fade.level(750), 1);
+        assert_eq!(fade.level(751), 0);
     }
 }

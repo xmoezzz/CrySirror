@@ -28,9 +28,9 @@
 //! Not reproduced (SATD-nd-retail-runtime): per-particle random sizes (the
 //! sample mean is used), the random atlas frame (frame 0), the volume
 //! shape's per-particle outward/around-axis directions (approximated by
-//! their dominant direction), force nodes of kinds 4, 6 and 7, and the
-//! godray shader's fog-texture term (it reaches only alpha, which the
-//! additive blend ignores).
+//! their dominant direction), and force nodes of kinds 4, 6 and 7. The
+//! separate world-space shaft mask controls coverage in the later layer
+//! composite; emitted colour has independent factors.
 use crate::dc::{Dc, sid};
 use anyhow::{Result, ensure};
 use glam::{Mat4, Quat, Vec3};
@@ -149,15 +149,28 @@ pub enum Field {
     Other(u32),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ColorSource {
+    Constant(f32),
+    Attribute(usize),
+    Ramp(usize),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Effect {
     pub name: String,
     pub flags: u32,
     /// Render orientation 0–7 (`sub_4710` of the cull job).
     pub orientation: u8,
+    /// Descriptor +0x48 low nibble. The cull job maps 3 to main-pass
+    /// buckets 0–2 by distance; 4/5 draw directly after/before the composite.
+    pub pass_bucket: u8,
     pub material: u32,
     /// Attribute name `StringId` → slot.
     pub slots: HashMap<u32, usize>,
+    /// Render-map inputs for RGBA. A descriptor can bind a ramp or a
+    /// constant directly even when it allocates no particle alpha slot.
+    pub color_sources: [Option<ColorSource>; 4],
     pub constants: Vec<f32>,
     pub curves: Vec<Curve>,
     pub ramps: Vec<Ramp>,
@@ -383,6 +396,39 @@ fn effect(dc: &Dc, p: u32) -> Result<Option<Effect>> {
         let base = m.u32(at)?;
         (0..count).map(|i| Ok(m.bytes(base + 4 * i, 4)?.try_into()?)).collect()
     };
+    // SPU particle-cull job, map parameters: source 1 retains the
+    // immediate, 2 reads an attribute and 3 evaluates ramp[index+lane]
+    // (jump table at file offset 0x4ce4). Colour is destination 4.
+    let mut color_sources = [None; 4];
+    let headers = m.u32(p + 0x58)?;
+    let parameters = m.u32(p + 0x5c)?;
+    let count = u32::from(u16_at(dc, p + 0x4e)?);
+    for i in 0..u32::from(u8_at(dc, p + 0x4d)?) {
+        let header = m.bytes(headers + 4 * i, 4)?;
+        if !(5..=7).contains(&header[0]) { continue; }
+        let first = u32::from(header[3]);
+        let end = first + u32::from(header[1]);
+        ensure!(end <= count, "ND particle colour map outside parameter table");
+        for j in first..end {
+            let at = parameters + 8 * j;
+            let binding = m.bytes(at + 4, 4)?;
+            if binding[2] != 4 { continue; }
+            let channel = usize::from(binding[3]);
+            ensure!(channel < 4, "ND particle colour channel");
+            let value = m.f32(at)?;
+            ensure!(value.is_finite(), "ND particle colour map value");
+            color_sources[channel] = Some(match binding[0] {
+                1 => ColorSource::Constant(value),
+                2 if (0.0..256.0).contains(&value) => ColorSource::Attribute(value as usize),
+                3 if value >= 0.0 && value < ramps.len() as f32 => {
+                    let index = value as usize + usize::from(binding[1]);
+                    ensure!(index < ramps.len(), "ND particle colour ramp");
+                    ColorSource::Ramp(index)
+                }
+                kind => anyhow::bail!("ND particle colour source {kind} with value {value}"),
+            });
+        }
+    }
     let constants = {
         let base = m.u32(p + 0xb0)?;
         (0..u32::from(u8_at(dc, p + 0x9e)?)).map(|i| m.f32(base + 4 * i)).collect::<Result<Vec<_>>>()?
@@ -436,8 +482,10 @@ fn effect(dc: &Dc, p: u32) -> Result<Option<Effect>> {
         name: m.cstr(m.u32(p + 0x10)?).unwrap_or_default(),
         flags: m.u32(p + 0x44)?,
         orientation: u8_at(dc, p + 0x4c)?,
+        pass_bucket: u8_at(dc, p + 0x48)? & 15,
         material: m.u32(p + 0x60)?,
         slots,
+        color_sources,
         constants,
         curves,
         ramps,
@@ -455,13 +503,15 @@ pub struct ParticleMaterial {
     pub name: String,
     /// Pass 0's sampler texture IDs.
     pub samplers: Vec<u32>,
-    /// Pass 0's colour blend factors (pass data +0x20, `u16` source and
+    /// Pass 0's colour blend factors (pass data +0x30, `u16` source and
     /// destination in GL enumerants: 1 ONE, 0x303 ONE_MINUS_SRC_ALPHA).
     pub blend: (u16, u16),
     /// Soft-particle distance: the fragment program divides the scene
     /// depth difference by `g_fDepthBlend` (`DIV_SAT`; 0.5 m on
     /// `godrays-fog`).
     pub depth_blend: Option<f32>,
+    /// World-space scrolling mask from the shaft vertex program.
+    pub fog_scroll: Option<[f32; 4]>,
 }
 
 pub fn materials(p: &crate::mesh::Loaded, payload: usize) -> Result<HashMap<u32, ParticleMaterial>> {
@@ -474,7 +524,9 @@ pub fn materials(p: &crate::mesh::Loaded, payload: usize) -> Result<HashMap<u32,
         let Ok(material) = crate::mesh::material(p, m) else { continue };
         let data = p.ptr(p.ptr(m + 0x10)?).and_then(|pass| p.ptr(pass + 0x10))?;
         let depth_blend = crate::rsx::material_constant(p, data, "g_fDepthBlend").ok().flatten().map(|v| v[0]).filter(|v| v.is_finite() && *v > 0.);
-        out.insert(p.u32(m + 0x18)?, ParticleMaterial { name: material.name, samplers: material.samplers, blend: (p.u16(data + 0x20)?, p.u16(data + 0x22)?), depth_blend });
+        let fog_scroll = crate::rsx::material_constant(p, data, "g_fTransparencyFogScroll").ok().flatten()
+            .filter(|v| v.iter().all(|c| c.is_finite()) && v[3] > 0.);
+        out.insert(p.u32(m + 0x18)?, ParticleMaterial { name: material.name, samplers: material.samplers, blend: (p.u16(data + 0x30)?, p.u16(data + 0x32)?), depth_blend, fog_scroll });
     }
     Ok(out)
 }
@@ -549,7 +601,17 @@ pub fn emitter(effect: &Effect, id: &str, placement: &Placement, texture: Option
                 effect.run(&effect.update, &mut q, Clock { age, effect_time: age, dt: 1. / 30. });
             }
             for (k, name) in ["colorR", "colorG", "colorB", "alpha", "scaleX", "scaleY"].iter().enumerate() {
-                sum[k] += if k >= 4 { read(&q, name).abs() } else { read(&q, name) };
+                sum[k] += match effect.color_sources.get(k).copied().flatten() {
+                    Some(ColorSource::Constant(v)) => v,
+                    Some(ColorSource::Attribute(slot)) => q.attrs.get(slot).copied().unwrap_or(0.),
+                    Some(ColorSource::Ramp(index)) => {
+                        let ramp = &effect.ramps[index];
+                        let x = ramp.input.map_or(t, |slot| q.attrs.get(slot).copied().unwrap_or(0.).rem_euclid(1.));
+                        ramp.eval(x)
+                    }
+                    None if k >= 4 => read(&q, name).abs(),
+                    None => read(&q, name),
+                };
             }
         }
         let n = born.len() as f32;
@@ -639,7 +701,7 @@ pub fn emitter(effect: &Effect, id: &str, placement: &Placement, texture: Option
         spawn,
         initialize: InitSpec { shape, lifetime, speed, direction: direction.to_array().into(), spread_degrees: spread, color, size, rotation, ..Default::default() },
         update,
-        render: RenderSpec::Sprite { texture, columns, rows: 1, frames: 1, fps: 0., soft_distance, blend, facing },
+        render: RenderSpec::Sprite { texture, columns, rows: 1, frames: 1, fps: 0., soft_distance, triplanar_coverage: None, blend, facing },
         ..Default::default()
     };
     let frame = Mat4::from_rotation_translation(placement.rotation, placement.position) * Mat4::from_translation(offset * scale);
@@ -649,6 +711,8 @@ pub fn emitter(effect: &Effect, id: &str, placement: &Placement, texture: Option
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "runtime")]
+    use anyhow::Context;
 
     #[test]
     fn ramp_and_curve() {
@@ -667,8 +731,10 @@ mod tests {
             name: "dust".into(),
             flags: 0,
             orientation: 0,
+            pass_bucket: 0,
             material: 0,
             slots: HashMap::new(),
+            color_sources: [None; 4],
             constants: vec![],
             curves: vec![],
             ramps: vec![],
@@ -695,8 +761,10 @@ mod tests {
             name: String::new(),
             flags: 0,
             orientation: 0,
+            pass_bucket: 0,
             material: 0,
             slots: HashMap::from([(sid("scaleX"), 0)]),
+            color_sources: [None; 4],
             constants: vec![1., 3.],
             curves: vec![],
             ramps: vec![],
@@ -711,5 +779,87 @@ mod tests {
         let b = e.birth(1234);
         assert_eq!(a.attrs, b.attrs);
         assert!((1.0..3.0).contains(&a.attrs[0]));
+    }
+
+    #[cfg(feature = "runtime")]
+    fn installed_particle_archive(name: &str) -> Result<crysirror_resource::ArchiveMount> {
+        use crysirror_core::{path::{Mount, VfsPath}, state::ClientId};
+        use crysirror_resource::{ArchiveMount, DecodeContext, FormatRegistry};
+        let root = std::env::var_os("UNCHARTED2_ROOT").context("UNCHARTED2_ROOT")?;
+        let assets = std::path::Path::new(&root).join(crate::adapter::MAIN);
+        let temp = std::env::temp_dir().join(format!("crysirror-particle-test-{}-{name}", std::process::id()));
+        let mut vfs = crysirror_runtime::vfs::DiskVfs::new(&assets, &temp)?;
+        let client = ClientId(1);
+        vfs.register(client, "naughty-dog", "particle-test")?;
+        let storage = vfs.storage(client)?;
+        let reader = storage.open_asset(&VfsPath::new(Mount::Asset, name)?)?;
+        let mut registry = FormatRegistry::default();
+        crysirror_formats_arc::register(&mut registry)?;
+        let mut context = DecodeContext::new(client);
+        context.limits.max_entry_size = 256 << 20;
+        let (_, archive) = registry.open(reader, Some("sony/psarc"), &context)?;
+        ArchiveMount::new(archive, context)
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    #[ignore = "requires local BCAS20097 01.00 via UNCHARTED2_ROOT"]
+    fn installed_particle_colour_bindings_parse_across_disc() -> Result<()> {
+        use crate::game::ModuleSource;
+        let archive = installed_particle_archive("dc1.psarc")?;
+        let mut modules = 0;
+        let mut effects = 0;
+        for name in archive.names().into_iter().filter(|n| ["part-", "fma-part-", "particle-u2-"].iter().any(|s| n.starts_with(s))) {
+            let library = Library::parse(&name, &archive.read(&name)?).with_context(|| name.clone())?;
+            modules += 1;
+            effects += library.effects.len();
+        }
+        assert_eq!(modules, 61);
+        assert_eq!(effects, 5852);
+        Ok(())
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    #[ignore = "requires local BCAS20097 01.00 via UNCHARTED2_ROOT"]
+    fn installed_title_material_blends() -> Result<()> {
+        use crate::{mesh::Loaded, package::Directory};
+        use crysirror_core::{service::MemoryAssetReader, vfs::VfsProvider};
+        let package = installed_particle_archive("pak22.psarc")?.open("particle.pak")?;
+        let reader = MemoryAssetReader(crysirror_resource::read_all(package.as_ref(), 256 << 20)?.into());
+        let directory = Directory::read(&reader)?;
+        let item = directory.items.iter().find(|item| item.kind == "MATERIAL_TABLE_1").context("particle material table")?;
+        let package = Loaded::read(&reader, 1 << 30)?;
+        let table = materials(&package, item.payload_offset as usize)?;
+        let shafts = &table[&sid("general/particles/godrays-fog/default")];
+        assert_eq!(shafts.blend, (1, 1));
+        assert_eq!(shafts.depth_blend, Some(0.5));
+        assert_eq!(shafts.fog_scroll, Some([0., 0.075, 0., 0.35]));
+        let dust = &table[&sid("general/particles/dust-in-light/default")];
+        assert_eq!(dust.blend, (1, 0x303));
+        Ok(())
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    #[ignore = "requires local BCAS20097 01.00 via UNCHARTED2_ROOT"]
+    fn installed_menu_dust_fades_through_its_colour_map() -> Result<()> {
+        let bytes = crate::game::ModuleSource::read(&installed_particle_archive("dc1.psarc")?, "part-menu")?;
+        let library = Library::parse("part-menu", &bytes)?;
+        let dust = &library.effects[&sid("menu-light-dust/paper-emitter1")];
+        assert_eq!(dust.pass_bucket, 4);
+        assert_eq!(library.effects.values().filter(|e| e.pass_bucket == 3).count(), 6);
+        assert_eq!(dust.slot("alpha"), None);
+        assert_eq!(dust.color_sources[3], Some(ColorSource::Ramp(3)));
+        let placement = Placement { position: Vec3::ZERO, rotation: Quat::IDENTITY, color: [1.; 3], alpha: 0.6, sprite_scale: 1., effect_scale: Vec3::ONE };
+        let (spec, _) = emitter(dust, &dust.name, &placement, None, crysirror_vfx::BlendMode::Additive, 0., 1);
+        let curve = spec.update.iter().find_map(|module| match module {
+            crysirror_vfx::Module::ColorOverLife { curve } => Some(curve),
+            _ => None,
+        }).expect("dust colour curve");
+        assert_eq!(curve.sample(0.)[3], 0.);
+        assert!((curve.sample(0.5)[3] - 0.6).abs() < 1e-5);
+        assert_eq!(curve.sample(1.)[3], 0.);
+        Ok(())
     }
 }

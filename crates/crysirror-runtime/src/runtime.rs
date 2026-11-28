@@ -161,6 +161,7 @@ pub struct SharedHost {
     pub window_maximized: Option<bool>,
     pub window_fullscreen: Option<bool>,
     pub window_geometry: Option<crysirror_core::service::WindowGeometry>,
+    pub presentation_fps: Option<u32>,
     /// Backend metadata, independent of saved simulation/input state. The
     /// position is absent until the backend actually reports one.
     pub pointer_observation: crysirror_core::service::PointerObservation,
@@ -1476,6 +1477,9 @@ impl HostServices for SharedHost {
         }
         Ok(self.window_focused)
     }
+    fn presentation_fps(&self) -> Option<u32> {
+        self.presentation_fps
+    }
     fn window_geometry(
         &self,
         client: ClientId,
@@ -2612,6 +2616,7 @@ impl Runtime {
                 window_maximized: None,
                 window_fullscreen: None,
                 window_geometry: None,
+                presentation_fps: None,
                 pointer_observation: Default::default(),
                 pointer_activity: None,
                 input_observation: None,

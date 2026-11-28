@@ -383,6 +383,15 @@ impl FontLibrary for ClientFonts {
     fn metrics(&self,alias:&str,size:f32,character:char)->crysirror_core::Result<FontMetrics> {
         self.text.metrics(alias,size,character).map_err(err)
     }
+    fn kerning(&self, alias: &str, size: f32, left: char, right: char) -> crysirror_core::Result<f32> {
+        self.text.kerning(alias, size, left, right).map_err(err)
+    }
+    fn shape(&self, request: &crysirror_core::service::ShapeRequest) -> crysirror_core::Result<Vec<crysirror_core::service::ShapedGlyph>> {
+        self.text.shape(request).map_err(err)
+    }
+    fn variations(&self, alias: &str) -> crysirror_core::Result<crysirror_core::service::FontVariations> {
+        self.text.variations(alias).map_err(err)
+    }
     fn is_loaded(&self, alias: &str) -> crysirror_core::Result<bool> {
         Ok(self.text.font_digest(alias).is_ok())
     }

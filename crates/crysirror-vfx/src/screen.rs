@@ -87,13 +87,14 @@ pub fn pack_screen_emitter(
         fps,
         blend,
         facing,
+        triplanar_coverage,
         ..
     } = &frame.render
     else {
         anyhow::bail!("VFX screen projection requires a sprite emitter")
     };
     ensure!(
-        matches!(facing, FacingMode::Camera),
+        matches!(facing, FacingMode::Camera) && triplanar_coverage.is_none(),
         "VFX screen facing profile unsupported"
     );
     let texture = texture
@@ -105,6 +106,9 @@ pub fn pack_screen_emitter(
         BlendMode::Multiply => PartBlend::Multiply,
         BlendMode::Premultiplied => {
             anyhow::bail!("VFX premultiplied screen sprite profile unsupported")
+        }
+        BlendMode::AdditiveColor | BlendMode::AdditiveCoverageLayer => {
+            anyhow::bail!("VFX independent RGB/alpha addition requires a world renderer")
         }
     };
     ensure!(frame.particles.len() <= MAX_PARTS, "VFX screen part limit");
@@ -236,6 +240,7 @@ mod tests {
                 frames: 2,
                 fps: 1.,
                 soft_distance: 0.,
+                triplanar_coverage: None,
                 blend: BlendMode::Alpha,
                 facing: FacingMode::Camera,
             },

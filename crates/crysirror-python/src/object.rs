@@ -40,7 +40,14 @@ impl fmt::Debug for Value {
     }
 }
 
+/// Collector fields come first (`repr(C)`) so they share a cache line with
+/// the `Rc` counts the collector reads alongside them.
+#[repr(C)]
 pub struct PyObject {
+    /// Collector state (`gc::TRACKED`, `gc::FINALIZED`, `gc::WEAKREFED`).
+    pub(crate) gc_flags: Cell<u8>,
+    /// Scratch slot of the collector while the object is a candidate.
+    pub(crate) gc_index: Cell<u32>,
     /// Always set after bootstrap (`type` is its own class).
     pub class: RefCell<Option<ObjRef>>,
     pub dict: Option<RefCell<Dict>>,
@@ -153,6 +160,8 @@ pub struct TypeData {
     pub builtin: bool,
     /// Instances have no `__dict__` (builtin immutable types, `__slots__`).
     pub no_dict: bool,
+    /// The class (or a base) defines `__del__`; checked when instances die.
+    pub finalizer: Cell<bool>,
 }
 
 pub enum IterState {
@@ -191,6 +200,20 @@ pub struct Generator {
     pub yield_from: Option<Value>,
 }
 
+/// A weak reference (`weakref.ref`, proxies). The target is reset when the
+/// referent dies or is collected; the callback is taken when it is queued.
+pub struct WeakRefData {
+    pub target: RefCell<Weak<PyObject>>,
+    pub callback: RefCell<Value>,
+    pub hash: Cell<Option<i64>>,
+}
+
+impl WeakRefData {
+    pub fn upgrade(&self) -> Option<ObjRef> {
+        self.target.borrow().upgrade()
+    }
+}
+
 pub enum Payload {
     None,
     Str(PyStr),
@@ -221,7 +244,7 @@ pub enum Payload {
     DictView { dict: ObjRef, kind: u8 },
     Super { typ: ObjRef, obj: Value },
     Code(Rc<Code>),
-    WeakRef(Weak<PyObject>, Value),
+    WeakRef(WeakRefData),
     Native(RefCell<Box<dyn Any>>),
     /// Module name and its namespace (a dict-payload object used as the
     /// globals of code defined in the module).
@@ -231,6 +254,12 @@ pub enum Payload {
 }
 
 impl PyObject {
+    /// `object` and `type` are created before any class exists.
+    pub(crate) fn bootstrap_type(payload: Payload) -> ObjRef {
+        let o = Rc::new(PyObject { class: RefCell::new(None), dict: Some(RefCell::new(Dict::new())), payload, gc_flags: Cell::new(crate::gc::TRACKED), gc_index: Cell::new(0) });
+        crate::gc::track(&o);
+        o
+    }
     pub fn class(&self) -> ObjRef {
         self.class.borrow().clone().expect("class")
     }
@@ -313,5 +342,10 @@ impl Value {
 }
 
 pub fn new_obj(class: ObjRef, dict: Option<Dict>, payload: Payload) -> ObjRef {
-    Rc::new(PyObject { class: RefCell::new(Some(class)), dict: dict.map(RefCell::new), payload })
+    let tracked = crate::gc::needs_tracking(&class, dict.is_some(), &payload);
+    let o = Rc::new(PyObject { class: RefCell::new(Some(class)), dict: dict.map(RefCell::new), payload, gc_flags: Cell::new(if tracked { crate::gc::TRACKED } else { 0 }), gc_index: Cell::new(0) });
+    if tracked {
+        crate::gc::track(&o);
+    }
+    o
 }

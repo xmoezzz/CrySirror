@@ -98,7 +98,12 @@ pub fn call(vm: &mut Vm, f: &Value, args: Vec<Value>) -> PyResult<Value> {
     vm.call(f, args, Vec::new())
 }
 
-pub fn call_kw(vm: &mut Vm, f: &Value, args: Vec<Value>, kwargs: Vec<(Rc<str>, Value)>) -> PyResult<Value> {
+pub fn call_kw(
+    vm: &mut Vm,
+    f: &Value,
+    args: Vec<Value>,
+    kwargs: Vec<(Rc<str>, Value)>,
+) -> PyResult<Value> {
     vm.call(f, args, kwargs)
 }
 
@@ -145,11 +150,19 @@ pub fn closure(vm: &Vm, name: &'static str, f: NativeFn, data: Value) -> Value {
 }
 
 pub fn staticmethod(vm: &Vm, f: Value) -> Value {
-    Value::Obj(new_obj(vm.types.staticmethod.clone(), Some(Default::default()), Payload::StaticMethod(f)))
+    Value::Obj(new_obj(
+        vm.types.staticmethod.clone(),
+        Some(Default::default()),
+        Payload::StaticMethod(f),
+    ))
 }
 
 pub fn classmethod(vm: &Vm, f: Value) -> Value {
-    Value::Obj(new_obj(vm.types.classmethod.clone(), Some(Default::default()), Payload::ClassMethod(f)))
+    Value::Obj(new_obj(
+        vm.types.classmethod.clone(),
+        Some(Default::default()),
+        Payload::ClassMethod(f),
+    ))
 }
 
 pub fn property(vm: &mut Vm, get: Value, set: Option<Value>) -> PyResult<Value> {
@@ -163,7 +176,14 @@ pub fn property(vm: &mut Vm, get: Value, set: Option<Value>) -> PyResult<Value> 
 
 /// Builds an ordinary (dict-backed, subclassable, picklable) Python class
 /// whose methods are natives, as `type(name, bases, ns)` would.
-pub fn class(vm: &mut Vm, module: &str, name: &str, bases: &[Value], methods: Methods, attrs: &[(&str, Value)]) -> PyResult<ObjRef> {
+pub fn class(
+    vm: &mut Vm,
+    module: &str,
+    name: &str,
+    bases: &[Value],
+    methods: Methods,
+    attrs: &[(&str, Value)],
+) -> PyResult<ObjRef> {
     let ns = vm.types.new_dict();
     for (n, f) in methods {
         let v = vm.types.new_builtin(n, *f);
@@ -176,12 +196,18 @@ pub fn class(vm: &mut Vm, module: &str, name: &str, bases: &[Value], methods: Me
     dict_set(vm, &ns, "__module__", m)?;
     let q = vm.types.new_str(name);
     dict_set(vm, &ns, "__qualname__", q)?;
-    let bases = if bases.is_empty() { vec![Value::Obj(vm.types.object.clone())] } else { bases.to_vec() };
+    let bases = if bases.is_empty() {
+        vec![Value::Obj(vm.types.object.clone())]
+    } else {
+        bases.to_vec()
+    };
     let ty = Value::Obj(vm.types.type_.clone());
     let n = vm.types.new_str(name);
     let b = vm.types.new_tuple(bases);
     let c = vm.call(&ty, vec![n, b, ns], Vec::new())?;
-    c.obj().cloned().ok_or_else(|| vm.type_error("class construction failed"))
+    c.obj()
+        .cloned()
+        .ok_or_else(|| vm.type_error("class construction failed"))
 }
 
 /// Native-payload access.
@@ -260,7 +286,13 @@ pub fn get_items(vm: &mut Vm, obj: &Value, name: &str) -> PyResult<Vec<Value>> {
     items(vm, &v)
 }
 
-pub fn method_kw(vm: &mut Vm, obj: &Value, name: &str, args: Vec<Value>, kwargs: Vec<(Rc<str>, Value)>) -> PyResult<Value> {
+pub fn method_kw(
+    vm: &mut Vm,
+    obj: &Value,
+    name: &str,
+    args: Vec<Value>,
+    kwargs: Vec<(Rc<str>, Value)>,
+) -> PyResult<Value> {
     let f = crysirror_python::ops::getattr(vm, obj, name)?;
     vm.call(&f, args, kwargs)
 }
@@ -279,7 +311,9 @@ pub fn gt(vm: &mut Vm, a: &Value, b: &Value) -> PyResult<bool> {
 
 /// The attribute dict of a module (its namespace) or instance.
 pub fn namespace_of(vm: &mut Vm, v: &Value) -> PyResult<Value> {
-    let Some(o) = v.obj() else { return Err(vm.type_error("object has no namespace")) };
+    let Some(o) = v.obj() else {
+        return Err(vm.type_error("object has no namespace"));
+    };
     if let Payload::Module(_, ns) = &o.payload {
         return Ok(Value::Obj(ns.clone()));
     }

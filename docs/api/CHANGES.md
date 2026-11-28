@@ -1,5 +1,43 @@
 # API change log
 
+## `856a153d826df6b5` (2026-11-27) — stored-byte rectangle resampling
+
+`ImageEffect.rect_resample_byte255` accepts a source rectangle and an output
+size. It uses 8.8 coordinates, 255-sum weights and one truncating shift for
+opaque RGB output. Existing JSON effects retain their meaning. Rust
+exhaustive matches on `ImageEffect` must handle the new variant.
+
+The regenerated reference also includes the existing `rgba_color_matrix`
+variant for straight RGBA 4×5 matrices. The prior generated fingerprint was
+`6bfb007b98404827`.
+
+## `6bfb007b98404827` (2026-11-27) — particle coverage and layered Blinn materials
+
+World particle sprites accept optional `triplanar_coverage` with a scoped
+texture, world-coordinate scale and scrolling rates. The 3D blend
+`additive_coverage_layer` accumulates emitted colour and coverage before
+one composite over the opaque scene. Existing serialized sprite definitions
+retain their blend. Rust callers spelling out a full `RenderSpec::Sprite`
+literal must initialize `triplanar_coverage`; use `None` for ordinary sprites.
+Exhaustive matches on `crysirror_vfx::BlendMode` must handle
+`AdditiveCoverageLayer`.
+
+`ShaderEffect::LayeredBlinn` adds two masked specular lobes with material
+intensity, softness, mask power, specular scale and specular exponent.
+Rust exhaustive matches for material effects must handle this variant.
+The prior fingerprint was `0d7e3b8a087f4655`.
+
+## `0d7e3b8a087f4655` (2026-11-27) — baked vertex lighting and additive particle colour
+
+`Environment.baked_vertex_scale` multiplies the diffuse irradiance stored on
+vertices. It defaults to 1. Existing serialized scenes retain their lighting.
+Rust literals constructing every environment field must supply the new value.
+`VfxRenderSpec.blend` accepts `additive_color` on 3D renderers for independent
+addition of emitted RGB and coverage. Existing blend names keep their semantics.
+Rust exhaustive matches on `VfxBlendMode` (`crysirror_vfx::BlendMode`) must
+handle `AdditiveColor`. The preceding generated fingerprint was
+`a8c01b42c4a50deb`.
+
 ## `2ac32143b330d5a1` (2026-11-26) — Gaussian fog model
 
 `Fog.model` selects the opacity model: `exponential` (default, unchanged)
@@ -9,6 +47,25 @@ linear height ramp `b` that may thicken upward (negative
 omit the field and keep their fog. Rust code building `Fog` with a struct
 literal must add `model` (or use `..Default`-style construction). The
 previous fingerprint was `848a0fe0b5b5bfd9`.
+
+## `2c1cf545aaec7f6f` (2026-11-26) — raster quality and capture magnification
+
+`World.setEnvironment` accepts optional `raster_quality` with
+`samples` (1, 2, 4, or 8), `shadow_map_size` (512–4096, power of two)
+and `anisotropy` (1–16). Omitting it preserves the previous raster defaults.
+`Ui.setCaptureScale` and `ui.set_capture_scale` accept 1, 2, or 4.
+Rust exhaustive matches on `UiCommand` and `AudioRequest` must cover
+`SetCaptureScale` and `SetChannelSpatial`, respectively. Positional
+source playback is opt-in through `AudioParameters.spatial_position`.
+The previous fingerprint was `625a9fe62f18f709`.
+
+## `625a9fe62f18f709` (2026-11-25) — soft additive blending and RGB lightmaps
+
+`AlphaMode.soft_additive` adds screen blending with an alpha-weighted
+source. `ShaderEffect.rgb_lightmap` multiplies the base color by the RGB
+texture in the emissive slot, sampling secondary UVs from `_AUX.xy`.
+Rust callers with exhaustive matches on either enum need a new arm.
+The previous fingerprint was `3832b7ea7ef5e8ae`.
 
 ## `848a0fe0b5b5bfd9` (2026-11-25) — VFX local-plane sprites
 

@@ -37,12 +37,20 @@ fn sd_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let old = vm.types.new_dict();
     py::set(vm, this, "old", old)?;
-    py::set(vm, this, "ever_been_changed", vm.types.new_set(Default::default()))?;
+    py::set(
+        vm,
+        this,
+        "ever_been_changed",
+        vm.types.new_set(Default::default()),
+    )?;
     Ok(Value::None)
 }
 
 fn sd_reduce(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
-    Err(py::error(vm, "Cannot pickle a reference to a store dictionary."))
+    Err(py::error(
+        vm,
+        "Cannot pickle a reference to a store dictionary.",
+    ))
 }
 
 fn dict_method(vm: &mut Vm, this: &Value, name: &str, args: Vec<Value>) -> PyResult<Value> {
@@ -55,7 +63,12 @@ fn dict_method(vm: &mut Vm, this: &Value, name: &str, args: Vec<Value>) -> PyRes
 
 fn sd_reset(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    py::set(vm, this, "ever_been_changed", vm.types.new_set(Default::default()))?;
+    py::set(
+        vm,
+        this,
+        "ever_been_changed",
+        vm.types.new_set(Default::default()),
+    )?;
     dict_method(vm, this, "clear", Vec::new())?;
     py::set(vm, this, "old", vm.types.new_dict())?;
     Ok(Value::None)
@@ -63,7 +76,10 @@ fn sd_reset(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn is_constant(vm: &mut Vm, this: &Value) -> PyResult<bool> {
     let k = py::s(vm, "_constant");
-    match this.obj().filter(|o| matches!(o.payload, crysirror_python::Payload::Dict(_))) {
+    match this
+        .obj()
+        .filter(|o| matches!(o.payload, crysirror_python::Payload::Dict(_)))
+    {
         Some(o) => match ops::dict_get(vm, o, &k)? {
             Some(v) => py::truthy(vm, &v),
             None => Ok(false),
@@ -123,7 +139,9 @@ fn sd_get_changes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let new = copy_dict(vm, this)?;
     let old = py::get(vm, this, "old")?;
     let deleted = py::import_attr(vm, "renpy.rollback", "deleted")?;
-    let Some(rv) = find_changes(vm, &old, &new, &deleted)? else { return Ok(Value::None) };
+    let Some(rv) = find_changes(vm, &old, &new, &deleted)? else {
+        return Ok(Value::None);
+    };
     if cycle {
         py::set(vm, this, "old", new)?;
     }
@@ -199,7 +217,17 @@ pub fn create_store(vm: &mut Vm, name: &str) -> PyResult<()> {
     let b = crysirror_python::import::import_module(vm, "builtins")?;
     py::dict_set(vm, &d, "__builtins__", b)?;
     let minstore = py::import(vm, "renpy.minstore")?;
-    let skip = ["__all__", "__name__", "__doc__", "__package__", "__loader__", "__spec__", "__file__", "__cached__", "__builtins__"];
+    let skip = [
+        "__all__",
+        "__name__",
+        "__doc__",
+        "__package__",
+        "__loader__",
+        "__spec__",
+        "__file__",
+        "__cached__",
+        "__builtins__",
+    ];
     let ms_dict = py::namespace_of(vm, &minstore)?;
     for (k, v) in ops::mapping_items(vm, &ms_dict)? {
         if k.as_str().is_some_and(|k| skip.contains(&k)) || ops::contains(vm, &d, &k)? {
@@ -327,7 +355,10 @@ fn f_make_clean_stores(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 fn backup(vm: &mut Vm) -> PyResult<Value> {
     let b = mget(vm, "clean_store_backup")?;
     if py::is_none(&b) {
-        return Err(py::error(vm, "The stores have no clean backup (make_clean_stores was not called)."));
+        return Err(py::error(
+            vm,
+            "The stores have no clean backup (make_clean_stores was not called).",
+        ));
     }
     Ok(b)
 }
@@ -339,7 +370,14 @@ fn f_clean_stores(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn store_name(vm: &mut Vm, v: &Value) -> PyResult<Value> {
     let n = py::string(vm, v)?;
-    Ok(py::s(vm, &if n.starts_with("store.") || n == "store" { n } else { format!("store.{n}") }))
+    Ok(py::s(
+        vm,
+        &if n.starts_with("store.") || n == "store" {
+            n
+        } else {
+            format!("store.{n}")
+        },
+    ))
 }
 
 fn f_clean_store(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -372,14 +410,28 @@ fn dialect_for(vm: &mut Vm, filename: &str, py: Option<i64>) -> PyResult<Dialect
     Ok(super::state::dialect(vm))
 }
 
-pub fn compile(vm: &mut Vm, source: &str, mode: &'static str, filename: &str, lineno: u32, py: Option<i64>) -> PyResult<Rc<crysirror_python::code::Code>> {
+pub fn compile(
+    vm: &mut Vm,
+    source: &str,
+    mode: &'static str,
+    filename: &str,
+    lineno: u32,
+    py: Option<i64>,
+) -> PyResult<Rc<crysirror_python::code::Code>> {
     let dialect = dialect_for(vm, filename, py)?;
-    let key = (lineno, Rc::<str>::from(filename), Rc::<str>::from(source), mode, dialect as u8);
+    let key = (
+        lineno,
+        Rc::<str>::from(filename),
+        Rc::<str>::from(source),
+        mode,
+        dialect as u8,
+    );
     if let Some(c) = CACHE.with(|c| c.borrow().get(&key).cloned()) {
         return Ok(c);
     }
     let e = PyExpr::new(source, filename.into(), lineno);
-    let c = crate::pycompile::compile(vm, &e, mode, dialect).map_err(|m| vm.syntax_error(crysirror_python::Error::Runtime(m)))?;
+    let c = crate::pycompile::compile(vm, &e, mode, dialect)
+        .map_err(|m| vm.syntax_error(crysirror_python::Error::Runtime(m)))?;
     CACHE.with(|cc| cc.borrow_mut().insert(key, c.clone()));
     Ok(c)
 }
@@ -421,7 +473,11 @@ fn f_py_compile(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         }
     }
     let text = py::string(vm, &source)?;
-    let text = if mode == "eval" { text.trim().to_owned() } else { text };
+    let text = if mode == "eval" {
+        text.trim().to_owned()
+    } else {
+        text
+    };
     let c = compile(vm, &text, mode, &filename, lineno.max(1), pyv)?;
     Ok(vm.types.new_code(c))
 }
@@ -451,7 +507,11 @@ fn f_py_compile_eval_bytecode(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<V
     compile_with(vm, args, kw, "eval")
 }
 
-fn code_of(vm: &mut Vm, v: &Value, mode: &'static str) -> PyResult<Rc<crysirror_python::code::Code>> {
+fn code_of(
+    vm: &mut Vm,
+    v: &Value,
+    mode: &'static str,
+) -> PyResult<Rc<crysirror_python::code::Code>> {
     match v.payload() {
         Some(crysirror_python::Payload::Code(c)) => Ok(c.clone()),
         _ => {
@@ -465,14 +525,33 @@ fn code_of(vm: &mut Vm, v: &Value, mode: &'static str) -> PyResult<Rc<crysirror_
 }
 
 fn globals_of(vm: &mut Vm, g: &Value, store: &str) -> PyResult<ObjRef> {
-    let g = if py::is_none(g) { store_dict(vm, store)? } else { g.clone() };
-    g.obj().cloned().ok_or_else(|| vm.type_error("globals must be a dict"))
+    let g = if py::is_none(g) {
+        store_dict(vm, store)?
+    } else {
+        g.clone()
+    };
+    g.obj()
+        .cloned()
+        .ok_or_else(|| vm.type_error("globals must be a dict"))
 }
 
 /// `py_exec_bytecode(bytecode, hide, globals, locals, store)`.
-pub fn exec_bytecode(vm: &mut Vm, code: Rc<crysirror_python::code::Code>, hide: bool, globals: &Value, locals: &Value, store: &str) -> PyResult<()> {
+pub fn exec_bytecode(
+    vm: &mut Vm,
+    code: Rc<crysirror_python::code::Code>,
+    hide: bool,
+    globals: &Value,
+    locals: &Value,
+    store: &str,
+) -> PyResult<()> {
     let g = globals_of(vm, globals, store)?;
-    let l = if hide { Some(vm.types.new_dict()) } else if py::is_none(locals) { None } else { Some(locals.clone()) };
+    let l = if hide {
+        Some(vm.types.new_dict())
+    } else if py::is_none(locals) {
+        None
+    } else {
+        Some(locals.clone())
+    };
     vm.run_code(code, g, l)?;
     Ok(())
 }
@@ -492,7 +571,11 @@ fn f_py_exec(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let code = code_of(vm, &args[0], "exec")?;
     let hide = py::truthy(vm, &arg_or(args, kw, 1, "hide", Value::Bool(false)))?;
     let store = arg_or(args, kw, 2, "store", Value::None);
-    let g = if py::is_none(&store) { store_dict(vm, "store")? } else { store };
+    let g = if py::is_none(&store) {
+        store_dict(vm, "store")?
+    } else {
+        store
+    };
     let l = if hide { vm.types.new_dict() } else { g.clone() };
     let go = g.obj().cloned().ok_or_else(|| vm.type_error("store"))?;
     vm.run_code(code, go, Some(l))?;
@@ -500,9 +583,18 @@ fn f_py_exec(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 /// `py_eval_bytecode(bytecode, globals, locals)`.
-pub fn eval_bytecode(vm: &mut Vm, code: Rc<crysirror_python::code::Code>, globals: &Value, locals: &Value) -> PyResult<Value> {
+pub fn eval_bytecode(
+    vm: &mut Vm,
+    code: Rc<crysirror_python::code::Code>,
+    globals: &Value,
+    locals: &Value,
+) -> PyResult<Value> {
     let g = globals_of(vm, globals, "store")?;
-    let l = if py::is_none(locals) { None } else { Some(locals.clone()) };
+    let l = if py::is_none(locals) {
+        None
+    } else {
+        Some(locals.clone())
+    };
     vm.run_code(code, g, l)
 }
 
@@ -558,7 +650,14 @@ fn f_quote_eval(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             }
             '\'' | '"' => {
                 let triple = cs.get(i + 1) == Some(&c) && cs.get(i + 2) == Some(&c);
-                let delim: String = if (string.is_none() || string.as_ref().is_some_and(|s| s.len() == 3)) && triple { std::iter::repeat_n(c, 3).collect() } else { c.to_string() };
+                let delim: String = if (string.is_none()
+                    || string.as_ref().is_some_and(|s| s.len() == 3))
+                    && triple
+                {
+                    std::iter::repeat_n(c, 3).collect()
+                } else {
+                    c.to_string()
+                };
                 if string.as_deref() == Some(delim.as_str()) {
                     string = None;
                 } else if string.is_none() {
@@ -629,64 +728,128 @@ fn f_construct_none(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("get_store_module", f_get_store_module),
-        ("begin_stores", f_begin_stores),
-        ("create_store", f_create_store),
-        ("make_clean_stores", f_make_clean_stores),
-        ("clean_stores", f_clean_stores),
-        ("clean_store", f_clean_store),
-        ("reset_store_changes", f_reset_store_changes),
-        ("quote_eval", f_quote_eval),
-        ("py_compile", f_py_compile),
-        ("py_compile_exec_bytecode", f_py_compile_exec_bytecode),
-        ("py_compile_hide_bytecode", f_py_compile_hide_bytecode),
-        ("py_compile_eval_bytecode", f_py_compile_eval_bytecode),
-        ("py_exec_bytecode", f_py_exec_bytecode),
-        ("py_exec", f_py_exec),
-        ("py_eval_bytecode", f_py_eval_bytecode),
-        ("py_eval", f_py_eval),
-        ("store_eval", f_store_eval),
-        ("raise_at_location", f_raise_at_location),
-        ("method_unpickle", f_method_unpickle),
-        ("module_pickle", f_module_pickle),
-        ("module_unpickle", f_module_unpickle),
-        ("construct_None", f_construct_none),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("get_store_module", f_get_store_module),
+            ("begin_stores", f_begin_stores),
+            ("create_store", f_create_store),
+            ("make_clean_stores", f_make_clean_stores),
+            ("clean_stores", f_clean_stores),
+            ("clean_store", f_clean_store),
+            ("reset_store_changes", f_reset_store_changes),
+            ("quote_eval", f_quote_eval),
+            ("py_compile", f_py_compile),
+            ("py_compile_exec_bytecode", f_py_compile_exec_bytecode),
+            ("py_compile_hide_bytecode", f_py_compile_hide_bytecode),
+            ("py_compile_eval_bytecode", f_py_compile_eval_bytecode),
+            ("py_exec_bytecode", f_py_exec_bytecode),
+            ("py_exec", f_py_exec),
+            ("py_eval_bytecode", f_py_eval_bytecode),
+            ("py_eval", f_py_eval),
+            ("store_eval", f_store_eval),
+            ("raise_at_location", f_raise_at_location),
+            ("method_unpickle", f_method_unpickle),
+            ("module_pickle", f_module_pickle),
+            ("module_unpickle", f_module_unpickle),
+            ("construct_None", f_construct_none),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
-    for n in ["CompressedList", "DetRandom", "RevertableDict", "RevertableList", "RevertableObject", "RevertableSet", "RollbackRandom", "revertable_range", "revertable_sorted", "MultiRevertable", "RevertableDefaultDict", "mutator"] {
+    for n in [
+        "CompressedList",
+        "DetRandom",
+        "RevertableDict",
+        "RevertableList",
+        "RevertableObject",
+        "RevertableSet",
+        "RollbackRandom",
+        "revertable_range",
+        "revertable_sorted",
+        "MultiRevertable",
+        "RevertableDefaultDict",
+        "mutator",
+    ] {
         if let Ok(v) = py::import_attr(vm, "renpy.revertable", n) {
             set(vm, n, v);
         }
     }
-    for n in ["deleted", "StoreDeleted", "AlwaysRollback", "NoRollback", "SlottedNoRollback", "rng", "reached", "reached_vars", "Rollback", "RollbackLog"] {
+    for n in [
+        "deleted",
+        "StoreDeleted",
+        "AlwaysRollback",
+        "NoRollback",
+        "SlottedNoRollback",
+        "rng",
+        "reached",
+        "reached_vars",
+        "Rollback",
+        "RollbackLog",
+    ] {
         let v = py::import_attr(vm, "renpy.rollback", n)?;
         set(vm, n, v);
     }
     let obj = Value::Obj(vm.types.object.clone());
-    let sm = py::class(vm, MODULE, "StoreModule", &[obj.clone()], &[("__reduce__", sm_reduce)], &[])?;
+    let sm = py::class(
+        vm,
+        MODULE,
+        "StoreModule",
+        &[obj.clone()],
+        &[("__reduce__", sm_reduce)],
+        &[],
+    )?;
     set(vm, "StoreModule", Value::Obj(sm));
     let dict_t = Value::Obj(vm.types.dict.clone());
-    let sd = py::class(vm, MODULE, "StoreDict", &[dict_t], &[
-        ("__init__", sd_init),
-        ("__reduce__", sd_reduce),
-        ("reset", sd_reset),
-        ("begin", sd_begin),
-        ("get_changes", sd_get_changes),
-    ], &[])?;
+    let sd = py::class(
+        vm,
+        MODULE,
+        "StoreDict",
+        &[dict_t],
+        &[
+            ("__init__", sd_init),
+            ("__reduce__", sd_reduce),
+            ("reset", sd_reset),
+            ("begin", sd_begin),
+            ("get_changes", sd_get_changes),
+        ],
+        &[],
+    )?;
     set(vm, "StoreDict", Value::Obj(sd));
-    let sb = py::class(vm, MODULE, "StoreBackup", &[obj.clone()], &[
-        ("__init__", sb_init),
-        ("backup_one", sb_backup_one),
-        ("restore_one", sb_restore_one),
-        ("restore", sb_restore),
-    ], &[])?;
+    let sb = py::class(
+        vm,
+        MODULE,
+        "StoreBackup",
+        &[obj.clone()],
+        &[
+            ("__init__", sb_init),
+            ("backup_one", sb_backup_one),
+            ("restore_one", sb_restore_one),
+            ("restore", sb_restore),
+        ],
+        &[],
+    )?;
     set(vm, "StoreBackup", Value::Obj(sb));
-    let spx = py::class(vm, MODULE, "StoreProxy", &[obj], &[("__getattr__", spx_getattr), ("__setattr__", spx_setattr), ("__delattr__", spx_delattr)], &[])?;
+    let spx = py::class(
+        vm,
+        MODULE,
+        "StoreProxy",
+        &[obj],
+        &[
+            ("__getattr__", spx_getattr),
+            ("__setattr__", spx_setattr),
+            ("__delattr__", spx_delattr),
+        ],
+        &[],
+    )?;
     set(vm, "StoreProxy", Value::Obj(spx));
     set(vm, "store_dicts", vm.types.new_dict());
     set(vm, "store_modules", vm.types.new_dict());
-    set(vm, "initialized_store_dicts", vm.types.new_set(Default::default()));
+    set(
+        vm,
+        "initialized_store_dicts",
+        vm.types.new_set(Default::default()),
+    );
     set(vm, "clean_store_backup", Value::None);
     set(vm, "file_compiler_flags", vm.types.new_dict());
     set(vm, "py_compile_cache", vm.types.new_dict());

@@ -23,6 +23,7 @@ use wgpu::util::DeviceExt;
 fn vfx_render_and_gpu_sort_sources_are_valid_wgsl() {
     for (name, text) in [
         ("render", crysirror_shaders::wgsl::VFX_RENDER),
+        ("composite", crysirror_shaders::wgsl::VFX_COMPOSITE),
         ("sort", crysirror_shaders::wgsl::VFX_SORT),
         ("cull", crysirror_shaders::wgsl::VFX_CULL),
     ] {
@@ -81,6 +82,7 @@ fn sprite(
         frames,
         fps: 0.,
         soft_distance,
+        triplanar_coverage: None,
         blend,
         facing: FacingMode::Camera,
     }
@@ -186,6 +188,15 @@ fn draw(
     target: &wgpu::TextureView,
     depth: &wgpu::TextureView,
 ) {
+    draw_over(encoder, renderer, target, depth, wgpu::Color::BLACK);
+}
+fn draw_over(
+    encoder: &mut wgpu::CommandEncoder,
+    renderer: &VfxRenderer,
+    target: &wgpu::TextureView,
+    depth: &wgpu::TextureView,
+    background: wgpu::Color,
+) {
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("VFX test draw"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -193,7 +204,7 @@ fn draw(
             resolve_target: None,
             depth_slice: None,
             ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                load: wgpu::LoadOp::Clear(background),
                 store: wgpu::StoreOp::Store,
             },
         })],
@@ -219,6 +230,42 @@ fn artifacts() -> PathBuf {
 }
 
 #[test]
+#[ignore = "requires a real GPU; verifies the particle accumulation and composite passes"]
+fn overlapping_particles_composite_one_coverage_layer() {
+    let g = gpu();
+    let temp = tempfile::tempdir().unwrap();
+    for (name, alpha) in [("white.png", 255), ("coverage.png", 128)] {
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 255, 255, alpha])).save(temp.path().join(name)).unwrap();
+    }
+    let mut assets = Assets::new(temp.path()).unwrap();
+    assets.register(ClientId(1), "").unwrap();
+    let mut render = sprite(Some("white.png".into()), 1, 1, 0., BlendMode::AdditiveCoverageLayer);
+    if let RenderSpec::Sprite { triplanar_coverage, .. } = &mut render {
+        *triplanar_coverage = Some(crysirror_vfx::TriplanarCoverage { texture: "coverage.png".into(), scale: 0.35, scroll: [0., 0.075, 0.] });
+    }
+    let frame = FrameSnapshot { emitters: vec![emitter(1, render, vec![
+        particle(1, [0.; 3], [0.25, 0., 0., 0.5]),
+        particle(2, [0.; 3], [0., 0.25, 0., 0.5]),
+    ])], ..Default::default() };
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let target = texture(&g, "layer output", format, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
+    let depth = texture(&g, "layer depth", wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+    let depth = depth.create_view(&Default::default());
+    let mut renderer = VfxRenderer::new(&g.device, format, 1).unwrap();
+    renderer.begin_frame(&frame_view(), 1).unwrap();
+    renderer.prepare_cpu(&g, &frame, &mut assets, &depth).unwrap();
+    renderer.finish_frame();
+    let mut encoder = g.device.create_command_encoder(&Default::default());
+    depth_clear(&mut encoder, &depth, 1.);
+    renderer.render_coverage_layer(&g.device, &mut encoder, &depth);
+    draw_over(&mut encoder, &renderer, &target.create_view(&Default::default()), &depth, wgpu::Color::BLUE);
+    let out = read(&g, encoder, &target);
+    let center = out.get_pixel(64, 64).0;
+    assert!(center[0].abs_diff(64) <= 1 && center[1].abs_diff(64) <= 1 && center[2].abs_diff(127) <= 1, "two emitting colours, half remaining scene colour: {center:?}");
+    assert_eq!(out.get_pixel(4, 4).0, [0, 0, 255, 255]);
+}
+
+#[test]
 #[ignore = "requires a real GPU; actual texture/mesh/ribbon pixels"]
 fn texture_flipbook_mesh_and_ribbon_are_distinct_renderers() {
     let g = gpu();
@@ -234,13 +281,19 @@ fn texture_flipbook_mesh_and_ribbon_are_distinct_renderers() {
     image.save(temp.path().join("sheet.png")).unwrap();
     let mut assets = Assets::new(temp.path()).unwrap();
     assets.register(ClientId(1), "").unwrap();
+    let mut sheet = sprite(Some("sheet.png".into()), 2, 2, 0., BlendMode::AdditiveColor);
+    if let RenderSpec::Sprite { facing, .. } = &mut sheet {
+        *facing = FacingMode::Local;
+    }
+    let mut card = emitter(1, sheet, vec![Particle {
+        size: [0.8, 0.2],
+        rotation: 3. * std::f32::consts::FRAC_PI_4,
+        ..particle(1, [-0.5, 0.3, 0.], [1., 1., 1., 0.])
+    }]);
+    card.transform = Mat4::from_rotation_z(-std::f32::consts::FRAC_PI_4).to_cols_array_2d();
     let frame = FrameSnapshot {
         emitters: vec![
-            emitter(
-                1,
-                sprite(Some("sheet.png".into()), 2, 2, 0., BlendMode::Alpha),
-                vec![particle(1, [-0.5, 0.3, 0.], [1.; 4])],
-            ),
+            card,
             emitter(
                 2,
                 RenderSpec::Mesh {
@@ -324,6 +377,10 @@ fn texture_flipbook_mesh_and_ribbon_are_distinct_renderers() {
         .filter(|p| p[2] > 180 && p[0] < 30 && p[1] < 30)
         .count();
     assert!(green>300&&orange>300&&blue>400,"real flipbook, mesh and continuous ribbon pixels: green={green} orange={orange} blue={blue}");
+    // Independent RGB addition emits the green frame even with zero
+    // coverage. Its long axis turns upright around (32, 45).
+    assert!(image.get_pixel(32, 62)[1] > 180);
+    assert!(image.get_pixel(50, 45)[1] < 60);
 }
 
 #[test]

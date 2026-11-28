@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
 //! RLD v1 local register overrides and native register arithmetic.
+mod settings2011;
+mod expression2011;
+mod midori_string_db;
+pub(super) use midori_string_db::Command as MidoriStringDb;
+pub(super) use expression2011::Expression;
 use crate::branch::{Condition, number};
-use crate::midori_state::{DbDefinition, DbLookup, SceneDone};
+use crate::midori_state::{DbDefinition, DbLookup, DbWrite};
+#[path = "midori_done.rs"]
+mod midori_done;
+pub(super) use midori_done::DoneFlags;
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -43,6 +51,7 @@ pub(super) enum Value {
     System(i32),
     RelativeSystem(i32),
     Flag(i32),
+    SystemFlag(i32),
     Seen(Bank, i32),
     TextNumber(i32),
 }
@@ -82,6 +91,7 @@ pub(super) enum TextValue {
     Global(i32),
     System(i32),
     Text(i32),
+    MidoriText(i32),
 }
 
 #[derive(Debug, PartialEq)]
@@ -92,10 +102,12 @@ pub(super) enum Change {
         left: Value,
         right: Value,
     },
-    Assign(Value, i32, Value, Condition),
+    Assign(Value, i32, Expression, Condition),
     Action2011 {
         operation: Action2011,
         result: i32,
+        args: [Expression; 4],
+        text: Vec<u8>,
     },
     TextAssign {
         dest: i32,
@@ -107,38 +119,81 @@ pub(super) enum Change {
     Experience(Bank, Vec<i32>),
     MidoriDefineDb(DbDefinition),
     MidoriGetDb(DbLookup),
-    MidoriSceneDone(SceneDone),
+    MidoriSetDb(DbWrite),
+    MidoriStringDb(MidoriStringDb),
+    MidoriDone(DoneFlags),
     LocalFlag(i32, bool),
 }
 #[derive(Debug, PartialEq)]
 pub(super) enum Action2011 {
-    SetLocalFlag7,
-    Text208And209(i32, Vec<u8>),
-    Text206(Vec<u8>),
-    ClearRange { bank: i32, first: i32, last: i32 },
-    SetBits23(i32),
+    Setting(settings2011::Setting),
+    ScriptReturn,
+    ConditionalLocal(i32, Option<bool>),
+    LocalFlag(Option<(i32, i32)>),
+    SystemFlag(Option<(i32, i32)>),
+    RubiFade,
+    Text208And209,
+    Text206,
+    ClearRange,
+    SetBits23,
 }
+// RetouchSystem::createActionTable (RVA 0x1454c0) initializes the 400-slot
+// table to actionDummy before assigning these non-default functions.
+fn assigned_action_2011(n: i32) -> bool {
+    matches!(n, 1..=15 | 31..=34 | 40..=47 | 50..=72 | 95 | 98..=99 |
+        101..=108 | 110..=113 | 119..=123 | 130..=137 | 142..=154 | 158..=227 |
+        250..=266 | 298..=321 | 323..=348 | 350..=352 | 360)
+}
+
 pub(super) fn action2011(raw: &[u8]) -> Result<Change> {
     // cmdAction takes six numeric fields and an unsplit final CP932 string.
     let mut fields = raw.splitn(7, |b| *b == b',');
-    let mut numeric = || number(fields.next().context("missing action field")?);
-    let (code, result) = (numeric()?, numeric()?);
-    let args = [numeric()?, numeric()?, numeric()?, numeric()?];
-    let text = fields.next().context("missing action string")?;
-    let action_text = || if text == b"*" { vec![] } else { text.to_vec() };
+    let mut numeric = || crate::native_numbers::integer2011(fields.next().unwrap_or_default());
+    let (code, result) = (numeric(), numeric());
+    let mut argument = || Expression::parse(fields.next().unwrap_or_default());
+    let args = [argument()?, argument()?, argument()?, argument()?];
+    let text = fields.next().unwrap_or_default();
     let operation = match code {
-        190 => Action2011::SetLocalFlag7,
-        360 => Action2011::Text208And209(args[0], action_text()),
-        262 => Action2011::Text206(action_text()),
-        346 => Action2011::ClearRange {
-            bank: args[0],
-            first: args[1].min(args[2]),
-            last: args[1].max(args[2]),
-        },
-        348 => Action2011::SetBits23(args[0]),
-        _ => bail!("unsupported ExHibit 2011 action {code}"),
+        // cmdAction passes a null selection view. These handlers either return
+        // immediately or gate their entire body on that pointer. Dialog/control
+        // dispatch supplies a real view and must use its own implementation.
+        50 | 52..=55 | 57..=67 | 70..=72 => Action2011::ScriptReturn,
+        152 => Action2011::ConditionalLocal(6, None),
+        154 => Action2011::SystemFlag(Some((2, -1))),
+        171..=178 | 198 | 199 => {
+            let bit = match code { 171 | 172 => 0, 173 | 174 => 2, 175 | 176 => 3,
+                177 | 178 => 4, _ => 6 };
+            Action2011::ConditionalLocal(bit, Some(matches!(code, 171 | 173 | 175 | 178 | 198)))
+        }
+        186 | 187 => Action2011::SystemFlag(Some((1, i32::from(code == 187)))),
+        188..=191 => Action2011::LocalFlag(Some((if code < 190 { 3 } else { 7 }, i32::from(code % 2 == 0)))),
+        340 => Action2011::LocalFlag(None),
+        341 => Action2011::SystemFlag(None),
+        342 => Action2011::RubiFade,
+        360 => Action2011::Text208And209,
+        262 => Action2011::Text206,
+        346 => Action2011::ClearRange,
+        348 => Action2011::SetBits23,
+        // For category 1/2 million calls RetouchSystem::action requires flag
+        // bit 0, absent in the script envelope (0x80). Other out-of-table
+        // values also return 4096. No disk/host dispatch is involved.
+        _ if !assigned_action_2011(code) => Action2011::ScriptReturn,
+        _ => Action2011::Setting(settings2011::Setting::for_selector(code)
+            .with_context(|| format!("unsupported ExHibit 2011 action {code}"))?),
     };
-    Ok(Change::Action2011 { operation, result })
+    Ok(Change::Action2011 { operation, result, args, text: if text == b"*" { Vec::new() } else { text.to_vec() } })
+}
+
+pub(super) fn db_operand(raw: &[u8]) -> Result<Expression> {
+    Expression::parse(raw)
+}
+
+pub(super) fn service_flag2011(bit: i32, enabled: bool) -> Change {
+    Change::Action2011 {
+        operation: Action2011::SystemFlag(Some((bit, i32::from(enabled)))),
+        args: std::array::from_fn(|_| Expression::Scalar(expression2011::Operand::immediate(0))),
+        text: Vec::new(), result: -1,
+    }
 }
 
 /// Detached native system-register image. Every absent cell in the
@@ -179,10 +234,43 @@ pub(super) struct Registers {
     seen: [BTreeMap<i32, i32>; 3],
     strings: BTreeMap<i32, Vec<u8>>,
     local_flag: bool,
+    saved_flag2: Option<bool>,
     messages: BTreeMap<usize, u32>,
     integer_tables: [BTreeMap<i32, [i32; 8]>; 8],
+    string_tables: [midori_string_db::Table; 8],
+    windows_version: Option<[u8; 3]>,
 }
 impl Registers {
+    pub fn set_windows_version(&mut self, version: Option<[u8; 3]>) {
+        self.windows_version = version;
+    }
+
+    pub fn for_transfer(&self) -> Self {
+        Self {
+            limits: self.limits,
+            normal: self.normal.clone(),
+            local: self.local.clone(),
+            sys: self.sys.clone(),
+            seen: self.seen.clone(),
+            strings: self.strings.clone(),
+            local_flag: self.local_flag,
+            saved_flag2: self.saved_flag2,
+            messages: self.messages.clone(),
+            windows_version: self.windows_version,
+            ..Self::default()
+        }
+    }
+
+    pub fn commit_transfer(&mut self, mut next: Self) {
+        std::mem::swap(&mut self.integer_tables, &mut next.integer_tables);
+        std::mem::swap(&mut self.string_tables, &mut next.string_tables);
+        *self = next;
+    }
+
+    pub fn clear_transfer_memo(&mut self) {
+        self.strings.remove(&206);
+    }
+
     pub fn new(limits: Option<Limits>) -> Result<Self> {
         if let Some(l) = limits {
             ensure!(
@@ -364,6 +452,28 @@ impl Registers {
         self.mark_message_in(id, count);
         Ok(())
     }
+
+    pub fn checkpoint_v3(&mut self, block: i32, title: Vec<u8>, skip: Option<bool>,
+        capture: crate::midori_checkpoint::Capture) -> Result<()> {
+        let l = self.limits.context("missing ExHibit v3 checkpoint limits")?;
+        let crate::midori_checkpoint::Capture { before_flush, after_flush, mut texts } = capture;
+        texts.push((1, title));
+        ensure!(l.regs >= 148 && texts.iter().all(|(slot, _)| (*slot as usize) < l.strings),
+            "ExHibit v3 checkpoint registers are out of range");
+        let experience = self.capture_experience()?;
+        self.local.insert(2, block);
+        self.normal.extend(before_flush);
+        if let Some(skip) = skip {
+            self.normal.insert(6, i32::from(skip));
+        }
+        self.strings.extend(texts);
+        for (index, value) in std::mem::take(&mut self.local) {
+            self.normal.insert(Self::index(index, l.regs), value);
+        }
+        self.normal.extend(after_flush);
+        experience.apply(&mut self.sys);
+        Ok(())
+    }
     fn mark_message_in(&mut self, id: i32, count: usize) {
         if (id as usize) < count {
             *self.messages.entry(id as usize / 32).or_default() |= 1u32 << ((id as usize % 32) ^ 7);
@@ -384,6 +494,10 @@ impl Registers {
         self.normal.insert(Self::index(index, l.regs), n);
         Ok(())
     }
+    pub fn read_normal(&self, index: i32) -> Result<i32> {
+        let l = self.limits.context("missing ExHibit register configuration")?;
+        Ok(self.normal.get(&Self::index(index, l.regs)).copied().unwrap_or(0))
+    }
     pub fn set_local(&mut self, index: i32, n: i32) -> Result<()> {
         let limits = self
             .limits
@@ -396,6 +510,33 @@ impl Registers {
             .limits
             .context("missing ExHibit register configuration")?;
         self.sys.insert(Self::index(index, l.sys), n);
+        Ok(())
+    }
+    pub fn load_system_bank(&mut self, words: Vec<i32>) -> Result<()> {
+        let limits = self.limits.context("missing ExHibit register configuration")?;
+        ensure!(words.len() == limits.sys, "invalid ExHibit system register count");
+        let base = usize::try_from(*words.get(16).context("missing ExHibit system history base")?)?;
+        let counts = [limits.cg, limits.scene, limits.sound, limits.messages.max(1).div_ceil(32)];
+        let end = base.checked_add(4 + counts.iter().sum::<usize>())
+            .filter(|&end| end <= words.len())
+            .context("invalid ExHibit system history span")?;
+        let header = &words[base..base + 4];
+        ensure!(header == [0; 4] || header == counts.map(|count| count as i32),
+            "unexpected ExHibit system history dimensions");
+        if header != [0; 4] {
+            let mut at = base + 4;
+            for (bank, count) in self.seen.iter_mut().zip(counts) {
+                *bank = words[at..at + count].iter().copied().enumerate()
+                    .filter(|&(_, value)| value != 0)
+                    .map(|(index, value)| (index as i32, value)).collect();
+                at += count;
+            }
+            self.messages = words[at..end].iter().copied().enumerate()
+                .filter(|&(_, value)| value != 0)
+                .map(|(index, value)| (index, value as u32)).collect();
+        }
+        self.sys = words.into_iter().enumerate().filter(|&(_, value)| value != 0)
+            .map(|(index, value)| (index as i32, value)).collect();
         Ok(())
     }
     // FCRegItem returns element zero for an invalid ordinary/system index.
@@ -433,18 +574,24 @@ impl Registers {
             _ => {}
         }
     }
-    /// Midori liteLoad (0xc5d50) publishes the caller's successful logical
+    /// Both liteLoad implementations (v1 RVA 0x5f180 and 2011 RVA 0xc5d50) publish the successful logical
     /// RLD path, not the joined host/prefix path and not the script stem.
-    pub fn midori_scenario_loaded(&mut self, path: &crysirror_core::path::VfsPath) -> Result<()> {
+    pub fn scenario_loaded(&mut self, path: &crysirror_core::path::VfsPath) -> Result<()> {
         let Some(_) = self.limits else { return Ok(()) };
         self.text(2)?;
         let name = path.relative();
         ensure!(
             path.mount() == crysirror_core::path::Mount::Asset
                 && name.starts_with("rld/") && name.ends_with(".rld"),
-            "invalid Midori scenario register path"
+            "invalid ExHibit scenario register path"
         );
         let native = name.bytes().map(|b| if b == b'/' { b'\\' } else { b }).collect();
+        self.scenario_loaded_native(native)
+    }
+
+    pub fn scenario_loaded_native(&mut self, native: Vec<u8>) -> Result<()> {
+        if self.limits.is_none() { return Ok(()) }
+        self.text(2)?;
         self.strings.insert(2, native);
         Ok(())
     }
@@ -541,6 +688,9 @@ impl Registers {
                 .unwrap_or(0),
             Value::System(i) => self.sys.get(&Self::index(i, l.sys)).copied().unwrap_or(0),
             Value::RelativeSystem(i) => self.read(Value::System(self.relative(i, l)))?,
+            Value::SystemFlag(i) => {
+                i32::from(self.read(Value::System(23))? & (1_i32 << (i & 31)) != 0)
+            }
             Value::Flag(i) => {
                 i32::from(self.read(Value::RelativeSystem(1_000_004))? & (1i32 << (i & 31)) != 0)
             }
@@ -558,22 +708,58 @@ impl Registers {
             }
         })
     }
+    fn set_local_flag2011(&mut self, bit: i32, enabled: bool, limits: Limits) -> Result<()> {
+        if (0..32).contains(&bit) {
+            let slot = self.read(Value::System(15))?.wrapping_add(4);
+            let old = self.read(Value::System(slot))?;
+            self.store(Value::System(slot), if enabled { old | (1 << bit) } else { old & !(1 << bit) }, limits);
+            if slot == 3 { self.local_flag = enabled; }
+        }
+        Ok(())
+    }
     pub fn change(&mut self, c: Change) -> Result<()> {
         let l = self
             .limits
             .context("missing ExHibit register configuration")?;
         match c {
-            Change::Action2011 { operation, result } => {
+            Change::Action2011 { operation, result, args, text } => {
+                let [a, b, c, d] = args;
+                let args = [a.eval(self)?, b.eval(self)?, c.eval(self)?, d.eval(self)?];
+                let mut returned = 0;
                 match operation {
-                    Action2011::SetLocalFlag7 => {
-                        let slot = self.read(Value::System(15))?.wrapping_add(4);
-                        let flags = self.read(Value::System(slot))? | 0x80;
-                        self.store(Value::System(slot), flags, l);
-                        if slot == 3 {
-                            self.local_flag = true;
+                    Action2011::Setting(setting) => returned = setting.apply(self, l, args, text)?,
+                    Action2011::ScriptReturn => {}
+                    Action2011::ConditionalLocal(bit, desired) => {
+                        let old = self.read(Value::Flag(bit))? != 0;
+                        let enabled = desired.unwrap_or(!old);
+                        if old != enabled {
+                            self.set_local_flag2011(bit, enabled, l)?;
                         }
                     }
-                    Action2011::Text208And209(mode, bytes) => {
+                    Action2011::LocalFlag(fixed) => {
+                        let (bit, value) = fixed.unwrap_or((args[0], args[1]));
+                        self.set_local_flag2011(bit, value != 0, l)?;
+                    }
+                    Action2011::SystemFlag(fixed) => {
+                        let (bit, value) = fixed.unwrap_or((args[0], args[1]));
+                        if (0..32).contains(&bit) {
+                            let old = self.read(Value::System(23))?;
+                            let mask = 1 << bit;
+                            let flags = match value {
+                                -1 => old ^ mask,
+                                0 => old & !mask,
+                                _ => old | mask,
+                            };
+                            self.store(Value::System(23), flags, l);
+                        }
+                    }
+                    Action2011::RubiFade => {
+                        let low = args[0] & 15;
+                        let old = self.read(Value::System(42))?;
+                        self.store(Value::System(42), (old & !15) | 16 | low, l);
+                    }
+                    Action2011::Text208And209 => {
+                        let mode = args[0];
                         ensure!(
                             208 < l.strings && (!matches!(mode, 0 | 1) || 209 < l.strings),
                             "missing native action text registers"
@@ -588,20 +774,23 @@ impl Registers {
                             if mode == 0 {
                                 self.strings.remove(&209);
                             } else {
-                                self.strings.insert(209, bytes);
+                                self.strings.insert(209, text);
                             }
                         }
                         self.strings.remove(&208);
                     }
-                    Action2011::Text206(bytes) => {
+                    Action2011::Text206 => {
                         ensure!(206 < l.strings, "missing native text register 206");
-                        self.strings.insert(206, bytes);
+                        self.strings.insert(206, text);
                     }
-                    Action2011::SetBits23(value) => {
+                    Action2011::SetBits23 => {
+                        let value = args[0];
                         let old = self.read(Value::System(23))?;
                         self.store(Value::System(23), (old & !0x700) | ((value & 7) << 8), l);
                     }
-                    Action2011::ClearRange { bank, first, last } => {
+                    Action2011::ClearRange => {
+                        let [bank, a, b, _] = args;
+                        let (first, last) = (a.min(b), a.max(b));
                         ensure!(
                             i64::from(last) - i64::from(first) < 1_000_000,
                             "native register range exceeds budget"
@@ -630,7 +819,7 @@ impl Registers {
                     }
                 }
                 if result >= 0 {
-                    self.store(Value::Local(result), 0, l);
+                    self.store(Value::Local(result), returned, l);
                 }
             }
             Change::Arithmetic {
@@ -659,7 +848,7 @@ impl Registers {
             Change::Assign(to, op, rhs, when) => {
                 if when.matches(self)? {
                     let a = self.read(to)?;
-                    let b = self.read(rhs)?;
+                    let b = rhs.eval(self)?;
                     let n = match op {
                         0 => b,
                         1 => a.wrapping_add(b),
@@ -699,6 +888,9 @@ impl Registers {
                         .into_bytes(),
                     TextValue::System(i) => self.read(Value::System(i))?.to_string().into_bytes(),
                     TextValue::Text(i) => self.text(i)?.to_vec(),
+                    // FCStrReg::item (2011 RVA 0x1707f0) uses entry zero
+                    // as the returned string when an index is out of range.
+                    TextValue::MidoriText(i) => self.text(Self::index(i, l.strings))?.to_vec(),
                 };
                 let mut bytes = Vec::new();
                 let mut append = |s: &[u8]| -> Result<()> {
@@ -763,21 +955,37 @@ impl Registers {
             }
             Change::MidoriDefineDb(definition) => {
                 // This map belongs to RetouchSystem, not SaveDataControl.
-                self.integer_tables[definition.table] = definition.rows;
+                if let Some(table) = self.integer_tables.get_mut(definition.table as usize) {
+                    *table = definition.rows;
+                }
             }
             Change::MidoriGetDb(lookup) => {
-                let key = self.read(lookup.key)?;
-                if let Some(row) = self.integer_tables[lookup.table].get(&key).copied() {
+                let key = lookup.key.eval(self)?;
+                if let Some(row) = self.integer_tables.get(lookup.table as usize)
+                    .and_then(|table| table.get(&key)).copied() {
                     for (col, register) in lookup.outputs {
                         let value = row.get(col as usize).copied().unwrap_or(0);
                         self.store(Value::Local(register), value, l);
                     }
                 }
             }
-            Change::MidoriSceneDone(SceneDone(id)) => {
-                self.increment_experience(Bank::Scene, id, l.scene);
-                self.mark_message_in(id, l.messages);
+            Change::MidoriStringDb(command) => command.apply(self)?,
+            Change::MidoriSetDb(write) => {
+                let key = write.key.eval(self)?;
+                let mut pairs = [(0, 0); 8];
+                for (pair, (column, expr)) in pairs.iter_mut().zip(write.values) {
+                    *pair = (column, expr.eval(self)?);
+                }
+                if let Some(row) = self.integer_tables.get_mut(write.table as usize)
+                    .and_then(|table| table.get_mut(&key)) {
+                    for (column, value) in pairs.into_iter().take_while(|(column, _)| *column >= 0) {
+                        if let Some(cell) = row.get_mut(column as usize) {
+                            *cell = value;
+                        }
+                    }
+                }
             }
+            Change::MidoriDone(flags) => flags.apply(self)?,
             Change::LocalFlag(i, set) => {
                 if (0..32).contains(&i) {
                     let base = self.read(Value::System(15))?.wrapping_add(4);
@@ -799,47 +1007,72 @@ pub(super) fn syscall(raw: &[u8]) -> Result<crate::Action> {
     // cmdExHIBIT splits the first three numeric fields, then gives the rest
     // of the comma-delimited line to the selected native operation.
     let mut fields = raw.splitn(4, |b| *b == b',');
-    let mut number = || -> Result<i32> {
-        let bytes = fields.next().context("missing ExHibit syscall argument")?;
-        Ok(std::str::from_utf8(bytes)?.trim().parse()?)
-    };
-    let code = number()?;
-    let _result_register = number()?;
-    let count = number()?;
+    let mut next_integer = || crate::native_numbers::integer(fields.next().unwrap_or_default());
+    let code = next_integer();
+    let _result_register = next_integer();
+    let count = next_integer();
     let tail = fields.next().unwrap_or_default();
+    if matches!(code, 0 | 1) {
+        // liteLoadTitle selects entry name 1, liteLoadExit selects 0.
+        return Ok(crate::Action::LoadV1Entry(usize::from(code == 0)));
+    }
+    if code == 30 {
+        return Ok(crate::Action::EntryNameV1(
+            crate::v1_services::Entry::parse(count, tail)?,
+        ));
+    }
+    if code == 36 {
+        let mut fields = tail.split(|b| *b == b',');
+        let words = std::array::from_fn(|_| {
+            crate::native_numbers::integer(fields.next().unwrap_or_default())
+        });
+        return Ok(crate::Action::PlaceLoadPage(words));
+    }
+    if code == 41 {
+        let args = crate::v1_services::args(tail, count, false)?;
+        let [group, layer, first, last] =
+            std::array::from_fn(|i| crate::native_numbers::integer(args[i]));
+        return Ok(crate::Action::RemoveItems(group, layer, first, last));
+    }
+    if code == 40 {
+        return Ok(crate::Action::ExperienceGate(
+            crate::v1_services::ExperienceGate::parse(count, tail)?,
+        ));
+    }
     if (code, count) == (26, 4) {
         return Ok(crate::Action::Billboard(
             crate::billboard::Billboard::parse(tail)?,
         ));
     }
-    let mut fields = tail.split(|b| *b == b',');
-    let mut number =
-        || super::branch::number(fields.next().context("missing ExHibit syscall argument")?);
-    let change = match (code, count) {
-        (27, 0) => return Ok(crate::Action::CancelSkip),
-        (28, 0) => return Ok(crate::Action::CancelAuto),
-        (29, 2) => return Ok(crate::Action::DisableButton(number()?, number()?)),
-        (37, 1) => return Ok(crate::Action::QuerySlots(number()?)),
-        (33, 1) => Change::Experience(Bank::Cg, vec![number()?]),
-        (38, 2) => Change::LocalFlag(number()?, number()? != 0),
-        (39, 3) => {
-            let kind = number()?;
-            let _declared = number()?;
-            let list = fields.next().context("missing experience IDs")?;
-            let bank = match kind {
+    match code {
+        27 => return Ok(crate::Action::CancelSkip),
+        28 => return Ok(crate::Action::CancelAuto),
+        37 => return Ok(crate::Action::QuerySlots(crate::native_numbers::integer(tail))),
+        29 | 33 | 35 | 38 | 39 | 42 => {}
+        _ => bail!("unsupported ExHibit native call {code} ({count} arguments)"),
+    }
+    let fields = crate::v1_services::args(tail, count, false)?;
+    let n = |i: usize| crate::native_numbers::integer(fields[i]);
+    let change = match code {
+        29 => return Ok(crate::Action::DisableButton(n(0), n(1))),
+        35 => return Ok(crate::Action::PrepareV1Effect(n(0), n(1))),
+        42 if n(0) == 3 => return Ok(crate::Action::V1GalleryMovies(crate::movie::Gallery::new(fields[1]))),
+        42 => bail!("unsupported ExHibit v1 gallery operation {}", n(0)),
+        33 => Change::Experience(Bank::Cg, vec![n(0)]),
+        38 => Change::LocalFlag(n(0), n(1) != 0),
+        39 => {
+            let bank = match n(0) {
                 0 => Bank::Cg,
                 1 => Bank::Sound,
                 2 => Bank::Scene,
-                _ => bail!("unknown experience kind {kind}"),
+                // 0x695ed iterates the tokens with no bank update for other selectors.
+                _ => return Ok(crate::Action::IgnoredExperienceBank),
             };
-            let ids = list
-                .split(|b| *b == b'.')
-                .filter(|s| !s.is_empty())
-                .map(crate::branch::number)
-                .collect::<Result<Vec<_>>>()?;
+            let ids = fields[2].split(|b| *b == b'.').filter(|s| !s.is_empty())
+                .map(crate::native_numbers::integer).collect();
             Change::Experience(bank, ids)
         }
-        _ => bail!("unsupported ExHibit native call {code} ({count} arguments)"),
+        _ => unreachable!(),
     };
     Ok(crate::Action::Change(change))
 }
@@ -850,8 +1083,11 @@ pub(super) fn assignment(op: u16, raw: &[u8]) -> Result<Change> {
 pub(super) fn assignment_for_abi(op: u16, raw: &[u8], abi: u32) -> Result<Change> {
     let f: Vec<_> = raw.splitn(6, |b| *b == b',').collect();
     ensure!(f.len() == 6, "invalid ExHibit register assignment");
-    let index = number(f[1])?;
-    let mode = number(f[2])?;
+    let integer = |field: &[u8]| {
+        if abi == 3 { Ok(crate::native_numbers::integer2011(field)) } else { number(field) }
+    };
+    let index = integer(f[1])?;
+    let mode = integer(f[2])?;
     let text = f[3];
     let condition = Condition::for_abi(if f[4].is_empty() { b"*" } else { f[4] }, abi)?;
     if op == 10 {
@@ -898,7 +1134,7 @@ pub(super) fn assignment_for_abi(op: u16, raw: &[u8], abi: u32) -> Result<Change
         return Ok(Change::Assign(
             to,
             mode,
-            Value::expression(text)?,
+            Expression::parse(text)?,
             condition,
         ));
     }
@@ -908,12 +1144,38 @@ pub(super) fn assignment_for_abi(op: u16, raw: &[u8], abi: u32) -> Result<Change
         Some((b'T', id)) => Value::TextNumber(number(id)?),
         _ => Value::Immediate(number(text)?),
     };
-    Ok(Change::Assign(to, mode, rhs, condition))
+    Ok(Change::Assign(to, mode, rhs.into(), condition))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn v1_services_use_native_numeric_prefixes_and_respect_declared_arguments() -> Result<()> {
+        let mut regs = crate::native_state_tests::fresh(1)?;
+        regs.set_local(9, 77)?;
+        regs.set_system(15, 16)?;
+        regs.set_system(20, 0x20)?;
+        for raw in [
+            b"0x21suffix,9,1,0x3zzz,5".as_slice(),
+            b"39,9,3,0,888,...3tail..0x3..",
+            b"38,9,2,0x2,5after",
+        ] {
+            let crate::Action::Change(change) = syscall(raw)? else { panic!("expected state operation") };
+            regs.change(change)?;
+        }
+        assert_eq!(regs.seen[Bank::Cg as usize].get(&3), Some(&3));
+        assert_eq!(regs.read(Value::System(20))?, 0x24);
+        assert_eq!(regs.read(Value::Local(9))?, 77);
+        let crate::Action::Change(change) = syscall(b"38,9,1,2,1")? else { panic!("scope bit") };
+        regs.change(change)?;
+        assert_eq!(regs.read(Value::System(20))?, 0x20);
+        assert!(matches!(syscall(b"39,9,3,9,0,3")?, crate::Action::IgnoredExperienceBank));
+        assert!(matches!(syscall(b"37,-1,0,0x3trailing")?, crate::Action::QuerySlots(3)));
+        assert!(matches!(syscall(b"28,-1,999,ignored")?, crate::Action::CancelAuto));
+        assert!(matches!(syscall(b"27,-1,999,ignored")?, crate::Action::CancelSkip));
+        Ok(())
+    }
     #[test]
     fn action_calls_preserve_raw_text_result_and_unrelated_flag_bits() -> Result<()> {
         let mut regs = Registers::new(Some(Limits {
@@ -1011,7 +1273,7 @@ fn midori_literal_scene_done_updates_two_banks_independently() -> Result<()> {
     assert!(regs.seen[Bank::Cg as usize].is_empty());
     assert!(regs.seen[Bank::Sound as usize].is_empty());
     regs.seen[Bank::Scene as usize].insert(3, 0x7fff_ff00);
-    regs.change(Change::MidoriSceneDone(SceneDone(3)))?;
+    regs.change(Change::MidoriDone(DoneFlags::parse(b"2,1,3")))?;
     assert_eq!(regs.seen[Bank::Scene as usize][&3], 0x7fff_ff00);
     assert_eq!(regs.messages[&0], 0x4010);
     Ok(())

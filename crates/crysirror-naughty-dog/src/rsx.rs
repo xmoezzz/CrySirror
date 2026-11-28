@@ -112,6 +112,73 @@ pub fn pass_program(p: &Loaded, data: usize) -> Result<Vec<Instruction>> {
     Ok(decode(p.data.get(fp + code..fp + size).context("ND fragment program outside package")?))
 }
 
+/// Material texture indices for the two specular masks of the recovered
+/// dual-Blinn normal/lighting program. Match both complete instruction
+/// streams: FP 0x0310/0x0380 depends on the VP's two half-vector inputs.
+/// Shader indices are package-local and reused by unrelated programs.
+pub(crate) fn blinn_mask_slots(p: &Loaded, data: usize, normal_pass: usize) -> Result<Option<[u8; 2]>> {
+    let table = p.directory.items.iter().find(|i| i.kind == "MATERIAL_TABLE_1").context("ND material table")?.payload_offset as usize;
+    let shader = usize::from(p.u16(data)?);
+    ensure!(shader < p.u32(table + 8)? as usize, "ND shader index");
+    let row = p.ptr(table + 0x1c)? + shader * 16;
+    let vp = p.ptr(row + 8)?;
+    let fp = p.ptr(row + 12)?;
+    let vp_len = usize::from(p.u16(vp)?) * 16;
+    let fp_offset = p.u32(fp + 0x10)? as usize;
+    if vp_len != 848 || (p.u32(fp)? as usize).checked_sub(fp_offset) != Some(1344) {
+        return Ok(None);
+    }
+    let fingerprint = |base: usize, offset: usize, len: usize| -> Option<u64> {
+        let start = base.checked_add(offset)?;
+        Some(p.data.get(start..start.checked_add(len)?)?.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)))
+    };
+    if fingerprint(vp, p.u32(vp + 0x10)? as usize, vp_len) != Some(0xfba7_dc1f_939b_c357)
+        || fingerprint(fp, fp_offset, 1344) != Some(0xcd6f_fb46_c73c_4920)
+    {
+        return Ok(None);
+    }
+    // The normal prepass reconstructs Z from the texture's red and green
+    // channels, including for BC1, and feeds the main pass's world normal.
+    let normal_shader = usize::from(p.u16(normal_pass)?);
+    if normal_shader >= p.u32(table + 8)? as usize || p.u16(normal_pass + 0xc)? != 1 {
+        return Ok(None);
+    }
+    let normal_fp = p.ptr(p.ptr(table + 0x1c)? + normal_shader * 16 + 12)?;
+    let offset = p.u32(normal_fp + 0x10)? as usize;
+    if (p.u32(normal_fp)? as usize).checked_sub(offset) != Some(384)
+        || fingerprint(normal_fp, offset, 384) != Some(0xcaa6_8acd_d135_bc06)
+    {
+        return Ok(None);
+    }
+    let normal_rows = p.ptr(normal_pass + 0x14)?;
+    let normal_count = usize::from(p.u16(normal_pass + 0xa)?);
+    ensure!(normal_count <= 256, "ND normal binding count");
+    let mut bound_normal = false;
+    for r in 0..normal_count {
+        let at = normal_rows + 16 * r;
+        if p.u16(at)? == 1 && p.u16(at + 6)? == 0x0202 {
+            bound_normal = p.u32(at + 12)? == 0;
+        }
+    }
+    if !bound_normal {
+        return Ok(None);
+    }
+    let mut slots = [None; 2];
+    let rows = p.ptr(data + 0x14)?;
+    let count = p.u16(data + 0xa)?;
+    ensure!(count <= 256, "ND shader binding count");
+    for r in 0..usize::from(count) {
+        let at = rows + 16 * r;
+        let unit = p.u16(at)?;
+        if p.u16(at + 6)? == 0x0202 && (4..=5).contains(&unit) {
+            // +12 selects the material sampler. Both texture units may
+            // reference one image, even when the table has another entry.
+            slots[usize::from(unit - 4)] = Some(u8::try_from(p.u32(at + 12)?)?);
+        }
+    }
+    Ok(slots[0].zip(slots[1]).map(|(a, b)| [a, b]))
+}
+
 /// The upper layer of a two-layer blend.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Top {

@@ -72,7 +72,13 @@ pub(crate) fn start_before_hiring(s: &mut TjsState) -> Result<()> {
     // FacilityManager.UpdateNextDay has no pending orders on a new game.
     s.retail.business_name = initial_business;
     s.retail.peak_facilities = fixed.len();
-    s.retail.facilities = fixed.iter().map(|&type_id| facility::Facility { type_id, ..Default::default() }).collect();
+    s.retail.facility_build_counts = fixed.iter().map(|&id| (id, 1)).collect();
+    s.retail.native_facility_records = None;
+    s.retail.facilities = fixed.iter().map(|&type_id| facility::Facility {
+        type_id,
+        costume: wardrobe::Wardrobe { guid: s.guid(), ..Default::default() },
+        ..Default::default()
+    }).collect();
     s.retail.buildings = Some(fixed);
     for (&id, &enabled) in entries.iter() {
         if enabled {

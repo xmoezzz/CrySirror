@@ -84,7 +84,9 @@ fn not_implemented(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn barvalue_get_style(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
-    Ok(vm.types.new_tuple(vec![vm.types.new_str("bar"), vm.types.new_str("vbar")]))
+    Ok(vm
+        .types
+        .new_tuple(vec![vm.types.new_str("bar"), vm.types.new_str("vbar")]))
 }
 
 // Addables ---------------------------------------------------------------------------------------------
@@ -98,7 +100,13 @@ fn layer_add(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let name = py::get(vm, &args[0], "name")?;
     let key = arg_or(args, kw, 2, "key", Value::None);
     let sl = scene_lists(vm, Some(-1))?;
-    py::method_kw(vm, &sl, "add", vec![name, args[1].clone()], vec![("key".into(), key)])?;
+    py::method_kw(
+        vm,
+        &sl,
+        "add",
+        vec![name, args[1].clone()],
+        vec![("key".into(), key)],
+    )?;
     Ok(Value::None)
 }
 
@@ -109,7 +117,10 @@ fn layer_close(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if ops::truthy(vm, &d)? && !ops::eq(vm, &d, &name)? {
         let n = ops::repr(vm, &name)?;
         let dr = ops::repr(vm, &d)?;
-        return Err(py::error(vm, format!("ui.close closed layer {n}, not the expected {dr}.")));
+        return Err(py::error(
+            vm,
+            format!("ui.close closed layer {n}, not the expected {dr}."),
+        ));
     }
     Ok(Value::None)
 }
@@ -120,15 +131,25 @@ fn layer_get_layer(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn addable_get_layer(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     // Upstream returns (does not raise) this exception object.
-    let e = vm.types.new_str("Operation can only be performed on a layer.");
+    let e = vm
+        .types
+        .new_str("Operation can only be performed on a layer.");
     let b = Value::Obj(vm.builtins_module.clone());
     let exc = py::get(vm, &b, "Exception")?;
     vm.call(&exc, vec![e], Vec::new())
 }
 
 fn many_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    for (i, n) in ["displayable", "imagemap", "style_prefix"].iter().enumerate() {
-        py::set(vm, &args[0], n, args.get(i + 1).cloned().unwrap_or(Value::None))?;
+    for (i, n) in ["displayable", "imagemap", "style_prefix"]
+        .iter()
+        .enumerate()
+    {
+        py::set(
+            vm,
+            &args[0],
+            n,
+            args.get(i + 1).cloned().unwrap_or(Value::None),
+        )?;
     }
     Ok(Value::None)
 }
@@ -154,14 +175,22 @@ fn many_close(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if ops::truthy(vm, &d)? && !ops::eq(vm, &d, &disp)? {
         let a = ops::repr(vm, &disp)?;
         let b = ops::repr(vm, &d)?;
-        return Err(py::error(vm, format!("ui.close closed {a}, not the expected {b}.")));
+        return Err(py::error(
+            vm,
+            format!("ui.close closed {a}, not the expected {b}."),
+        ));
     }
     Ok(Value::None)
 }
 
 fn one_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     py::set(vm, &args[0], "displayable", args[1].clone())?;
-    py::set(vm, &args[0], "style_prefix", args.get(2).cloned().unwrap_or(Value::None))?;
+    py::set(
+        vm,
+        &args[0],
+        "style_prefix",
+        args.get(2).cloned().unwrap_or(Value::None),
+    )?;
     Ok(Value::None)
 }
 
@@ -178,7 +207,12 @@ fn one_close(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn prefix_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    py::set(vm, &args[0], "style_prefix", args.get(1).cloned().unwrap_or(Value::None))?;
+    py::set(
+        vm,
+        &args[0],
+        "style_prefix",
+        args.get(1).cloned().unwrap_or(Value::None),
+    )?;
     Ok(Value::None)
 }
 
@@ -194,7 +228,12 @@ fn detached_close(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn cof_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     py::set(vm, &args[0], "queue", vm.types.new_list(Vec::new()))?;
-    py::set(vm, &args[0], "style_prefix", args.get(1).cloned().unwrap_or(Value::None))?;
+    py::set(
+        vm,
+        &args[0],
+        "style_prefix",
+        args.get(1).cloned().unwrap_or(Value::None),
+    )?;
     Ok(Value::None)
 }
 
@@ -246,7 +285,11 @@ fn f_reset(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 fn f_interact(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let ty = arg_or(args, kw, 0, "type", vm.types.new_str("misc"));
     let roll_forward = py::kw(kw, "roll_forward").cloned().unwrap_or(Value::None);
-    let rest: Vec<(Rc<str>, Value)> = kw.iter().filter(|(k, _)| !matches!(&**k, "type" | "roll_forward")).cloned().collect();
+    let rest: Vec<(Rc<str>, Value)> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "type" | "roll_forward"))
+        .cloned()
+        .collect();
     let s = stack(vm)?;
     if py::is_none(&s) {
         return Err(py::error(vm, "Interaction not allowed during init phase."));
@@ -262,7 +305,13 @@ fn f_interact(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             let t = ops::str(vm, &i)?;
             parts.push(t.to_string());
         }
-        return Err(py::error(vm, format!("ui.interact called with non-empty widget/layer stack. Did you forget a ui.close() somewhere?\nStack was {}", parts.join("\n"))));
+        return Err(py::error(
+            vm,
+            format!(
+                "ui.interact called with non-empty widget/layer stack. Did you forget a ui.close() somewhere?\nStack was {}",
+                parts.join("\n")
+            ),
+        ));
     }
     let ats = mget(vm, "at_stack")?;
     if ops::truthy(vm, &ats)? {
@@ -347,7 +396,10 @@ pub fn f_close(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     vm.call_method(&top, "close", vec![d])?;
     let s = stack(vm)?;
     if ops::len(vm, &s)? == 0 {
-        return Err(py::error(vm, "ui.close() called when no layer or widget is open."));
+        return Err(py::error(
+            vm,
+            "ui.close() called when no layer or widget is open.",
+        ));
     }
     Ok(Value::None)
 }
@@ -375,7 +427,10 @@ fn f_context_enter(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         }
     }
     let n = args[0].obj().map(|o| o.class_name()).unwrap_or_default();
-    Err(py::error(vm, format!("{n} cannot be used as a context manager.")))
+    Err(py::error(
+        vm,
+        format!("{n} cannot be used as a context manager."),
+    ))
 }
 
 fn f_context_exit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -436,7 +491,12 @@ fn wrapper_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let many = Value::Bool(ops::truthy(vm, &many)? || ops::truthy(vm, &imagemap)?);
     py::set(vm, this, "name", vm.types.new_str(""))?;
-    py::set(vm, this, "function", args.get(1).cloned().unwrap_or(Value::None))?;
+    py::set(
+        vm,
+        this,
+        "function",
+        args.get(1).cloned().unwrap_or(Value::None),
+    )?;
     py::set(vm, this, "one", one)?;
     py::set(vm, this, "many", many)?;
     py::set(vm, this, "imagemap", imagemap)?;
@@ -477,7 +537,10 @@ fn wrapper_call(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let mut at_list: Vec<Value> = if py::is_none(&at_list) {
         Vec::new()
-    } else if matches!(at_list.payload(), Some(crysirror_python::Payload::List(_) | crysirror_python::Payload::Tuple(_))) {
+    } else if matches!(
+        at_list.payload(),
+        Some(crysirror_python::Payload::List(_) | crysirror_python::Payload::Tuple(_))
+    ) {
         py::items(vm, &at_list)?
     } else {
         vec![at_list]
@@ -494,7 +557,10 @@ fn wrapper_call(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     };
     let screen = mget(vm, "screen")?;
     let has_screen = ops::truthy(vm, &screen)?;
-    let old_transfers = has_screen && { let v = py::get_or_none(vm, &screen, "old_transfers")?; ops::truthy(vm, &v)? };
+    let old_transfers = has_screen && {
+        let v = py::get_or_none(vm, &screen, "old_transfers")?;
+        ops::truthy(vm, &v)?
+    };
     let mut do_add = true;
     if has_screen {
         let wp = py::get(vm, &screen, "widget_properties")?;
@@ -511,8 +577,15 @@ fn wrapper_call(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let old_main = if old_transfers {
         let ow = py::get(vm, &screen, "old_widgets")?;
-        let om = if py::is_none(&ow) { Value::None } else { vm.call_method(&ow, "get", vec![widget_id.clone(), Value::None])? };
-        let rep = { let v = py::get(vm, this, "replaces")?; ops::truthy(vm, &v)? };
+        let om = if py::is_none(&ow) {
+            Value::None
+        } else {
+            vm.call_method(&ow, "get", vec![widget_id.clone(), Value::None])?
+        };
+        let rep = {
+            let v = py::get(vm, this, "replaces")?;
+            ops::truthy(vm, &v)?
+        };
         if rep && !py::is_none(&om) {
             set_kw(&mut keyword, "replaces", om.clone());
         }
@@ -536,7 +609,10 @@ fn wrapper_call(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let wm = py::get_or_none(vm, &w, "_main")?;
     let main = if ops::truthy(vm, &wm)? { wm } else { w.clone() };
     if !py::is_none(&old_main) {
-        let hiding = { let v = py::get_or_none(vm, &screen, "hiding")?; ops::truthy(vm, &v)? };
+        let hiding = {
+            let v = py::get_or_none(vm, &screen, "hiding")?;
+            ops::truthy(vm, &v)?
+        };
         if !hiding {
             let rb = py::import_attr(vm, "renpy.display.focus", "replaced_by")?;
             ops::setitem(vm, &rb, Value::Int(old_main.id()), main.clone())?;
@@ -561,10 +637,16 @@ fn wrapper_call(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let tag = mget(vm, "add_tag")?;
         vm.call_method(&top, "add", vec![atw.clone(), tag])?;
     }
-    if { let v = py::get(vm, this, "one")?; ops::truthy(vm, &v)? } {
+    if {
+        let v = py::get(vm, this, "one")?;
+        ops::truthy(vm, &v)?
+    } {
         let o = new(vm, "One", vec![w.clone(), style_prefix])?;
         stack_push(vm, o)?;
-    } else if { let v = py::get(vm, this, "many")?; ops::truthy(vm, &v)? } {
+    } else if {
+        let v = py::get(vm, this, "many")?;
+        ops::truthy(vm, &v)?
+    } {
         let im = py::get(vm, this, "imagemap")?;
         let o = new(vm, "Many", vec![w.clone(), im, style_prefix])?;
         stack_push(vm, o)?;
@@ -577,7 +659,11 @@ fn wrapper_call(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             ops::setitem(vm, &tr, widget_id.clone(), atw.clone())?;
             let oldt = if old_transfers {
                 let ot = py::get_or_none(vm, &screen, "old_transforms")?;
-                if py::is_none(&ot) { Value::None } else { vm.call_method(&ot, "get", vec![widget_id, Value::None])? }
+                if py::is_none(&ot) {
+                    Value::None
+                } else {
+                    vm.call_method(&ot, "get", vec![widget_id, Value::None])?
+                }
             } else {
                 Value::None
             };
@@ -647,7 +733,14 @@ fn f_key(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let sound = arg_or(args, kw, 2, "activate_sound", Value::None);
     let capture = arg_or(args, kw, 3, "capture", Value::Bool(true));
     let mut k: Vec<(Rc<str>, Value)> = Vec::new();
-    let keys = if matches!(key.payload(), Some(crysirror_python::Payload::List(_) | crysirror_python::Payload::Tuple(_))) { py::items(vm, &key)? } else { vec![key] };
+    let keys = if matches!(
+        key.payload(),
+        Some(crysirror_python::Payload::List(_) | crysirror_python::Payload::Tuple(_))
+    ) {
+        py::items(vm, &key)?
+    } else {
+        vec![key]
+    };
     for kk in keys {
         let s = py::string(vm, &kk)?;
         k.retain(|(n, _)| **n != *s);
@@ -663,8 +756,24 @@ fn f_key(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn cab_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["label", "value", "location", "block_all", "sensitive", "args", "kwargs"];
-    let mut v = vec![Value::None, Value::None, Value::None, Value::None, Value::Bool(true), Value::None, Value::None];
+    let names = [
+        "label",
+        "value",
+        "location",
+        "block_all",
+        "sensitive",
+        "args",
+        "kwargs",
+    ];
+    let mut v = vec![
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::Bool(true),
+        Value::None,
+        Value::None,
+    ];
     for (i, a) in args.iter().skip(1).enumerate().take(names.len()) {
         v[i] = a.clone();
     }
@@ -689,12 +798,21 @@ fn export(vm: &mut Vm, n: &str) -> PyResult<Value> {
 
 fn cab_get_sensitive(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let s = { let v = py::get_or_none(vm, this, "sensitive")?; ops::truthy(vm, &v)? };
-    let fixed = { let v = export(vm, "in_fixed_rollback")?; ops::truthy(vm, &v)? };
+    let s = {
+        let v = py::get_or_none(vm, this, "sensitive")?;
+        ops::truthy(vm, &v)?
+    };
+    let fixed = {
+        let v = export(vm, "in_fixed_rollback")?;
+        ops::truthy(vm, &v)?
+    };
     if s && !fixed {
         return Ok(Value::Bool(true));
     }
-    let block_all = { let v = py::get_or_none(vm, this, "block_all")?; ops::truthy(vm, &v)? };
+    let block_all = {
+        let v = py::get_or_none(vm, this, "block_all")?;
+        ops::truthy(vm, &v)?
+    };
     if block_all {
         return Ok(Value::Bool(false));
     }
@@ -704,7 +822,10 @@ fn cab_get_sensitive(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn cab_get_selected(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let rf = export(vm, "roll_forward_info")?;
-    let fixed = { let v = export(vm, "in_fixed_rollback")?; ops::truthy(vm, &v)? };
+    let fixed = {
+        let v = export(vm, "in_fixed_rollback")?;
+        ops::truthy(vm, &v)?
+    };
     let value = py::get_or_none(vm, &args[0], "value")?;
     Ok(Value::Bool(fixed && ops::eq(vm, &rf, &value)?))
 }
@@ -754,7 +875,10 @@ fn choice_jump_get_selected(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Valu
         let a = py::get(vm, &rf, "args")?;
         rf = ops::getitem(vm, &a, Value::Int(0))?;
     }
-    let fixed = { let v = export(vm, "in_fixed_rollback")?; ops::truthy(vm, &v)? };
+    let fixed = {
+        let v = export(vm, "in_fixed_rollback")?;
+        ops::truthy(vm, &v)?
+    };
     let value = py::get_or_none(vm, &args[0], "value")?;
     Ok(Value::Bool(fixed && ops::eq(vm, &rf, &value)?))
 }
@@ -767,7 +891,12 @@ fn choice_jump_call(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn choice_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    py::set(vm, &args[0], "value", args.get(1).cloned().unwrap_or(Value::None))?;
+    py::set(
+        vm,
+        &args[0],
+        "value",
+        args.get(1).cloned().unwrap_or(Value::None),
+    )?;
     let a = vm.types.new_tuple(args.iter().skip(2).cloned().collect());
     py::set(vm, &args[0], "args", a)?;
     let k = py::kwargs_dict(vm, kw)?;
@@ -784,8 +913,27 @@ fn style_attr(vm: &mut Vm, v: Value) -> PyResult<Value> {
 }
 
 fn f_menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let names = ["menuitems", "style", "caption_style", "choice_style", "choice_chosen_style", "choice_button_style", "choice_chosen_button_style", "location", "focus", "default"];
-    let defaults = ["", "menu", "menu_caption", "menu_choice", "menu_choice_chosen", "menu_choice_button", "menu_choice_chosen_button"];
+    let names = [
+        "menuitems",
+        "style",
+        "caption_style",
+        "choice_style",
+        "choice_chosen_style",
+        "choice_button_style",
+        "choice_chosen_button_style",
+        "location",
+        "focus",
+        "default",
+    ];
+    let defaults = [
+        "",
+        "menu",
+        "menu_caption",
+        "menu_choice",
+        "menu_choice_chosen",
+        "menu_choice_button",
+        "menu_choice_chosen_button",
+    ];
     let mut v: Vec<Value> = defaults.iter().map(|d| vm.types.new_str(d)).collect();
     v[0] = Value::None;
     v.extend([Value::None, Value::None, Value::Bool(false)]);
@@ -819,21 +967,47 @@ fn f_menu(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             vm.call(&cr, vec![label.clone(), val, v[7].clone()], Vec::new())?
         };
         let chosen = vm.call_method(&clicked, "get_chosen", Vec::new())?;
-        let (t, b) = if ops::truthy(vm, &chosen)? { (v[4].clone(), v[6].clone()) } else { (v[3].clone(), v[5].clone()) };
+        let (t, b) = if ops::truthy(vm, &chosen)? {
+            (v[4].clone(), v[6].clone())
+        } else {
+            (v[3].clone(), v[5].clone())
+        };
         let b = style_attr(vm, b)?;
         let t = style_attr(vm, t)?;
         let b = ops::getitem(vm, &b, label.clone())?;
         let t = ops::getitem(vm, &t, label.clone())?;
-        vm.call(&tb, vec![label], vec![
-            ("style".into(), b), ("text_style".into(), t), ("clicked".into(), clicked), ("focus".into(), v[8].clone()), ("default".into(), v[9].clone()),
-        ])?;
+        vm.call(
+            &tb,
+            vec![label],
+            vec![
+                ("style".into(), b),
+                ("text_style".into(), t),
+                ("clicked".into(), clicked),
+                ("focus".into(), v[8].clone()),
+                ("default".into(), v[9].clone()),
+            ],
+        )?;
     }
     f_close(vm, &[], &[])
 }
 
 fn f_imagemap_compat(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let names = ["ground", "selected", "hotspots", "unselected", "style", "button_style"];
-    let mut v = vec![Value::None, Value::None, Value::None, Value::None, vm.types.new_str("imagemap"), vm.types.new_str("hotspot")];
+    let names = [
+        "ground",
+        "selected",
+        "hotspots",
+        "unselected",
+        "style",
+        "button_style",
+    ];
+    let mut v = vec![
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::None,
+        vm.types.new_str("imagemap"),
+        vm.types.new_str("hotspot"),
+    ];
     for (i, a) in args.iter().enumerate().take(names.len()) {
         v[i] = a.clone();
     }
@@ -848,7 +1022,11 @@ fn f_imagemap_compat(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     props.push(("style".into(), v[4].clone()));
     let fixed = mget(vm, "fixed")?;
     vm.call(&fixed, Vec::new(), props)?;
-    let unselected = if py::is_none(&v[3]) { v[0].clone() } else { v[3].clone() };
+    let unselected = if py::is_none(&v[3]) {
+        v[0].clone()
+    } else {
+        v[3].clone()
+    };
     let add = mget(vm, "add")?;
     vm.call(&add, vec![v[0].clone()], Vec::new())?;
     let cr = mget(vm, "ChoiceReturn")?;
@@ -859,17 +1037,37 @@ fn f_imagemap_compat(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         if py::is_none(&p[4]) {
             continue;
         }
-        let (x0, y0, x1, y1) = (py::f64_of(vm, &p[0])?, py::f64_of(vm, &p[1])?, py::f64_of(vm, &p[2])?, py::f64_of(vm, &p[3])?);
-        let rect = vm.types.new_tuple(vec![p[0].clone(), p[1].clone(), Value::Float(x1 - x0), Value::Float(y1 - y0)]);
+        let (x0, y0, x1, y1) = (
+            py::f64_of(vm, &p[0])?,
+            py::f64_of(vm, &p[1])?,
+            py::f64_of(vm, &p[2])?,
+            py::f64_of(vm, &p[3])?,
+        );
+        let rect = vm.types.new_tuple(vec![
+            p[0].clone(),
+            p[1].clone(),
+            Value::Float(x1 - x0),
+            Value::Float(y1 - y0),
+        ]);
         let action = vm.call(&cr, vec![p[4].clone(), p[4].clone()], Vec::new())?;
         let sel = vm.call(&lc, vec![rect.clone(), v[1].clone()], Vec::new())?;
         let unsel = vm.call(&lc, vec![rect, unselected.clone()], Vec::new())?;
         let bs = ops::getitem(vm, &button_style, p[4].clone())?;
-        vm.call(&ib, vec![unsel, sel.clone()], vec![
-            ("selected_idle_image".into(), sel.clone()), ("selected_insensitive_image".into(), sel), ("clicked".into(), action), ("style".into(), bs),
-            ("xpos".into(), Value::Float(x0)), ("xanchor".into(), Value::Int(0)), ("ypos".into(), Value::Float(y0)), ("yanchor".into(), Value::Int(0)),
-            ("focus_mask".into(), Value::Bool(true)),
-        ])?;
+        vm.call(
+            &ib,
+            vec![unsel, sel.clone()],
+            vec![
+                ("selected_idle_image".into(), sel.clone()),
+                ("selected_insensitive_image".into(), sel),
+                ("clicked".into(), action),
+                ("style".into(), bs),
+                ("xpos".into(), Value::Float(x0)),
+                ("xanchor".into(), Value::Int(0)),
+                ("ypos".into(), Value::Float(y0)),
+                ("yanchor".into(), Value::Int(0)),
+                ("focus_mask".into(), Value::Bool(true)),
+            ],
+        )?;
     }
     f_close(vm, &[], &[])
 }
@@ -881,8 +1079,22 @@ fn auto_image(vm: &mut Vm, auto: &Value, name: &str) -> PyResult<Value> {
 
 fn f_imagebutton(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let names = [
-        "idle_image", "hover_image", "insensitive_image", "activate_image", "selected_idle_image", "selected_hover_image", "selected_insensitive_image",
-        "selected_activate_image", "idle", "hover", "insensitive", "selected_idle", "selected_hover", "selected_insensitive", "image_style", "auto",
+        "idle_image",
+        "hover_image",
+        "insensitive_image",
+        "activate_image",
+        "selected_idle_image",
+        "selected_hover_image",
+        "selected_insensitive_image",
+        "selected_activate_image",
+        "idle",
+        "hover",
+        "insensitive",
+        "selected_idle",
+        "selected_hover",
+        "selected_insensitive",
+        "image_style",
+        "auto",
     ];
     let mut v = vec![Value::None; names.len()];
     for (i, a) in args.iter().enumerate().take(names.len()) {
@@ -896,28 +1108,35 @@ fn f_imagebutton(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         }
     }
     let auto = v[15].clone();
-    let mut choice = |vm: &mut Vm, a: usize, b: usize, name: &str, required: bool| -> PyResult<Value> {
-        if ops::truthy(vm, &v[a])? {
-            return Ok(v[a].clone());
-        }
-        if ops::truthy(vm, &v[b])? {
-            return Ok(v[b].clone());
-        }
-        if !py::is_none(&auto) {
-            let r = auto_image(vm, &auto, name)?;
-            if !py::is_none(&r) {
-                return Ok(r);
+    let mut choice =
+        |vm: &mut Vm, a: usize, b: usize, name: &str, required: bool| -> PyResult<Value> {
+            if ops::truthy(vm, &v[a])? {
+                return Ok(v[a].clone());
             }
-        }
-        if required {
-            if ops::truthy(vm, &auto)? {
-                let a = ops::repr(vm, &auto)?;
-                return Err(py::error(vm, format!("Imagebutton does not have a {name} image. (auto={a}).")));
+            if ops::truthy(vm, &v[b])? {
+                return Ok(v[b].clone());
             }
-            return Err(py::error(vm, format!("Imagebutton does not have a {name} image.")));
-        }
-        Ok(Value::None)
-    };
+            if !py::is_none(&auto) {
+                let r = auto_image(vm, &auto, name)?;
+                if !py::is_none(&r) {
+                    return Ok(r);
+                }
+            }
+            if required {
+                if ops::truthy(vm, &auto)? {
+                    let a = ops::repr(vm, &auto)?;
+                    return Err(py::error(
+                        vm,
+                        format!("Imagebutton does not have a {name} image. (auto={a})."),
+                    ));
+                }
+                return Err(py::error(
+                    vm,
+                    format!("Imagebutton does not have a {name} image."),
+                ));
+            }
+            Ok(Value::None)
+        };
     let idle = choice(vm, 8, 0, "idle", true)?;
     let hover = choice(vm, 9, 1, "hover", false)?;
     let insensitive = choice(vm, 10, 2, "insensitive", false)?;
@@ -926,8 +1145,12 @@ fn f_imagebutton(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let s_ins = choice(vm, 13, 6, "selected_insensitive", false)?;
     let ib = py::import_attr(vm, "renpy.display.behavior", "ImageButton")?;
     props.extend([
-        ("insensitive_image".into(), insensitive), ("activate_image".into(), v[3].clone()), ("selected_idle_image".into(), s_idle),
-        ("selected_hover_image".into(), s_hover), ("selected_insensitive_image".into(), s_ins), ("selected_activate_image".into(), v[7].clone()),
+        ("insensitive_image".into(), insensitive),
+        ("activate_image".into(), v[3].clone()),
+        ("selected_idle_image".into(), s_idle),
+        ("selected_hover_image".into(), s_hover),
+        ("selected_insensitive_image".into(), s_ins),
+        ("selected_activate_image".into(), v[7].clone()),
     ]);
     vm.call(&ib, vec![idle, hover], props)
 }
@@ -951,8 +1174,27 @@ fn text_style_for(vm: &mut Vm, style: &Value, suffix: &str) -> PyResult<Value> {
     vm.call(&gts, vec![style.clone(), fallback], Vec::new())
 }
 
-fn composite_text(vm: &mut Vm, label: Value, kw: Kw, outer: &str, outer_style: &str, text_suffix: &str, is_button: bool) -> PyResult<Value> {
-    let names = if is_button { &["label", "clicked", "style", "text_style", "substitute", "scope"][..] } else { &["label", "style", "text_style", "substitute", "scope"][..] };
+fn composite_text(
+    vm: &mut Vm,
+    label: Value,
+    kw: Kw,
+    outer: &str,
+    outer_style: &str,
+    text_suffix: &str,
+    is_button: bool,
+) -> PyResult<Value> {
+    let names = if is_button {
+        &[
+            "label",
+            "clicked",
+            "style",
+            "text_style",
+            "substitute",
+            "scope",
+        ][..]
+    } else {
+        &["label", "style", "text_style", "substitute", "scope"][..]
+    };
     let _ = names;
     let mut clicked = Value::None;
     let mut style = Value::None;
@@ -985,7 +1227,15 @@ fn composite_text(vm: &mut Vm, label: Value, kw: Kw, outer: &str, outer_style: &
     if py::is_none(&text_style) {
         text_style = text_style_for(vm, &style, text_suffix)?;
     }
-    let oc = py::import_attr(vm, if is_button { "renpy.display.behavior" } else { "renpy.display.layout" }, outer)?;
+    let oc = py::import_attr(
+        vm,
+        if is_button {
+            "renpy.display.behavior"
+        } else {
+            "renpy.display.layout"
+        },
+        outer,
+    )?;
     let mut okw = ok;
     okw.push(("style".into(), style));
     let rv = if is_button {
@@ -1010,15 +1260,32 @@ fn f_textbutton(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if let Some(c) = args.get(1) {
         k.push(("clicked".into(), c.clone()));
     }
-    composite_text(vm, args[0].clone(), &k, "Button", "button", "button_text", true)
+    composite_text(
+        vm,
+        args[0].clone(),
+        &k,
+        "Button",
+        "button",
+        "button_text",
+        true,
+    )
 }
 
 fn f_label(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    composite_text(vm, args[0].clone(), kw, "Window", "label", "label_text", false)
+    composite_text(
+        vm,
+        args[0].clone(),
+        kw,
+        "Window",
+        "label",
+        "label_text",
+        false,
+    )
 }
 
 fn f_bar(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let (mut width, mut height, mut range, mut value) = (Value::None, Value::None, Value::Int(1), Value::Int(0));
+    let (mut width, mut height, mut range, mut value) =
+        (Value::None, Value::None, Value::Int(1), Value::Int(0));
     // Upstream's `if len(args) == 4 ... if len(args) == 2 ... else` resets
     // a 4-argument call to the defaults; the behavior is kept.
     if args.len() == 2 {
@@ -1038,7 +1305,11 @@ fn f_bar(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !props.iter().any(|(k, _)| &**k == "style") {
         let bv = mget(vm, "BarValue")?;
         if bv.obj().is_some_and(|c| ops::isinstance(vm, &value, c)) {
-            let vertical = props.iter().find(|(k, _)| &**k == "vertical").map(|(_, v)| v.clone()).unwrap_or(Value::Bool(false));
+            let vertical = props
+                .iter()
+                .find(|(k, _)| &**k == "vertical")
+                .map(|(_, v)| v.clone())
+                .unwrap_or(Value::Bool(false));
             let s = vm.call_method(&value, "get_style", Vec::new())?;
             let i = if ops::truthy(vm, &vertical)? { 1 } else { 0 };
             let mut style = ops::getitem(vm, &s, Value::Int(i))?;
@@ -1054,11 +1325,25 @@ fn f_bar(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 fn f_autobar_interpolate(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let (range, start, end, time, st) = (args[0].clone(), py::f64_of(vm, &args[1])?, py::f64_of(vm, &args[2])?, py::f64_of(vm, &args[3])?, py::f64_of(vm, &args[4])?);
-    let (t, redraw) = if st > time { (1., Value::None) } else { (st / time, Value::Int(0)) };
+    let (range, start, end, time, st) = (
+        args[0].clone(),
+        py::f64_of(vm, &args[1])?,
+        py::f64_of(vm, &args[2])?,
+        py::f64_of(vm, &args[3])?,
+        py::f64_of(vm, &args[4])?,
+    );
+    let (t, redraw) = if st > time {
+        (1., Value::None)
+    } else {
+        (st / time, Value::Int(0))
+    };
     let value = start + t * (end - start);
     let bar = py::import_attr(vm, "renpy.display.behavior", "Bar")?;
-    let b = vm.call(&bar, vec![range, Value::Float(value), Value::None, Value::None], kw.to_vec())?;
+    let b = vm.call(
+        &bar,
+        vec![range, Value::Float(value), Value::None, Value::None],
+        kw.to_vec(),
+    )?;
     Ok(vm.types.new_tuple(vec![b, redraw]))
 }
 
@@ -1069,8 +1354,7 @@ fn f_autobar(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     vm.call(&dd, vec![f], Vec::new())
 }
 
-fn viewport_common(vm: &mut Vm, vpfunc: &str, spacing_to_side: bool, kw: Kw) -> PyResult<Value> {
-    let vpf = mget(vm, vpfunc)?;
+fn viewport_common(vm: &mut Vm, vpf: Value, spacing_to_side: bool, kw: Kw) -> PyResult<Value> {
     let mut scrollbars = Value::None;
     let mut props = Vec::new();
     for (k, v) in kw {
@@ -1083,7 +1367,8 @@ fn viewport_common(vm: &mut Vm, vpfunc: &str, spacing_to_side: bool, kw: Kw) -> 
     if py::is_none(&scrollbars) {
         return vm.call(&vpf, Vec::new(), props);
     }
-    let (mut vsb, mut sb, mut side, mut vp, mut core) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut vsb, mut sb, mut side, mut vp, mut core) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for (k, v) in props {
         if let Some(r) = k.strip_prefix("vscrollbar_") {
             vsb.push((Rc::from(r), v));
@@ -1120,11 +1405,23 @@ fn viewport_common(vm: &mut Vm, vpfunc: &str, spacing_to_side: bool, kw: Kw) -> 
             l.push((k.into(), v));
         }
     };
-    let s = if prefix && sbs != "vertical" { prefixed_style(vm, "scrollbar")? } else { vm.types.new_str("scrollbar") };
+    let s = if prefix && sbs != "vertical" {
+        prefixed_style(vm, "scrollbar")?
+    } else {
+        vm.types.new_str("scrollbar")
+    };
     setdefault(&mut sb, "style", s);
-    let s = if prefix && sbs != "horizontal" { prefixed_style(vm, "vscrollbar")? } else { vm.types.new_str("vscrollbar") };
+    let s = if prefix && sbs != "horizontal" {
+        prefixed_style(vm, "vscrollbar")?
+    } else {
+        vm.types.new_str("vscrollbar")
+    };
     setdefault(&mut vsb, "style", s);
-    let alt = vp.iter().find(|(k, _)| &**k == "alt").map(|(_, v)| v.clone()).unwrap_or_else(|| vm.types.new_str("viewport"));
+    let alt = vp
+        .iter()
+        .find(|(k, _)| &**k == "alt")
+        .map(|(_, v)| v.clone())
+        .unwrap_or_else(|| vm.types.new_str("viewport"));
     let tr = py::import_attr(vm, "renpy.minstore", "__")?;
     let a = vm.call(&tr, vec![alt], Vec::new())?;
     let a = py::string(vm, &a)?;
@@ -1166,19 +1463,76 @@ fn viewport_common(vm: &mut Vm, vpfunc: &str, spacing_to_side: bool, kw: Kw) -> 
     Ok(rv)
 }
 
+/// `viewport_common(vpfunc, _spacing_to_side, scrollbars=None, **properties)`.
+fn f_viewport_common(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    let mut kw: Vec<(Rc<str>, Value)> = kw.to_vec();
+    let mut take = |n: &str| {
+        kw.iter()
+            .position(|(k, _)| &**k == n)
+            .map(|i| kw.remove(i).1)
+    };
+    let vpf = args.first().cloned().or_else(|| take("vpfunc"));
+    let sts = args.get(1).cloned().or_else(|| take("_spacing_to_side"));
+    if let Some(sb) = args.get(2) {
+        kw.push(("scrollbars".into(), sb.clone()));
+    }
+    let (Some(vpf), Some(sts)) = (vpf, sts) else {
+        return Err(vm.type_error(
+            "viewport_common() missing required positional arguments: 'vpfunc' and '_spacing_to_side'",
+        ));
+    };
+    let sts = py::truthy(vm, &sts)?;
+    viewport_common(vm, vpf, sts, &kw)
+}
+
+/// `style_group_style(s, style_group)` (6.18): `style_group + "_" + s` (or
+/// `s`), the style group defaulting to the one of the open container.
+fn f_style_group_style(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    let s = arg_or(args, kw, 0, "s", Value::None);
+    let mut group = arg_or(args, kw, 1, "style_group", Value::None);
+    let ngg = mget(vm, "NoStyleGroupGiven")?;
+    if py::same(&group, &ngg) {
+        let top = stack_top(vm)?;
+        group = match py::get_opt(vm, &top, "style_group")? {
+            Some(g) => g,
+            None => py::get_or_none(vm, &top, "style_prefix")?,
+        };
+    }
+    let s = py::string(vm, &s)?;
+    let name = if py::is_none(&group) {
+        s
+    } else {
+        format!("{}_{s}", py::string(vm, &group)?)
+    };
+    let gs = py::import_attr(vm, "renpy.style", "get_style")?;
+    vm.call(&gs, vec![py::s(vm, &name)], Vec::new())
+}
+
 fn f_viewport(vm: &mut Vm, _: &[Value], kw: Kw) -> PyResult<Value> {
-    viewport_common(vm, "_viewport", true, kw)
+    let f = mget(vm, "_viewport")?;
+    viewport_common(vm, f, true, kw)
 }
 
 fn f_vpgrid(vm: &mut Vm, _: &[Value], kw: Kw) -> PyResult<Value> {
-    viewport_common(vm, "_vpgrid", false, kw)
+    let f = mget(vm, "_vpgrid")?;
+    viewport_common(vm, f, false, kw)
 }
 
 // Imagemaps ---------------------------------------------------------------------------------------------
 
 fn imagemap_obj_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    for (i, n) in ["insensitive", "idle", "selected_idle", "hover", "selected_hover", "selected_insensitive"].iter().enumerate() {
+    for (i, n) in [
+        "insensitive",
+        "idle",
+        "selected_idle",
+        "hover",
+        "selected_hover",
+        "selected_insensitive",
+    ]
+    .iter()
+    .enumerate()
+    {
         let d = super::easy::displayable(vm, &args[i + 1], &Value::None, true)?;
         py::set(vm, this, n, d)?;
     }
@@ -1199,7 +1553,19 @@ fn imagemap_obj_reuse(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn f_imagemap(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let names = ["ground", "hover", "insensitive", "idle", "selected_hover", "selected_idle", "selected_insensitive", "auto", "alpha", "cache", "style"];
+    let names = [
+        "ground",
+        "hover",
+        "insensitive",
+        "idle",
+        "selected_hover",
+        "selected_idle",
+        "selected_insensitive",
+        "auto",
+        "alpha",
+        "cache",
+        "style",
+    ];
     let mut v = vec![Value::None; names.len()];
     v[8] = Value::Bool(true);
     v[9] = Value::Bool(true);
@@ -1230,7 +1596,10 @@ fn f_imagemap(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         if !py::is_none(other) {
             return Ok(other.clone());
         }
-        Err(py::error(vm, format!("Could not find a {} image for imagemap.", name[0])))
+        Err(py::error(
+            vm,
+            format!("Could not find a {} image for imagemap.", name[0]),
+        ))
     };
     let ground = pick(vm, &v[0], &["ground", "idle"], &v[3])?;
     let idle = pick(vm, &v[3], &["idle"], &ground)?;
@@ -1240,7 +1609,20 @@ fn f_imagemap(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let insensitive = pick(vm, &v[2], &["insensitive"], &ground)?;
     let selected_insensitive = pick(vm, &v[6], &["selected_insensitive"], &hover)?;
     let imc = mget(vm, "Imagemap")?;
-    let im = vm.call(&imc, vec![insensitive, idle, selected_idle, hover, selected_hover, selected_insensitive, v[8].clone(), v[9].clone()], Vec::new())?;
+    let im = vm.call(
+        &imc,
+        vec![
+            insensitive,
+            idle,
+            selected_idle,
+            hover,
+            selected_hover,
+            selected_insensitive,
+            v[8].clone(),
+            v[9].clone(),
+        ],
+        Vec::new(),
+    )?;
     let ims = mget(vm, "imagemap_stack")?;
     vm.call_method(&ims, "append", vec![im])?;
     if !props.iter().any(|(k, _)| &**k == "fit_first") {
@@ -1256,7 +1638,11 @@ fn f_imagemap(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         vm.call_method(&rv, "add", vec![g])?;
         parts.push(ground);
     }
-    let bx = vm.call(&mb, Vec::new(), vec![("layout".into(), vm.types.new_str("fixed"))])?;
+    let bx = vm.call(
+        &mb,
+        Vec::new(),
+        vec![("layout".into(), vm.types.new_str("fixed"))],
+    )?;
     vm.call_method(&rv, "add", vec![bx.clone()])?;
     parts.push(bx.clone());
     py::set(vm, &rv, "_main", bx)?;
@@ -1267,7 +1653,10 @@ fn f_imagemap(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn imagemap_top(vm: &mut Vm, what: &str) -> PyResult<Value> {
     let ims = mget(vm, "imagemap_stack")?;
     if ops::len(vm, &ims)? == 0 {
-        return Err(py::error(vm, format!("{what} expects an imagemap to be defined.")));
+        return Err(py::error(
+            vm,
+            format!("{what} expects an imagemap to be defined."),
+        ));
     }
     ops::getitem(vm, &ims, Value::Int(-1))
 }
@@ -1287,22 +1676,53 @@ fn setdefault(props: &mut Vec<(Rc<str>, Value)>, k: &str, v: Value) {
 fn f_hotspot_impl(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let spot = arg_or(args, kw, 0, "spot", Value::None);
     let style = arg_or(args, kw, 1, "style", vm.types.new_str("hotspot"));
-    let mut props: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "spot" | "style")).cloned().collect();
+    let mut props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "spot" | "style"))
+        .cloned()
+        .collect();
     let im = imagemap_top(vm, "hotspot")?;
     let s = py::items(vm, &spot)?;
     let mut parts = Vec::new();
-    for n in ["idle", "hover", "selected_idle", "selected_hover", "insensitive", "selected_insensitive"] {
+    for n in [
+        "idle",
+        "hover",
+        "selected_idle",
+        "selected_hover",
+        "insensitive",
+        "selected_insensitive",
+    ] {
         parts.push(crop(vm, &im, n, &spot)?);
     }
-    for (k, v) in [("xpos", s[0].clone()), ("xanchor", Value::Int(0)), ("ypos", s[1].clone()), ("yanchor", Value::Int(0)), ("xminimum", s[2].clone()), ("xmaximum", s[2].clone()), ("yminimum", s[3].clone()), ("ymaximum", s[3].clone())] {
+    for (k, v) in [
+        ("xpos", s[0].clone()),
+        ("xanchor", Value::Int(0)),
+        ("ypos", s[1].clone()),
+        ("yanchor", Value::Int(0)),
+        ("xminimum", s[2].clone()),
+        ("xmaximum", s[2].clone()),
+        ("yminimum", s[3].clone()),
+        ("ymaximum", s[3].clone()),
+    ] {
         setdefault(&mut props, k, v);
     }
-    let alpha = { let v = py::get_or_none(vm, &im, "alpha")?; ops::truthy(vm, &v)? };
-    setdefault(&mut props, "focus_mask", if alpha { parts[1].clone() } else { Value::None });
+    let alpha = {
+        let v = py::get_or_none(vm, &im, "alpha")?;
+        ops::truthy(vm, &v)?
+    };
+    setdefault(
+        &mut props,
+        "focus_mask",
+        if alpha { parts[1].clone() } else { Value::None },
+    );
     props.extend([
-        ("idle_background".into(), parts[0].clone()), ("selected_idle_background".into(), parts[2].clone()), ("hover_background".into(), parts[1].clone()),
-        ("selected_hover_background".into(), parts[3].clone()), ("insensitive_background".into(), parts[4].clone()),
-        ("selected_insensitive_background".into(), parts[5].clone()), ("style".into(), style),
+        ("idle_background".into(), parts[0].clone()),
+        ("selected_idle_background".into(), parts[2].clone()),
+        ("hover_background".into(), parts[1].clone()),
+        ("selected_hover_background".into(), parts[3].clone()),
+        ("insensitive_background".into(), parts[4].clone()),
+        ("selected_insensitive_background".into(), parts[5].clone()),
+        ("style".into(), style),
     ]);
     let b = py::import_attr(vm, "renpy.display.behavior", "Button")?;
     vm.call(&b, vec![Value::None], props)
@@ -1321,13 +1741,25 @@ fn f_hotbar(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let adjustment = arg_or(args, kw, 1, "adjustment", Value::None);
     let range = arg_or(args, kw, 2, "range", Value::None);
     let value = arg_or(args, kw, 3, "value", Value::None);
-    let mut props: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "spot" | "adjustment" | "range" | "value")).cloned().collect();
+    let mut props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "spot" | "adjustment" | "range" | "value"))
+        .cloned()
+        .collect();
     if py::is_none(&adjustment) && py::is_none(&range) && py::is_none(&value) {
-        return Err(py::error(vm, "hotbar requires either an adjustment or a range and value."));
+        return Err(py::error(
+            vm,
+            "hotbar requires either an adjustment or a range and value.",
+        ));
     }
     let im = imagemap_top(vm, "hotbar")?;
     let s = py::items(vm, &spot)?;
-    for (k, v) in [("xpos", s[0].clone()), ("ypos", s[1].clone()), ("xanchor", Value::Int(0)), ("yanchor", Value::Int(0))] {
+    for (k, v) in [
+        ("xpos", s[0].clone()),
+        ("ypos", s[1].clone()),
+        ("xanchor", Value::Int(0)),
+        ("yanchor", Value::Int(0)),
+    ] {
         setdefault(&mut props, k, v);
     }
     let mut fore = crop(vm, &im, "selected_idle", &spot)?;
@@ -1341,10 +1773,21 @@ fn f_hotbar(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         std::mem::swap(&mut hfore, &mut haft);
     }
     props.extend([
-        ("adjustment".into(), adjustment), ("range".into(), range), ("value".into(), value), ("fore_bar".into(), fore), ("aft_bar".into(), aft),
-        ("hover_fore_bar".into(), hfore), ("hover_aft_bar".into(), haft), ("fore_gutter".into(), Value::Int(0)), ("aft_gutter".into(), Value::Int(0)),
-        ("bar_resizing".into(), Value::Bool(false)), ("thumb".into(), Value::None), ("thumb_shadow".into(), Value::None),
-        ("thumb_offset".into(), Value::Int(0)), ("xmaximum".into(), s[2].clone()), ("ymaximum".into(), s[3].clone()),
+        ("adjustment".into(), adjustment),
+        ("range".into(), range),
+        ("value".into(), value),
+        ("fore_bar".into(), fore),
+        ("aft_bar".into(), aft),
+        ("hover_fore_bar".into(), hfore),
+        ("hover_aft_bar".into(), haft),
+        ("fore_gutter".into(), Value::Int(0)),
+        ("aft_gutter".into(), Value::Int(0)),
+        ("bar_resizing".into(), Value::Bool(false)),
+        ("thumb".into(), Value::None),
+        ("thumb_shadow".into(), Value::None),
+        ("thumb_offset".into(), Value::Int(0)),
+        ("xmaximum".into(), s[2].clone()),
+        ("ymaximum".into(), s[3].clone()),
     ]);
     let b = py::import_attr(vm, "renpy.display.behavior", "Bar")?;
     vm.call(&b, Vec::new(), props)
@@ -1374,7 +1817,9 @@ fn f_jumps_impl(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn f_jumpsoutofcontext_impl(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let c = py::import_attr(vm, "renpy.game", "JumpOutException")?;
     let e = vm.call(&c, vec![args[0].clone()], Vec::new())?;
-    Err(crysirror_python::PyErr::Exc(e.obj().cloned().expect("exception")))
+    Err(crysirror_python::PyErr::Exc(
+        e.obj().cloned().expect("exception"),
+    ))
 }
 
 fn f_callsinnewcontext(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -1398,7 +1843,10 @@ fn f_gamemenus(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn f_screen_id(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let screen = mget(vm, "screen")?;
     if py::is_none(&screen) {
-        return Err(py::error(vm, "ui.screen_id must be called from within a screen."));
+        return Err(py::error(
+            vm,
+            "ui.screen_id must be called from within a screen.",
+        ));
     }
     let d = &args[1];
     let m = py::get_or_none(vm, d, "_main")?;
@@ -1411,90 +1859,241 @@ fn f_screen_id(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let mm = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("reset", f_reset),
-        ("interact", f_interact),
-        ("tag", f_tag),
-        ("child_or_fixed", f_child_or_fixed),
-        ("remove", f_remove),
-        ("remove_above", f_remove_above),
-        ("at", f_at),
-        ("clear", f_clear),
-        ("detached", f_detached),
-        ("layer", f_layer),
-        ("close", f_close),
-        ("reopen", f_reopen),
-        ("context_enter", f_context_enter),
-        ("context_exit", f_context_exit),
-        ("combine_style", f_combine_style),
-        ("prefixed_style", f_prefixed_style),
-        ("menu", f_menu),
-        ("imagemap_compat", f_imagemap_compat),
-        ("viewport", f_viewport),
-        ("vpgrid", f_vpgrid),
-        ("hotspot", f_hotspot),
-        ("callsinnewcontext", f_callsinnewcontext),
-        ("invokesinnewcontext", f_invokesinnewcontext),
-        ("gamemenus", f_gamemenus),
-        ("screen_id", f_screen_id),
-        ("_add", f_add),
-        ("_implicit_add", f_implicit_add),
-        ("_image", f_image),
-        ("_sizer", f_sizer),
-        ("_key", f_key),
-        ("_imagebutton", f_imagebutton),
-        ("_textbutton", f_textbutton),
-        ("_label", f_label),
-        ("_bar", f_bar),
-        ("_autobar_interpolate", f_autobar_interpolate),
-        ("_autobar", f_autobar),
-        ("_imagemap", f_imagemap),
-        ("_hotspot", f_hotspot_impl),
-        ("_hotbar", f_hotbar),
-        ("_returns", f_returns_impl),
-        ("_jumps", f_jumps_impl),
-        ("_jumpsoutofcontext", f_jumpsoutofcontext_impl),
-    ]);
+    let mm = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("reset", f_reset),
+            ("interact", f_interact),
+            ("tag", f_tag),
+            ("child_or_fixed", f_child_or_fixed),
+            ("remove", f_remove),
+            ("remove_above", f_remove_above),
+            ("at", f_at),
+            ("clear", f_clear),
+            ("detached", f_detached),
+            ("layer", f_layer),
+            ("close", f_close),
+            ("reopen", f_reopen),
+            ("context_enter", f_context_enter),
+            ("context_exit", f_context_exit),
+            ("combine_style", f_combine_style),
+            ("prefixed_style", f_prefixed_style),
+            ("menu", f_menu),
+            ("imagemap_compat", f_imagemap_compat),
+            ("viewport", f_viewport),
+            ("vpgrid", f_vpgrid),
+            ("hotspot", f_hotspot),
+            ("callsinnewcontext", f_callsinnewcontext),
+            ("invokesinnewcontext", f_invokesinnewcontext),
+            ("gamemenus", f_gamemenus),
+            ("screen_id", f_screen_id),
+            ("_add", f_add),
+            ("_implicit_add", f_implicit_add),
+            ("_image", f_image),
+            ("_sizer", f_sizer),
+            ("_key", f_key),
+            ("_imagebutton", f_imagebutton),
+            ("_textbutton", f_textbutton),
+            ("_label", f_label),
+            ("_bar", f_bar),
+            ("_autobar_interpolate", f_autobar_interpolate),
+            ("_autobar", f_autobar),
+            ("_imagemap", f_imagemap),
+            ("_hotspot", f_hotspot_impl),
+            ("_hotbar", f_hotbar),
+            ("_returns", f_returns_impl),
+            ("_jumps", f_jumps_impl),
+            ("_jumpsoutofcontext", f_jumpsoutofcontext_impl),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &mm, n, v);
     let object = py::import_attr(vm, "renpy.object", "Object")?;
     let obj = Value::Obj(vm.types.object.clone());
-    let cls = |vm: &mut Vm, name: &str, bases: &[Value], methods: Methods, attrs: &[(&str, Value)]| -> PyResult<Value> {
+    let cls = |vm: &mut Vm,
+               name: &str,
+               bases: &[Value],
+               methods: Methods,
+               attrs: &[(&str, Value)]|
+     -> PyResult<Value> {
         let c = Value::Obj(py::class(vm, MODULE, name, bases, methods, attrs)?);
         crysirror_python::modules::set(vm, &mm, name, c.clone());
         Ok(c)
     };
-    let action = cls(vm, "Action", &[object.clone()], &[
-        ("get_sensitive", ret_true), ("get_selected", ret_false), ("get_tooltip", ret_none), ("periodic", ret_none), ("predict", ret_none),
-        ("__call__", not_implemented),
-    ], &[("alt", Value::None)])?;
-    cls(vm, "BarValue", &[object], &[
-        ("replaces", ret_none), ("periodic", ret_none), ("get_adjustment", not_implemented), ("get_style", barvalue_get_style), ("get_tooltip", ret_none),
-    ], &[("alt", vm.types.new_str("Bar")), ("force_step", Value::Bool(false))])?;
-    let addable = cls(vm, "Addable", &[obj.clone()], &[("add", not_implemented), ("close", not_implemented), ("get_layer", addable_get_layer)], &[("style_prefix", Value::None)])?;
-    cls(vm, "Layer", &[addable.clone()], &[
-        ("__init__", layer_init), ("add", layer_add), ("close", layer_close), ("get_layer", layer_get_layer),
-        ("__repr__", |vm, a, _| repr_of(vm, &a[0], "Layer", "name")),
-    ], &[])?;
-    cls(vm, "Many", &[addable.clone()], &[
-        ("__init__", many_init), ("add", add_to_displayable), ("close", many_close), ("__repr__", |vm, a, _| repr_of(vm, &a[0], "Many", "displayable")),
-    ], &[])?;
-    cls(vm, "One", &[addable.clone()], &[
-        ("__init__", one_init), ("add", one_add), ("close", one_close), ("__repr__", |vm, a, _| repr_of(vm, &a[0], "One", "displayable")),
-    ], &[])?;
-    cls(vm, "Detached", &[addable.clone()], &[("__init__", prefix_init), ("add", detached_add), ("close", detached_close)], &[])?;
-    cls(vm, "ChildOrFixed", &[addable], &[("__init__", cof_init), ("add", cof_add), ("close", cof_close)], &[])?;
+    let action = cls(
+        vm,
+        "Action",
+        &[object.clone()],
+        &[
+            ("get_sensitive", ret_true),
+            ("get_selected", ret_false),
+            ("get_tooltip", ret_none),
+            ("periodic", ret_none),
+            ("predict", ret_none),
+            ("__call__", not_implemented),
+        ],
+        &[("alt", Value::None)],
+    )?;
+    cls(
+        vm,
+        "BarValue",
+        &[object],
+        &[
+            ("replaces", ret_none),
+            ("periodic", ret_none),
+            ("get_adjustment", not_implemented),
+            ("get_style", barvalue_get_style),
+            ("get_tooltip", ret_none),
+        ],
+        &[
+            ("alt", vm.types.new_str("Bar")),
+            ("force_step", Value::Bool(false)),
+        ],
+    )?;
+    let addable = cls(
+        vm,
+        "Addable",
+        &[obj.clone()],
+        &[
+            ("add", not_implemented),
+            ("close", not_implemented),
+            ("get_layer", addable_get_layer),
+        ],
+        &[("style_prefix", Value::None)],
+    )?;
+    cls(
+        vm,
+        "Layer",
+        &[addable.clone()],
+        &[
+            ("__init__", layer_init),
+            ("add", layer_add),
+            ("close", layer_close),
+            ("get_layer", layer_get_layer),
+            ("__repr__", |vm, a, _| repr_of(vm, &a[0], "Layer", "name")),
+        ],
+        &[],
+    )?;
+    cls(
+        vm,
+        "Many",
+        &[addable.clone()],
+        &[
+            ("__init__", many_init),
+            ("add", add_to_displayable),
+            ("close", many_close),
+            ("__repr__", |vm, a, _| {
+                repr_of(vm, &a[0], "Many", "displayable")
+            }),
+        ],
+        &[],
+    )?;
+    cls(
+        vm,
+        "One",
+        &[addable.clone()],
+        &[
+            ("__init__", one_init),
+            ("add", one_add),
+            ("close", one_close),
+            ("__repr__", |vm, a, _| {
+                repr_of(vm, &a[0], "One", "displayable")
+            }),
+        ],
+        &[],
+    )?;
+    cls(
+        vm,
+        "Detached",
+        &[addable.clone()],
+        &[
+            ("__init__", prefix_init),
+            ("add", detached_add),
+            ("close", detached_close),
+        ],
+        &[],
+    )?;
+    cls(
+        vm,
+        "ChildOrFixed",
+        &[addable],
+        &[
+            ("__init__", cof_init),
+            ("add", cof_add),
+            ("close", cof_close),
+        ],
+        &[],
+    )?;
     let robj = py::import_attr(vm, "renpy.object", "Object")?;
-    let wrapper = cls(vm, "Wrapper", &[robj], &[("__reduce__", wrapper_reduce), ("__init__", wrapper_init), ("__call__", wrapper_call)], &[])?;
-    let cab = cls(vm, "ChoiceActionBase", &[action], &[("__init__", cab_init), ("get_sensitive", cab_get_sensitive), ("get_selected", cab_get_selected), ("get_chosen", cab_get_chosen)], &[("sensitive", Value::Bool(true))])?;
+    let wrapper = cls(
+        vm,
+        "Wrapper",
+        &[robj],
+        &[
+            ("__reduce__", wrapper_reduce),
+            ("__init__", wrapper_init),
+            ("__call__", wrapper_call),
+        ],
+        &[],
+    )?;
+    let cab = cls(
+        vm,
+        "ChoiceActionBase",
+        &[action],
+        &[
+            ("__init__", cab_init),
+            ("get_sensitive", cab_get_sensitive),
+            ("get_selected", cab_get_selected),
+            ("get_chosen", cab_get_chosen),
+        ],
+        &[("sensitive", Value::Bool(true))],
+    )?;
     let g = vm.types.new_builtin("chosen", cab_chosen);
     let p = py::property(vm, g, None)?;
     py::set(vm, &cab, "chosen", p)?;
-    cls(vm, "ChoiceReturn", &[cab.clone()], &[("__call__", choice_return_call)], &[])?;
-    cls(vm, "ChoiceJump", &[cab], &[("get_selected", choice_jump_get_selected), ("__call__", choice_jump_call)], &[])?;
-    cls(vm, "Choice", &[obj.clone()], &[("__init__", choice_init)], &[])?;
-    cls(vm, "Imagemap", &[obj], &[("__init__", imagemap_obj_init), ("reuse", imagemap_obj_reuse)], &[("alpha", Value::Bool(true)), ("cache_param", Value::Bool(true))])?;
+    cls(
+        vm,
+        "ChoiceReturn",
+        &[cab.clone()],
+        &[("__call__", choice_return_call)],
+        &[],
+    )?;
+    cls(
+        vm,
+        "ChoiceJump",
+        &[cab],
+        &[
+            ("get_selected", choice_jump_get_selected),
+            ("__call__", choice_jump_call),
+        ],
+        &[],
+    )?;
+    cls(
+        vm,
+        "Choice",
+        &[obj.clone()],
+        &[("__init__", choice_init)],
+        &[],
+    )?;
+    cls(
+        vm,
+        "Imagemap",
+        &[obj],
+        &[
+            ("__init__", imagemap_obj_init),
+            ("reuse", imagemap_obj_reuse),
+        ],
+        &[
+            ("alpha", Value::Bool(true)),
+            ("cache_param", Value::Bool(true)),
+        ],
+    )?;
     let nsp = py::import_attr(vm, "renpy.object", "Sentinel")?;
-    let nsp = vm.call(&nsp, vec![vm.types.new_str("NoStylePrefixGiven")], Vec::new())?;
+    let nsp = vm.call(
+        &nsp,
+        vec![vm.types.new_str("NoStylePrefixGiven")],
+        Vec::new(),
+    )?;
     set(vm, "NoStylePrefixGiven", nsp);
     for n in ["stack", "at_stack", "imagemap_stack"] {
         let l = vm.types.new_list(Vec::new());
@@ -1505,7 +2104,12 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     set(vm, "VIEWPORT_SIZE", Value::Int(32767));
     // Curried helpers.
     let curry = py::import_attr(vm, "renpy.curry", "curry")?;
-    for (n, f) in [("returns", "_returns"), ("jumps", "_jumps"), ("jumpsoutofcontext", "_jumpsoutofcontext"), ("autobar_interpolate", "_autobar_interpolate")] {
+    for (n, f) in [
+        ("returns", "_returns"),
+        ("jumps", "_jumps"),
+        ("jumpsoutofcontext", "_jumpsoutofcontext"),
+        ("autobar_interpolate", "_autobar_interpolate"),
+    ] {
         let inner = py::get(vm, &Value::Obj(mm.clone()), f)?;
         let c = vm.call(&curry, vec![inner], Vec::new())?;
         set(vm, n, c);
@@ -1517,48 +2121,244 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let t = Value::Bool(true);
     let wrappers: Vec<(&str, Value, Vec<(&str, Value)>)> = vec![
         ("add", py::get(vm, &Value::Obj(mm.clone()), "_add")?, vec![]),
-        ("implicit_add", py::get(vm, &Value::Obj(mm.clone()), "_implicit_add")?, vec![]),
-        ("image", py::get(vm, &Value::Obj(mm.clone()), "_image")?, vec![]),
-        ("null", py::import_attr(vm, "renpy.display.layout", "Null")?, vec![]),
-        ("text", py::import_attr(vm, "renpy.text.text", "Text")?, vec![("style", s(vm, "text")), ("replaces", t.clone())]),
-        ("hbox", py::import_attr(vm, "renpy.display.layout", "MultiBox")?, vec![("layout", s(vm, "horizontal")), ("style", s(vm, "hbox")), ("many", t.clone())]),
-        ("vbox", py::import_attr(vm, "renpy.display.layout", "MultiBox")?, vec![("layout", s(vm, "vertical")), ("style", s(vm, "vbox")), ("many", t.clone())]),
-        ("fixed", py::import_attr(vm, "renpy.display.layout", "MultiBox")?, vec![("layout", s(vm, "fixed")), ("style", s(vm, "fixed")), ("many", t.clone())]),
-        ("default_fixed", py::import_attr(vm, "renpy.display.layout", "MultiBox")?, vec![("layout", s(vm, "fixed")), ("many", t.clone())]),
-        ("grid", py::import_attr(vm, "renpy.display.layout", "Grid")?, vec![("style", s(vm, "grid")), ("many", t.clone())]),
-        ("side", py::import_attr(vm, "renpy.display.layout", "Side")?, vec![("style", s(vm, "side")), ("many", t.clone())]),
-        ("sizer", py::get(vm, &Value::Obj(mm.clone()), "_sizer")?, vec![("one", t.clone())]),
-        ("window", py::import_attr(vm, "renpy.display.layout", "Window")?, vec![("style", s(vm, "window")), ("one", t.clone()), ("child", Value::None)]),
-        ("frame", py::import_attr(vm, "renpy.display.layout", "Window")?, vec![("style", s(vm, "frame")), ("one", t.clone()), ("child", Value::None)]),
-        ("keymap", py::import_attr(vm, "renpy.display.behavior", "Keymap")?, vec![]),
-        ("saybehavior", py::import_attr(vm, "renpy.display.behavior", "SayBehavior")?, vec![]),
-        ("pausebehavior", py::import_attr(vm, "renpy.display.behavior", "PauseBehavior")?, vec![]),
-        ("soundstopbehavior", py::import_attr(vm, "renpy.display.behavior", "SoundStopBehavior")?, vec![]),
+        (
+            "implicit_add",
+            py::get(vm, &Value::Obj(mm.clone()), "_implicit_add")?,
+            vec![],
+        ),
+        (
+            "image",
+            py::get(vm, &Value::Obj(mm.clone()), "_image")?,
+            vec![],
+        ),
+        (
+            "null",
+            py::import_attr(vm, "renpy.display.layout", "Null")?,
+            vec![],
+        ),
+        (
+            "text",
+            py::import_attr(vm, "renpy.text.text", "Text")?,
+            vec![("style", s(vm, "text")), ("replaces", t.clone())],
+        ),
+        (
+            "hbox",
+            py::import_attr(vm, "renpy.display.layout", "MultiBox")?,
+            vec![
+                ("layout", s(vm, "horizontal")),
+                ("style", s(vm, "hbox")),
+                ("many", t.clone()),
+            ],
+        ),
+        (
+            "vbox",
+            py::import_attr(vm, "renpy.display.layout", "MultiBox")?,
+            vec![
+                ("layout", s(vm, "vertical")),
+                ("style", s(vm, "vbox")),
+                ("many", t.clone()),
+            ],
+        ),
+        (
+            "fixed",
+            py::import_attr(vm, "renpy.display.layout", "MultiBox")?,
+            vec![
+                ("layout", s(vm, "fixed")),
+                ("style", s(vm, "fixed")),
+                ("many", t.clone()),
+            ],
+        ),
+        (
+            "default_fixed",
+            py::import_attr(vm, "renpy.display.layout", "MultiBox")?,
+            vec![("layout", s(vm, "fixed")), ("many", t.clone())],
+        ),
+        (
+            "grid",
+            py::import_attr(vm, "renpy.display.layout", "Grid")?,
+            vec![("style", s(vm, "grid")), ("many", t.clone())],
+        ),
+        (
+            "side",
+            py::import_attr(vm, "renpy.display.layout", "Side")?,
+            vec![("style", s(vm, "side")), ("many", t.clone())],
+        ),
+        (
+            "sizer",
+            py::get(vm, &Value::Obj(mm.clone()), "_sizer")?,
+            vec![("one", t.clone())],
+        ),
+        (
+            "window",
+            py::import_attr(vm, "renpy.display.layout", "Window")?,
+            vec![
+                ("style", s(vm, "window")),
+                ("one", t.clone()),
+                ("child", Value::None),
+            ],
+        ),
+        (
+            "frame",
+            py::import_attr(vm, "renpy.display.layout", "Window")?,
+            vec![
+                ("style", s(vm, "frame")),
+                ("one", t.clone()),
+                ("child", Value::None),
+            ],
+        ),
+        (
+            "keymap",
+            py::import_attr(vm, "renpy.display.behavior", "Keymap")?,
+            vec![],
+        ),
+        (
+            "saybehavior",
+            py::import_attr(vm, "renpy.display.behavior", "SayBehavior")?,
+            vec![],
+        ),
+        (
+            "pausebehavior",
+            py::import_attr(vm, "renpy.display.behavior", "PauseBehavior")?,
+            vec![],
+        ),
+        (
+            "soundstopbehavior",
+            py::import_attr(vm, "renpy.display.behavior", "SoundStopBehavior")?,
+            vec![],
+        ),
         ("key", py::get(vm, &Value::Obj(mm.clone()), "_key")?, vec![]),
-        ("input", py::import_attr(vm, "renpy.display.behavior", "Input")?, vec![("exclude", s(vm, "{}")), ("style", s(vm, "input")), ("replaces", t.clone())]),
-        ("button", py::import_attr(vm, "renpy.display.behavior", "Button")?, vec![("style", s(vm, "button")), ("one", t.clone())]),
-        ("imagebutton", py::get(vm, &Value::Obj(mm.clone()), "_imagebutton")?, vec![("style", s(vm, "image_button"))]),
-        ("textbutton", py::get(vm, &Value::Obj(mm.clone()), "_textbutton")?, vec![]),
-        ("label", py::get(vm, &Value::Obj(mm.clone()), "_label")?, vec![]),
-        ("bar", py::get(vm, &Value::Obj(mm.clone()), "_bar")?, vec![("vertical", Value::Bool(false)), ("replaces", t.clone())]),
-        ("vbar", py::get(vm, &Value::Obj(mm.clone()), "_bar")?, vec![("vertical", t.clone()), ("replaces", t.clone())]),
-        ("slider", py::get(vm, &Value::Obj(mm.clone()), "_bar")?, vec![("style", s(vm, "slider")), ("replaces", t.clone())]),
-        ("vslider", py::get(vm, &Value::Obj(mm.clone()), "_bar")?, vec![("style", s(vm, "vslider")), ("replaces", t.clone())]),
-        ("scrollbar", py::get(vm, &Value::Obj(mm.clone()), "_bar")?, vec![("style", s(vm, "scrollbar")), ("replaces", t.clone())]),
-        ("vscrollbar", py::get(vm, &Value::Obj(mm.clone()), "_bar")?, vec![("style", s(vm, "vscrollbar")), ("replaces", t.clone())]),
-        ("autobar", py::get(vm, &Value::Obj(mm.clone()), "_autobar")?, vec![]),
-        ("transform", py::import_attr(vm, "renpy.display.motion", "Transform")?, vec![("one", t.clone()), ("style", s(vm, "transform"))]),
-        ("_viewport", py::import_attr(vm, "renpy.display.viewport", "Viewport")?, vec![("one", t.clone()), ("replaces", t.clone()), ("style", s(vm, "viewport"))]),
-        ("_vpgrid", py::import_attr(vm, "renpy.display.viewport", "VPGrid")?, vec![("many", t.clone()), ("replaces", t.clone()), ("style", s(vm, "vpgrid"))]),
-        ("conditional", py::import_attr(vm, "renpy.display.behavior", "Conditional")?, vec![("one", t.clone())]),
-        ("timer", py::import_attr(vm, "renpy.display.behavior", "Timer")?, vec![("replaces", t.clone())]),
-        ("drag", py::import_attr(vm, "renpy.display.dragdrop", "Drag")?, vec![("replaces", t.clone()), ("one", t.clone())]),
-        ("draggroup", py::import_attr(vm, "renpy.display.dragdrop", "DragGroup")?, vec![("replaces", t.clone()), ("many", t.clone())]),
-        ("mousearea", py::import_attr(vm, "renpy.display.behavior", "MouseArea")?, vec![("replaces", t.clone())]),
-        ("imagemap", py::get(vm, &Value::Obj(mm.clone()), "_imagemap")?, vec![("imagemap", t.clone()), ("style", s(vm, "imagemap"))]),
-        ("hotspot_with_child", py::get(vm, &Value::Obj(mm.clone()), "_hotspot")?, vec![("style", s(vm, "hotspot")), ("one", t.clone())]),
-        ("hotbar", py::get(vm, &Value::Obj(mm.clone()), "_hotbar")?, vec![("style", s(vm, "hotbar")), ("replaces", t.clone())]),
-        ("on", py::import_attr(vm, "renpy.display.behavior", "OnEvent")?, vec![]),
+        (
+            "input",
+            py::import_attr(vm, "renpy.display.behavior", "Input")?,
+            vec![
+                ("exclude", s(vm, "{}")),
+                ("style", s(vm, "input")),
+                ("replaces", t.clone()),
+            ],
+        ),
+        (
+            "button",
+            py::import_attr(vm, "renpy.display.behavior", "Button")?,
+            vec![("style", s(vm, "button")), ("one", t.clone())],
+        ),
+        (
+            "imagebutton",
+            py::get(vm, &Value::Obj(mm.clone()), "_imagebutton")?,
+            vec![("style", s(vm, "image_button"))],
+        ),
+        (
+            "textbutton",
+            py::get(vm, &Value::Obj(mm.clone()), "_textbutton")?,
+            vec![],
+        ),
+        (
+            "label",
+            py::get(vm, &Value::Obj(mm.clone()), "_label")?,
+            vec![],
+        ),
+        (
+            "bar",
+            py::get(vm, &Value::Obj(mm.clone()), "_bar")?,
+            vec![("vertical", Value::Bool(false)), ("replaces", t.clone())],
+        ),
+        (
+            "vbar",
+            py::get(vm, &Value::Obj(mm.clone()), "_bar")?,
+            vec![("vertical", t.clone()), ("replaces", t.clone())],
+        ),
+        (
+            "slider",
+            py::get(vm, &Value::Obj(mm.clone()), "_bar")?,
+            vec![("style", s(vm, "slider")), ("replaces", t.clone())],
+        ),
+        (
+            "vslider",
+            py::get(vm, &Value::Obj(mm.clone()), "_bar")?,
+            vec![("style", s(vm, "vslider")), ("replaces", t.clone())],
+        ),
+        (
+            "scrollbar",
+            py::get(vm, &Value::Obj(mm.clone()), "_bar")?,
+            vec![("style", s(vm, "scrollbar")), ("replaces", t.clone())],
+        ),
+        (
+            "vscrollbar",
+            py::get(vm, &Value::Obj(mm.clone()), "_bar")?,
+            vec![("style", s(vm, "vscrollbar")), ("replaces", t.clone())],
+        ),
+        (
+            "autobar",
+            py::get(vm, &Value::Obj(mm.clone()), "_autobar")?,
+            vec![],
+        ),
+        (
+            "transform",
+            py::import_attr(vm, "renpy.display.motion", "Transform")?,
+            vec![("one", t.clone()), ("style", s(vm, "transform"))],
+        ),
+        (
+            "_viewport",
+            py::import_attr(vm, "renpy.display.viewport", "Viewport")?,
+            vec![
+                ("one", t.clone()),
+                ("replaces", t.clone()),
+                ("style", s(vm, "viewport")),
+            ],
+        ),
+        (
+            "_vpgrid",
+            py::import_attr(vm, "renpy.display.viewport", "VPGrid")?,
+            vec![
+                ("many", t.clone()),
+                ("replaces", t.clone()),
+                ("style", s(vm, "vpgrid")),
+            ],
+        ),
+        (
+            "conditional",
+            py::import_attr(vm, "renpy.display.behavior", "Conditional")?,
+            vec![("one", t.clone())],
+        ),
+        (
+            "timer",
+            py::import_attr(vm, "renpy.display.behavior", "Timer")?,
+            vec![("replaces", t.clone())],
+        ),
+        (
+            "drag",
+            py::import_attr(vm, "renpy.display.dragdrop", "Drag")?,
+            vec![("replaces", t.clone()), ("one", t.clone())],
+        ),
+        (
+            "draggroup",
+            py::import_attr(vm, "renpy.display.dragdrop", "DragGroup")?,
+            vec![("replaces", t.clone()), ("many", t.clone())],
+        ),
+        (
+            "mousearea",
+            py::import_attr(vm, "renpy.display.behavior", "MouseArea")?,
+            vec![("replaces", t.clone())],
+        ),
+        (
+            "imagemap",
+            py::get(vm, &Value::Obj(mm.clone()), "_imagemap")?,
+            vec![("imagemap", t.clone()), ("style", s(vm, "imagemap"))],
+        ),
+        (
+            "hotspot_with_child",
+            py::get(vm, &Value::Obj(mm.clone()), "_hotspot")?,
+            vec![("style", s(vm, "hotspot")), ("one", t.clone())],
+        ),
+        (
+            "hotbar",
+            py::get(vm, &Value::Obj(mm.clone()), "_hotbar")?,
+            vec![("style", s(vm, "hotbar")), ("replaces", t.clone())],
+        ),
+        (
+            "on",
+            py::import_attr(vm, "renpy.display.behavior", "OnEvent")?,
+            vec![],
+        ),
     ];
     for (name, f, kwargs) in wrappers {
         let k: Vec<(Rc<str>, Value)> = kwargs.into_iter().map(|(k, v)| (Rc::from(k), v)).collect();
@@ -1566,6 +2366,29 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
         py::set(vm, &w, "name", vm.types.new_str(name))?;
         set(vm, name, w);
     }
+    let rel = super::slparser::release(vm);
+    // `from renpy.display.behavior import is_selected, is_sensitive`.
+    for n in ["is_selected", "is_sensitive"] {
+        let f = py::import_attr(vm, "renpy.display.behavior", n)?;
+        set(vm, n, f);
+    }
+    if rel >= (6, 99) {
+        let f = vm.types.new_builtin("viewport_common", f_viewport_common);
+        set(vm, "viewport_common", f);
+    } else {
+        // 6.18 names the style group sentinel and helper.
+        let ngg = py::import_attr(vm, "renpy.object", "Sentinel")?;
+        let ngg = vm.call(&ngg, vec![vm.types.new_str("NoStyleGroupGiven")], Vec::new())?;
+        set(vm, "NoStyleGroupGiven", ngg);
+        let f = vm.types.new_builtin("style_group_style", f_style_group_style);
+        set(vm, "style_group_style", f);
+    }
+    // The postamble's `for k, v in globals().items()` leaves its loop
+    // variables in the module: the final item is ('v', <previous value>),
+    // after ('k', 'screen_id') in the 8.x global order.
+    let last = if rel >= (6, 99) { "screen_id" } else { "on" };
+    set(vm, "k", vm.types.new_str("v"));
+    set(vm, "v", vm.types.new_str(last));
     // `renpy.game.post_init.append(reset)` at import, as upstream.
     let pi = py::import_attr(vm, "renpy.game", "post_init")?;
     let reset = py::get(vm, &Value::Obj(mm.clone()), "reset")?;

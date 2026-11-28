@@ -17,6 +17,7 @@ pub(super) struct Slot {
     pub dirty: bool,
     pub subs: Vec<Option<(String, i32, f32)>>,
     pub adjustments: Adjustments,
+    pub link_max: i32,
 }
 
 type Transform = [f32; 10];
@@ -120,10 +121,11 @@ fn read_prop(r: &mut Reader<'_>) -> Result<Prop> {
     if version >= 101 {
         r.i32()?;
     }
-    r.i32()?;
+    let link_max = r.i32()?;
     let mut file = r.string()?;
     let mut data = Slot {
         file_id: r.i32()?,
+        link_max,
         ..Default::default()
     };
     r.bool()?;
@@ -401,6 +403,129 @@ pub(crate) fn apply_bytes(s: &mut TjsState, idx: usize, bytes: &[u8]) -> Result<
     }
     if matches!(kind, 1 | 2) && colors.is_some() {
         appearance.colors = colors;
+    }
+    Ok(())
+}
+
+/// CharacterMgr slot properties carry the complete v1040 adjustment maps.
+pub(super) fn restore_model_props(
+    model: &mut crate::chara::Maid,
+    properties: &crate::save::stock_1040::Properties<'_>,
+    colors: Option<[PartsColor; 9]>,
+) -> Result<Appearance> {
+    let mut appearance = Appearance { slots: BTreeMap::new(), colors };
+    for (key, bytes) in properties {
+        let mut r = Reader::new(bytes);
+        let saved = read_prop(&mut r)?;
+        ensure!(r.remaining() == 0, "unexpected bytes in stock prop {key}");
+        let name = character::MPN[saved.index];
+        ensure!(name.eq_ignore_ascii_case(key), "stock property key {key} differs from {name}");
+        ensure!(!appearance.slots.contains_key(name), "duplicate saved property {name}");
+        let prop = model.props.get_mut(saved.index).context("stock property index")?;
+        if saved.kind == 3 {
+            prop.file = saved.file;
+            prop.dut = true;
+        } else {
+            prop.value = saved.value.clamp(prop.min, prop.max);
+        }
+        appearance.slots.insert(name, saved.data);
+    }
+    if let Some(colors) = colors {
+        for (index, color) in colors.into_iter().enumerate() {
+            model.set_parts_color(index, color);
+        }
+    }
+    Ok(appearance)
+}
+
+pub(super) fn capture_model_props(
+    model: &crate::chara::Maid,
+    appearance: Option<&Appearance>,
+) -> Result<crate::save::stock_1040::Properties<'static>> {
+    use crate::binio::Writer;
+    ensure!(model.prop_names == character::MPN, "nonretail character properties");
+    model.prop_names.iter().zip(&model.props).enumerate().map(|(index, (&name, prop))| {
+        let data = appearance.and_then(|look| look.slots.get(name));
+        let mut w = Writer::default();
+        w.str("CM3D2_MPROP");
+        w.i32(1040);
+        w.i32(i32::try_from(index)?);
+        w.str(name);
+        w.i32(i32::from(prop.kind));
+        w.i32(prop.default);
+        w.i32(prop.value);
+        w.i32(prop.temporary_value.unwrap_or(prop.value));
+        w.i32(data.map_or(0, |slot| slot.link_max));
+        w.str(&prop.file);
+        w.i32(file_id(&prop.file, data.map_or(0, |slot| slot.file_id)));
+        w.bool(prop.dut);
+        w.i32(prop.max);
+        w.i32(prop.min);
+        let subs = data.map(|slot| slot.subs.as_slice()).unwrap_or_default();
+        w.i32(i32::try_from(subs.len())?);
+        for sub in subs {
+            w.bool(sub.is_some());
+            if let Some((file, rid, alpha)) = sub {
+                w.bool(prop.dut);
+                w.str(file);
+                w.i32(*rid);
+                w.f32(*alpha);
+            }
+        }
+        if let Some(adjustments) = data.map(|slot| &slot.adjustments) {
+            write_adjustments(&mut w, adjustments)?;
+        } else {
+            for _ in 0..4 {
+                w.i32(0);
+            }
+        }
+        Ok((name.into(), std::borrow::Cow::Owned(w.bytes)))
+    }).collect()
+}
+
+fn write_adjustments(w: &mut crate::binio::Writer, data: &Adjustments) -> Result<()> {
+    w.i32(i32::try_from(data.skin.len())?);
+    for (&slot, (key, enabled, transform)) in &data.skin {
+        w.i32(slot);
+        w.i32(*key);
+        w.bool(*enabled);
+        for &component in transform {
+            w.f32(component);
+        }
+    }
+    w.i32(i32::try_from(data.vertices.len())?);
+    for (&slot, vertices) in &data.vertices {
+        w.i32(slot);
+        w.i32(i32::try_from(vertices.len())?);
+        for (name, (key, enabled, count, index, transform)) in vertices {
+            w.str(name);
+            w.i32(*key);
+            w.bool(*enabled);
+            w.i32(*count);
+            w.i32(*index);
+            for &component in transform {
+                w.f32(component);
+            }
+        }
+    }
+    w.i32(i32::try_from(data.materials.len())?);
+    for (&slot, (key, index, name, ty, value)) in &data.materials {
+        w.i32(slot);
+        w.i32(*key);
+        w.i32(*index);
+        w.str(name);
+        w.str(ty);
+        w.str(value);
+    }
+    w.i32(i32::try_from(data.bone_lengths.len())?);
+    for (&slot, (key, bones)) in &data.bone_lengths {
+        w.i32(slot);
+        w.i32(*key);
+        w.i32(i32::try_from(bones.len())?);
+        for (name, &value) in bones {
+            w.str(name);
+            w.f32(value);
+        }
     }
     Ok(())
 }

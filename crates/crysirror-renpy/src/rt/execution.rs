@@ -65,7 +65,9 @@ fn raise_new(vm: &mut Vm, module: &str, cls: &str, args: Vec<Value>) -> PyErr {
 pub fn exc_isinstance(vm: &mut Vm, e: &PyErr, module: &str, cls: &str) -> bool {
     let PyErr::Exc(o) = e else { return false };
     match py::import_attr(vm, module, cls) {
-        Ok(c) => c.obj().is_some_and(|c| ops::isinstance(vm, &Value::Obj(o.clone()), c)),
+        Ok(c) => c
+            .obj()
+            .is_some_and(|c| ops::isinstance(vm, &Value::Obj(o.clone()), c)),
         Err(_) => false,
     }
 }
@@ -86,7 +88,10 @@ fn is_control(vm: &mut Vm, e: &PyErr) -> bool {
         Err(_) => return false,
     };
     let v = exc_value(e);
-    py::seq(&ce).unwrap_or_default().iter().any(|c| c.obj().is_some_and(|c| ops::isinstance(vm, &v, c)))
+    py::seq(&ce)
+        .unwrap_or_default()
+        .iter()
+        .any(|c| c.obj().is_some_and(|c| ops::isinstance(vm, &v, c)))
 }
 
 // Infinite loop guard ----------------------------------------------------------------------------------
@@ -116,7 +121,11 @@ pub fn check_infinite_loop(vm: &mut Vm) -> PyResult<()> {
 }
 
 pub fn not_infinite_loop(vm: &mut Vm, delay: f64) {
-    let d = if py::config_bool(vm, "developer").unwrap_or(false) { delay } else { delay * 5. };
+    let d = if py::config_bool(vm, "developer").unwrap_or(false) {
+        delay
+    } else {
+        delay * 5.
+    };
     let now = super::link::now(vm);
     IL_TIME.with(|c| c.set(now + d));
 }
@@ -161,7 +170,9 @@ fn lle_eq(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     };
     let na = g(vm, a, "node_name")?;
     let nb = g(vm, b, "node_name")?;
-    Ok(Value::Bool(eq(vm, "filename")? && eq(vm, "line")? && (na.is(&nb) || ops::eq(vm, &na, &nb)?)))
+    Ok(Value::Bool(
+        eq(vm, "filename")? && eq(vm, "line")? && (na.is(&nb) || ops::eq(vm, &na, &nb)?),
+    ))
 }
 
 fn lle_ne(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -192,7 +203,12 @@ fn ctx_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let context = arg_or(args, kw, 2, "context", Value::None);
     let clear = arg_or(args, kw, 3, "clear", Value::Bool(false));
     st(vm, this, "current", Value::None)?;
-    for n in ["call_location_stack", "return_stack", "abnormal_stack", "line_log"] {
+    for n in [
+        "call_location_stack",
+        "return_stack",
+        "abnormal_stack",
+        "line_log",
+    ] {
         st(vm, this, n, new_list(vm))?;
     }
     let d0 = vm.types.new_dict();
@@ -209,7 +225,12 @@ fn ctx_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     for n in ["interacting", "init_phase", "force_checkpoint"] {
         st(vm, this, n, Value::Bool(false))?;
     }
-    for n in ["defer_rollback", "exception_handler", "say_attributes", "temporary_attributes"] {
+    for n in [
+        "defer_rollback",
+        "exception_handler",
+        "say_attributes",
+        "temporary_attributes",
+    ] {
         st(vm, this, n, Value::None)?;
     }
     let sii = py::import_attr(vm, "renpy.display.image", "ShownImageInfo")?;
@@ -241,18 +262,37 @@ fn ctx_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let images = g(vm, this, "images")?;
     let sl = vm.call(&slc, vec![oldsl, images], Vec::new())?;
     st(vm, this, "scene_lists", sl.clone())?;
-    let ccrs = py::config(vm, "context_copy_remove_screens")?;
+    // context_copy_remove_screens arrived in 7.3.
+    let ccrs = if super::state::rt(vm).profile.at_least(7, 3) {
+        py::config(vm, "context_copy_remove_screens")?
+    } else {
+        vm.types.new_list(Vec::new())
+    };
     for i in py::items(vm, &ccrs)? {
         let scr = py::s(vm, "screens");
         vm.call_method(&sl, "remove", vec![scr, i, Value::None])?;
     }
-    let names: Vec<Value> = ["_return", "_args", "_kwargs", "mouse_visible", "suppress_overlay", "_side_image_attributes"].iter().map(|n| vm.types.new_str(n)).collect();
+    let names: Vec<Value> = [
+        "_return",
+        "_args",
+        "_kwargs",
+        "mouse_visible",
+        "suppress_overlay",
+        "_side_image_attributes",
+    ]
+    .iter()
+    .map(|n| vm.types.new_str(n))
+    .collect();
     let names = vm.types.new_list(names);
     vm.call_method(this, "make_dynamic", vec![names])?;
     let ds = g(vm, this, "dynamic_stack")?;
     ops::list_append(vm, &ds, vm.types.new_dict())?;
     if py::truthy(vm, &clear)? {
-        let layers = if matches!(clear, Value::Bool(true)) { py::config(vm, "context_clear_layers")? } else { clear };
+        let layers = if matches!(clear, Value::Bool(true)) {
+            py::config(vm, "context_clear_layers")?
+        } else {
+            clear
+        };
         for i in py::items(vm, &layers)? {
             py::method_kw(vm, &sl, "clear", Vec::new(), vec![("layer".into(), i)])?;
         }
@@ -262,9 +302,17 @@ fn ctx_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     st(vm, this, "modes", modes)?;
     st(vm, this, "use_modes", Value::Bool(true))?;
     let prefs = game(vm, "preferences")?;
-    let lang = if py::is_none(&prefs) { Value::None } else { g(vm, &prefs, "language")? };
+    let lang = if py::is_none(&prefs) {
+        Value::None
+    } else {
+        g(vm, &prefs, "language")?
+    };
     st(vm, this, "translate_language", lang)?;
-    for n in ["translate_identifier", "alternate_translate_identifier", "deferred_translate_identifier"] {
+    for n in [
+        "translate_identifier",
+        "alternate_translate_identifier",
+        "deferred_translate_identifier",
+    ] {
         st(vm, this, n, Value::None)?;
     }
     Ok(Value::None)
@@ -326,7 +374,12 @@ fn ctx_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if version < 15 {
         let rs = g(vm, this, "return_stack")?;
         let n = ops::len(vm, &rs)?;
-        st(vm, this, "abnormal_stack", vm.types.new_list(vec![Value::Bool(false); n]))?;
+        st(
+            vm,
+            this,
+            "abnormal_stack",
+            vm.types.new_list(vec![Value::Bool(false); n]),
+        )?;
     }
     if version < 16 {
         st(vm, this, "alternate_translate_identifier", Value::None)?;
@@ -378,7 +431,8 @@ fn dynamic_target(vm: &mut Vm, name: &str) -> PyResult<(Value, String)> {
         let k = py::s(vm, head);
         let m = ops::dict_get(vm, d.obj().unwrap(), &k)?.unwrap_or(Value::None);
         let sm = py::import_attr(vm, "renpy.python", "StoreModule")?;
-        let is_module = matches!(m.payload(), Some(crysirror_python::Payload::Module(..))) || sm.obj().is_some_and(|c| ops::isinstance(vm, &m, c));
+        let is_module = matches!(m.payload(), Some(crysirror_python::Payload::Module(..)))
+            || sm.obj().is_some_and(|c| ops::isinstance(vm, &m, c));
         if !is_module {
             return Err(py::error(vm, format!("{head} is not a valid namespace.")));
         }
@@ -458,7 +512,9 @@ fn ctx_pop_dynamic_roots(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> 
         for (k, v) in ops::mapping_items(vm, dynamic)? {
             let n = py::string(vm, &k)?;
             let name = py::s(vm, &format!("store.{n}"));
-            if delete.obj().is_some_and(|c| ops::isinstance(vm, &v, c)) && ops::contains(vm, roots, &name)? {
+            if delete.obj().is_some_and(|c| ops::isinstance(vm, &v, c))
+                && ops::contains(vm, roots, &name)?
+            {
                 ops::delitem(vm, roots, name)?;
             } else {
                 ops::setitem(vm, roots, name, v)?;
@@ -485,7 +541,10 @@ fn ctx_check_stacks(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         while ops::len(vm, &ds)? > r + 2 {
             pop_dynamic(vm, this)?;
         }
-        return Err(py::error(vm, format!("Potential return stack corruption: dynamic={d} return={r}")));
+        return Err(py::error(
+            vm,
+            format!("Potential return stack corruption: dynamic={d} return={r}"),
+        ));
     }
     Ok(Value::None)
 }
@@ -509,7 +568,12 @@ fn ctx_report_traceback(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             };
             if !f.replace('\\', "/").starts_with("common/") {
                 let what = if i == last { "script" } else { "script call" };
-                let t = vec![py::s(vm, &f), Value::Int(l as i64), py::s(vm, what), Value::None];
+                let t = vec![
+                    py::s(vm, &f),
+                    Value::Int(l as i64),
+                    py::s(vm, what),
+                    Value::None,
+                ];
                 rv.push(vm.types.new_tuple(t));
             }
         }
@@ -531,9 +595,16 @@ fn ctx_mark_seen(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 pub fn call(vm: &mut Vm, this: &Value, label: &Value, return_site: Value) -> PyResult<Value> {
     let current = g(vm, this, "current")?;
     if !py::truthy(vm, &current)? {
-        return Err(py::error(vm, "Context not capable of executing Ren'Py code."));
+        return Err(py::error(
+            vm,
+            "Context not capable of executing Ren'Py code.",
+        ));
     }
-    let return_site = if py::is_none(&return_site) { current.clone() } else { return_site };
+    let return_site = if py::is_none(&return_site) {
+        current.clone()
+    } else {
+        return_site
+    };
     let cls = g(vm, this, "call_location_stack")?;
     ops::list_append(vm, &cls, current)?;
     let rs = g(vm, this, "return_stack")?;
@@ -544,7 +615,9 @@ pub fn call(vm: &mut Vm, this: &Value, label: &Value, return_site: Value) -> PyR
     let la = g(vm, this, "last_abnormal")?;
     ops::list_append(vm, &abs, la)?;
     st(vm, this, "current", label.clone())?;
-    let names = vm.types.new_list(vec![py::s(vm, "_args"), py::s(vm, "_kwargs")]);
+    let names = vm
+        .types
+        .new_list(vec![py::s(vm, "_args"), py::s(vm, "_kwargs")]);
     vm.call_method(this, "make_dynamic", vec![names])?;
     store_set(vm, "_args", Value::None)?;
     store_set(vm, "_kwargs", Value::None)?;
@@ -648,7 +721,15 @@ fn ctx_rollback_copy(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         ds.push(vm.call_method(&d, "copy", Vec::new())?);
     }
     st(vm, &rv, "dynamic_stack", vm.types.new_list(ds))?;
-    for n in ["current", "runtime", "info", "translate_language", "translate_identifier", "abnormal", "last_abnormal"] {
+    for n in [
+        "current",
+        "runtime",
+        "info",
+        "translate_language",
+        "translate_identifier",
+        "abnormal",
+        "last_abnormal",
+    ] {
         let v = g(vm, this, n)?;
         st(vm, &rv, n, v)?;
     }
@@ -695,7 +776,9 @@ fn ctx_predict(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let mut seen = std::collections::HashSet::new();
     let labels = vm.call(&cb, vec![current], Vec::new())?;
     for label in ops::collect(vm, &labels)? {
-        let Some(id) = nodes::find(vm, &label)? else { continue };
+        let Some(id) = nodes::find(vm, &label)? else {
+            continue;
+        };
         if seen.insert(id) {
             queue.push((nodes::handle(vm, id)?, old_images.clone(), rs.clone()));
         }
@@ -815,7 +898,13 @@ fn begin_rollback(vm: &mut Vm, this: &Value, node: &Value, first: bool) -> PyRes
         }
     }
     if update && gb(vm, this, "rollback")? && !py::is_none(&log) {
-        py::method_kw(vm, &log, "begin", Vec::new(), vec![("force".into(), Value::Bool(force))])?;
+        py::method_kw(
+            vm,
+            &log,
+            "begin",
+            Vec::new(),
+            vec![("force".into(), Value::Bool(force))],
+        )?;
         if gb(vm, this, "force_checkpoint")? {
             st(vm, &log, "force_checkpoint", Value::Bool(true))?;
             st(vm, this, "force_checkpoint", Value::Bool(false))?;
@@ -831,7 +920,11 @@ fn handle_error(vm: &mut Vm, this: &Value, e: PyErr) -> PyResult<()> {
     // Upstream's traceback starts at this `Context.run` frame, which
     // reports the script location through `report_traceback`.
     if let PyErr::Exc(o) = &e
-        && let Ok(Value::Obj(l)) = ctx_report_traceback(vm, &[this.clone(), py::s(vm, "run"), Value::Bool(false)], &[])
+        && let Ok(Value::Obj(l)) = ctx_report_traceback(
+            vm,
+            &[this.clone(), py::s(vm, "run"), Value::Bool(false)],
+            &[],
+        )
     {
         let ev = Value::Obj(o.clone());
         let tb = py::get_or_none(vm, &ev, "__traceback__")?;
@@ -841,6 +934,9 @@ fn handle_error(vm: &mut Vm, this: &Value, e: PyErr) -> PyResult<()> {
         }
         let nl = vm.types.new_list(all);
         py::set(vm, &ev, "__traceback__", nl)?;
+    }
+    if super::error84::active(vm) {
+        return super::error84::handle_exception(vm, this, e);
     }
     let report = py::import_attr(vm, "renpy.error", "report_exception");
     let (short, full, tbf) = match report {
@@ -854,12 +950,20 @@ fn handle_error(vm: &mut Vm, this: &Value, e: PyErr) -> PyResult<()> {
     };
     let h = g(vm, this, "exception_handler")?;
     let handled = if !py::is_none(&h) {
-        vm.call(&h, vec![short.clone(), full.clone(), tbf.clone()], Vec::new())?;
+        vm.call(
+            &h,
+            vec![short.clone(), full.clone(), tbf.clone()],
+            Vec::new(),
+        )?;
         true
     } else {
         let ch = py::config(vm, "exception_handler")?;
         if !py::is_none(&ch) {
-            let r = vm.call(&ch, vec![short.clone(), full.clone(), tbf.clone()], Vec::new())?;
+            let r = vm.call(
+                &ch,
+                vec![short.clone(), full.clone(), tbf.clone()],
+                Vec::new(),
+            )?;
             py::truthy(vm, &r)?
         } else {
             false
@@ -897,7 +1001,9 @@ pub fn run(vm: &mut Vm, this: &Value, start: Value) -> PyResult<()> {
             st(vm, this, "come_from_name", Value::None)?;
             let cfl = g(vm, this, "come_from_label")?;
             node = call(vm, this, &cfl, name.clone())?;
-            let names = vm.types.new_list(vec![py::s(vm, "_return"), py::s(vm, "_begin_rollback")]);
+            let names = vm
+                .types
+                .new_list(vec![py::s(vm, "_return"), py::s(vm, "_begin_rollback")]);
             vm.call_method(this, "make_dynamic", vec![names])?;
             store_set(vm, "_begin_rollback", Value::Bool(false))?;
         }
@@ -924,9 +1030,20 @@ pub fn run(vm: &mut Vm, this: &Value, start: Value) -> PyResult<()> {
         let r = (|| -> PyResult<()> {
             check_infinite_loop(vm)?;
             let gm = py::import(vm, "renpy.game")?;
-            py::set(vm, &gm, "exception_info", py::s(vm, "While running game code:"))?;
+            py::set(
+                vm,
+                &gm,
+                "exception_info",
+                py::s(vm, "While running game code:"),
+            )?;
             st(vm, this, "next_node", Value::None)?;
             let id = nodes::id_of(&node).ok_or_else(|| vm.type_error("node handle"))?;
+            if std::env::var_os("CRYSIRROR_RENPY_TRACE_NODES").is_some() {
+                let r = super::state::rt(vm);
+                let script = r.script.borrow();
+                let n = script.arena.get(id);
+                eprintln!("renpy node {}:{}", n.filename, n.linenumber);
+            }
             match super::astexec::execute(vm, id) {
                 Ok(()) => {
                     let nn = g(vm, this, "next_node")?;
@@ -964,7 +1081,10 @@ pub fn run(vm: &mut Vm, this: &Value, start: Value) -> PyResult<()> {
                 } else {
                     let nn = g(vm, this, "next_node")?;
                     if py::is_none(&nn) {
-                        return Err(py::error(vm, "renpy.call can't be used when the next node is undefined."));
+                        return Err(py::error(
+                            vm,
+                            "renpy.call can't be used when the next node is undefined.",
+                        ));
                     }
                     g(vm, &nn, "name")?
                 };
@@ -1047,7 +1167,10 @@ fn f_reset_all_contexts(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let old = vm.call(&cf, Vec::new(), Vec::new())?;
     let nn = g(vm, &old, "next_node")?;
     if py::is_none(&nn) {
-        return Err(py::error(vm, "The renpy.reset_all_contexts function can only be called as the last thing in a python statement."));
+        return Err(py::error(
+            vm,
+            "The renpy.reset_all_contexts function can only be called as the last thing in a python statement.",
+        ));
     }
     let contexts = game(vm, "contexts")?;
     while ops::len(vm, &contexts)? > 0 {
@@ -1063,12 +1186,16 @@ fn f_reset_all_contexts(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("check_infinite_loop", f_check_infinite_loop),
-        ("not_infinite_loop", f_not_infinite_loop),
-        ("run_context", f_run_context),
-        ("reset_all_contexts", f_reset_all_contexts),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("check_infinite_loop", f_check_infinite_loop),
+            ("not_infinite_loop", f_not_infinite_loop),
+            ("run_context", f_run_context),
+            ("reset_all_contexts", f_reset_all_contexts),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     set(vm, "il_statements", Value::Int(0));
     set(vm, "il_time", Value::Int(0));
@@ -1080,46 +1207,64 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     set(vm, "PredictInfo", Value::Obj(pi));
     let node_p = vm.types.new_builtin("node", lle_node);
     let node_p = py::property(vm, node_p, None)?;
-    let lle = py::class(vm, MODULE, "LineLogEntry", &[obj], &[("__init__", lle_init), ("__eq__", lle_eq), ("__ne__", lle_ne)], &[("node", node_p), ("__hash__", Value::None)])?;
+    let lle = py::class(
+        vm,
+        MODULE,
+        "LineLogEntry",
+        &[obj],
+        &[
+            ("__init__", lle_init),
+            ("__eq__", lle_eq),
+            ("__ne__", lle_ne),
+        ],
+        &[("node", node_p), ("__hash__", Value::None)],
+    )?;
     set(vm, "LineLogEntry", Value::Obj(lle));
     let nosave = vm.types.new_list(vec![py::s(vm, "next_node")]);
-    let ctx = py::class(vm, MODULE, "Context", &[object], &[
-        ("__init__", ctx_init),
-        ("__repr__", ctx_repr),
-        ("after_upgrade", ctx_after_upgrade),
-        ("replace_node", ctx_replace_node),
-        ("make_dynamic", ctx_make_dynamic),
-        ("pop_dynamic", ctx_pop_dynamic),
-        ("pop_all_dynamic", ctx_pop_all_dynamic),
-        ("pop_dynamic_roots", ctx_pop_dynamic_roots),
-        ("goto_label", ctx_goto_label),
-        ("check_stacks", ctx_check_stacks),
-        ("report_traceback", ctx_report_traceback),
-        ("come_from", ctx_come_from),
-        ("run", ctx_run),
-        ("mark_seen", ctx_mark_seen),
-        ("call", ctx_call),
-        ("pop_call", ctx_pop_call),
-        ("lookup_return", ctx_lookup_return),
-        ("rollback_copy", ctx_rollback_copy),
-        ("predict_call", ctx_predict_call),
-        ("predict_return", ctx_predict_return),
-        ("predict", ctx_predict),
-        ("seen_current", ctx_seen_current),
-        ("do_deferred_rollback", ctx_do_deferred_rollback),
-        ("get_return_stack", ctx_get_return_stack),
-        ("set_return_stack", ctx_set_return_stack),
-    ], &[
-        ("__version__", Value::Int(16)),
-        ("nosave", nosave),
-        ("next_node", Value::None),
-        ("force_checkpoint", Value::Bool(false)),
-        ("come_from_name", Value::None),
-        ("come_from_label", Value::None),
-        ("temporary_attributes", Value::None),
-        ("deferred_translate_identifier", Value::None),
-        ("predict_return_stack", Value::None),
-    ])?;
+    let ctx = py::class(
+        vm,
+        MODULE,
+        "Context",
+        &[object],
+        &[
+            ("__init__", ctx_init),
+            ("__repr__", ctx_repr),
+            ("after_upgrade", ctx_after_upgrade),
+            ("replace_node", ctx_replace_node),
+            ("make_dynamic", ctx_make_dynamic),
+            ("pop_dynamic", ctx_pop_dynamic),
+            ("pop_all_dynamic", ctx_pop_all_dynamic),
+            ("pop_dynamic_roots", ctx_pop_dynamic_roots),
+            ("goto_label", ctx_goto_label),
+            ("check_stacks", ctx_check_stacks),
+            ("report_traceback", ctx_report_traceback),
+            ("come_from", ctx_come_from),
+            ("run", ctx_run),
+            ("mark_seen", ctx_mark_seen),
+            ("call", ctx_call),
+            ("pop_call", ctx_pop_call),
+            ("lookup_return", ctx_lookup_return),
+            ("rollback_copy", ctx_rollback_copy),
+            ("predict_call", ctx_predict_call),
+            ("predict_return", ctx_predict_return),
+            ("predict", ctx_predict),
+            ("seen_current", ctx_seen_current),
+            ("do_deferred_rollback", ctx_do_deferred_rollback),
+            ("get_return_stack", ctx_get_return_stack),
+            ("set_return_stack", ctx_set_return_stack),
+        ],
+        &[
+            ("__version__", Value::Int(16)),
+            ("nosave", nosave),
+            ("next_node", Value::None),
+            ("force_checkpoint", Value::Bool(false)),
+            ("come_from_name", Value::None),
+            ("come_from_label", Value::None),
+            ("temporary_attributes", Value::None),
+            ("deferred_translate_identifier", Value::None),
+            ("predict_return_stack", Value::None),
+        ],
+    )?;
     set(vm, "Context", Value::Obj(ctx));
     Ok(m)
 }

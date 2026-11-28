@@ -19,7 +19,20 @@ use std::rc::Rc;
 
 const MODULE: &str = "renpy.ast";
 
-const EARLY_CONFIG: &[&str] = &["save_directory", "allow_duplicate_labels", "keyword_after_python", "steam_appid", "name", "version", "save_token_keys", "check_conflicting_properties", "check_translate_none", "defer_tl_scripts", "munge_in_strings", "interface_layer"];
+const EARLY_CONFIG: &[&str] = &[
+    "save_directory",
+    "allow_duplicate_labels",
+    "keyword_after_python",
+    "steam_appid",
+    "name",
+    "version",
+    "save_token_keys",
+    "check_conflicting_properties",
+    "check_translate_none",
+    "defer_tl_scripts",
+    "munge_in_strings",
+    "interface_layer",
+];
 
 fn mget(vm: &mut Vm, n: &str) -> PyResult<Value> {
     py::import_attr(vm, MODULE, n)
@@ -30,7 +43,12 @@ fn context(vm: &mut Vm) -> PyResult<Value> {
     vm.call(&f, Vec::new(), Vec::new())
 }
 
-fn exports(vm: &mut Vm, name: &str, args: Vec<Value>, kw: Vec<(Rc<str>, Value)>) -> PyResult<Value> {
+fn exports(
+    vm: &mut Vm,
+    name: &str,
+    args: Vec<Value>,
+    kw: Vec<(Rc<str>, Value)>,
+) -> PyResult<Value> {
     let f = py::import_attr(vm, "renpy.exports", name)?;
     vm.call(&f, args, kw)
 }
@@ -66,13 +84,31 @@ fn py_of(code: &PyCode) -> Option<i64> {
 }
 
 fn exec_code(vm: &mut Vm, code: &PyCode, hide: bool, store: &str) -> PyResult<()> {
-    let mode = if code.mode == "hide" || hide { "hide" } else { "exec" };
-    let c = python::compile(vm, &code.source.text, mode, &code.source.filename, code.source.line.max(1), py_of(code))?;
+    let mode = if code.mode == "hide" || hide {
+        "hide"
+    } else {
+        "exec"
+    };
+    let c = python::compile(
+        vm,
+        &code.source.text,
+        mode,
+        &code.source.filename,
+        code.source.line.max(1),
+        py_of(code),
+    )?;
     python::exec_bytecode(vm, c, hide, &Value::None, &Value::None, store)
 }
 
 fn eval_code(vm: &mut Vm, code: &PyCode) -> PyResult<Value> {
-    let c = python::compile(vm, code.source.text.trim(), "eval", &code.source.filename, code.source.line.max(1), py_of(code))?;
+    let c = python::compile(
+        vm,
+        code.source.text.trim(),
+        "eval",
+        &code.source.filename,
+        code.source.line.max(1),
+        py_of(code),
+    )?;
     python::eval_bytecode(vm, c, &Value::None, &Value::None)
 }
 
@@ -135,14 +171,20 @@ fn say_menu_with(vm: &mut Vm, expr: &Option<PyExpr>, callback: &Value) -> PyResu
 }
 
 fn f_say_menu_with(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let e = if py::is_none(&args[0]) { None } else { Some(PyExpr::new(py::string(vm, &args[0])?, "<none>".into(), 1)) };
+    let e = if py::is_none(&args[0]) {
+        None
+    } else {
+        Some(PyExpr::new(py::string(vm, &args[0])?, "<none>".into(), 1))
+    };
     say_menu_with(vm, &e, &args[1])?;
     Ok(Value::None)
 }
 
 /// `eval_who(who, fast)`: character stores first, then evaluation.
 pub fn eval_who(vm: &mut Vm, who: &Option<PyExpr>) -> PyResult<Value> {
-    let Some(who) = who else { return Ok(Value::None) };
+    let Some(who) = who else {
+        return Ok(Value::None);
+    };
     let name = py::s(vm, &who.text);
     let sds = py::import_attr(vm, "renpy.python", "store_dicts")?;
     let ck = py::s(vm, "store.character");
@@ -162,7 +204,10 @@ pub fn eval_who(vm: &mut Vm, who: &Option<PyExpr>) -> PyResult<Value> {
     match ev(vm, who) {
         Ok(v) => Ok(v),
         Err(e) if matches!(e, crysirror_python::PyErr::Suspend(..)) => Err(e),
-        Err(_) => Err(py::error(vm, format!("Sayer '{}' is not defined.", who.text))),
+        Err(_) => Err(py::error(
+            vm,
+            format!("Sayer '{}' is not defined.", who.text),
+        )),
     }
 }
 
@@ -197,36 +242,66 @@ fn show_imspec(vm: &mut Vm, spec: &ImSpec, atl: &Option<Rc<crate::atl::RawBlock>
         at_list.push(ev(vm, e)?);
     }
     let name = str_tuple(vm, &spec.name);
-    let tag = spec.tag.as_ref().map(|t| py::s(vm, t)).unwrap_or(Value::None);
-    let layer = spec.layer.as_ref().map(|t| py::s(vm, t)).unwrap_or(Value::None);
-    let tag_or_name = if py::is_none(&tag) { name.clone() } else { tag.clone() };
+    let tag = spec
+        .tag
+        .as_ref()
+        .map(|t| py::s(vm, t))
+        .unwrap_or(Value::None);
+    let layer = spec
+        .layer
+        .as_ref()
+        .map(|t| py::s(vm, t))
+        .unwrap_or(Value::None);
+    let tag_or_name = if py::is_none(&tag) {
+        name.clone()
+    } else {
+        tag.clone()
+    };
     let expr_untagged = !py::is_none(&expression) && py::is_none(&tag);
-    let layer = exports(vm, "default_layer", vec![layer, tag_or_name, Value::Bool(expr_untagged)], Vec::new())?;
+    let layer = exports(
+        vm,
+        "default_layer",
+        vec![layer, tag_or_name, Value::Bool(expr_untagged)],
+        Vec::new(),
+    )?;
     let atl = match atl {
         Some(a) => super::atlrt::raw_value(vm, a.clone())?,
         None => Value::None,
     };
-    let behind = vm.types.new_list(spec.behind.iter().map(|b| vm.types.new_str(b)).collect());
+    let behind = vm
+        .types
+        .new_list(spec.behind.iter().map(|b| vm.types.new_str(b)).collect());
     let show = py::config(vm, "show")?;
-    vm.call(&show, vec![name], vec![
-        ("at_list".into(), vm.types.new_list(at_list)),
-        ("layer".into(), layer),
-        ("what".into(), expression),
-        ("zorder".into(), zorder),
-        ("tag".into(), tag),
-        ("behind".into(), behind),
-        ("atl".into(), atl),
-    ])?;
+    vm.call(
+        &show,
+        vec![name],
+        vec![
+            ("at_list".into(), vm.types.new_list(at_list)),
+            ("layer".into(), layer),
+            ("what".into(), expression),
+            ("zorder".into(), zorder),
+            ("tag".into(), tag),
+            ("behind".into(), behind),
+            ("atl".into(), atl),
+        ],
+    )?;
     Ok(())
 }
 
 /// `predict_imspec(imspec, scene, atl)`; prediction failures are ignored.
-fn predict_imspec(vm: &mut Vm, spec: &ImSpec, scene: bool, atl: &Option<Rc<crate::atl::RawBlock>>) -> PyResult<()> {
+fn predict_imspec(
+    vm: &mut Vm,
+    spec: &ImSpec,
+    scene: bool,
+    atl: &Option<Rc<crate::atl::RawBlock>>,
+) -> PyResult<()> {
     let img = match &spec.expression {
-        Some(e) => match ev(vm, e).and_then(|v| super::easy::displayable(vm, &v, &Value::None, false)) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        },
+        Some(e) => {
+            match ev(vm, e).and_then(|v| super::easy::displayable(vm, &v, &Value::None, false)) {
+                Ok(v) => v,
+                Err(_) => return Ok(()),
+            }
+        }
         None => Value::None,
     };
     let mut at_list = Vec::new();
@@ -236,21 +311,49 @@ fn predict_imspec(vm: &mut Vm, spec: &ImSpec, scene: bool, atl: &Option<Rc<crate
         }
     }
     if let Some(a) = atl {
-        if let Ok(t) = super::atlrt::new_atl_transform(vm, a.clone(), None, Value::None, Value::None) {
+        if let Ok(t) =
+            super::atlrt::new_atl_transform(vm, a.clone(), None, Value::None, Value::None)
+        {
             at_list.push(t);
         }
     }
     let name = str_tuple(vm, &spec.name);
-    let tag = spec.tag.as_ref().map(|t| py::s(vm, t)).unwrap_or(Value::None);
-    let layer = spec.layer.as_ref().map(|t| py::s(vm, t)).unwrap_or(Value::None);
-    let tag_or_name = if py::is_none(&tag) { name.clone() } else { tag.clone() };
-    let layer = exports(vm, "default_layer", vec![layer, tag_or_name, Value::Bool(spec.expression.is_some())], Vec::new())?;
+    let tag = spec
+        .tag
+        .as_ref()
+        .map(|t| py::s(vm, t))
+        .unwrap_or(Value::None);
+    let layer = spec
+        .layer
+        .as_ref()
+        .map(|t| py::s(vm, t))
+        .unwrap_or(Value::None);
+    let tag_or_name = if py::is_none(&tag) {
+        name.clone()
+    } else {
+        tag.clone()
+    };
+    let layer = exports(
+        vm,
+        "default_layer",
+        vec![layer, tag_or_name, Value::Bool(spec.expression.is_some())],
+        Vec::new(),
+    )?;
     if scene {
         let ctx = context(vm)?;
         let images = py::get(vm, &ctx, "images")?;
         vm.call_method(&images, "predict_scene", vec![layer.clone()])?;
     }
-    exports(vm, "predict_show", vec![name, layer], vec![("what".into(), img), ("tag".into(), tag), ("at_list".into(), vm.types.new_list(at_list))])?;
+    exports(
+        vm,
+        "predict_show",
+        vec![name, layer],
+        vec![
+            ("what".into(), img),
+            ("tag".into(), tag),
+            ("at_list".into(), vm.types.new_list(at_list)),
+        ],
+    )?;
     Ok(())
 }
 
@@ -274,7 +377,13 @@ pub fn create_store(vm: &mut Vm, name: &str) -> PyResult<()> {
         let ns = ops::getitem(vm, &sn, mk)?;
         let allow = py::get_or_none(vm, &ns, "allow_child_namespaces")?;
         if !py::truthy(vm, &allow)? {
-            return Err(py::error(vm, format!("Creating stores within the {} namespace is not supported.", &maybe[6.min(maybe.len())..])));
+            return Err(py::error(
+                vm,
+                format!(
+                    "Creating stores within the {} namespace is not supported.",
+                    &maybe[6.min(maybe.len())..]
+                ),
+            ));
         }
     }
     python::create_store(vm, name)
@@ -327,7 +436,14 @@ fn sn_get(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 // Define / default -------------------------------------------------------------------------------------
 
-fn define_set(vm: &mut Vm, store: &str, name: &str, index: &Option<PyExpr>, operator: &str, code: &PyCode) -> PyResult<()> {
+fn define_set(
+    vm: &mut Vm,
+    store: &str,
+    name: &str,
+    index: &Option<PyExpr>,
+    operator: &str,
+    code: &PyCode,
+) -> PyResult<()> {
     let value = eval_code(vm, code)?;
     let (ns, _) = get_namespace(vm, store)?;
     let n = py::s(vm, name);
@@ -345,8 +461,22 @@ fn define_set(vm: &mut Vm, store: &str, name: &str, index: &Option<PyExpr>, oper
         }
     }
     let new = match operator {
-        "+=" => ops::binary_op(vm, &old, &value, crysirror_python::ast::BinOp::Add, false, false)?,
-        "|=" => ops::binary_op(vm, &old, &value, crysirror_python::ast::BinOp::BitOr, false, false)?,
+        "+=" => ops::binary_op(
+            vm,
+            &old,
+            &value,
+            crysirror_python::ast::BinOp::Add,
+            false,
+            false,
+        )?,
+        "|=" => ops::binary_op(
+            vm,
+            &old,
+            &value,
+            crysirror_python::ast::BinOp::BitOr,
+            false,
+            false,
+        )?,
         _ => value,
     };
     if index.is_some() {
@@ -358,7 +488,11 @@ fn define_set(vm: &mut Vm, store: &str, name: &str, index: &Option<PyExpr>, oper
 }
 
 fn record_definition(vm: &mut Vm, store: &str, name: &str, id: NodeId) -> PyResult<()> {
-    let full = if store == "store" { name.to_owned() } else { format!("{}.{}", &store[6.min(store.len())..], name) };
+    let full = if store == "store" {
+        name.to_owned()
+    } else {
+        format!("{}.{}", &store[6.min(store.len())..], name)
+    };
     let r = rt(vm);
     let (f, l) = {
         let s = r.script.borrow();
@@ -406,7 +540,10 @@ pub fn execute_default(vm: &mut Vm, id: NodeId, start: bool) -> PyResult<()> {
     let developer = py::config(vm, "developer")?;
     if ops::contains(vm, &defaults_set, &n)? {
         if start && py::truthy(vm, &developer)? {
-            return Err(py::error(vm, format!("{store}.{name} is being given a default a second time.")));
+            return Err(py::error(
+                vm,
+                format!("{store}.{name} is being given a default a second time."),
+            ));
         }
         return Ok(());
     }
@@ -415,7 +552,12 @@ pub fn execute_default(vm: &mut Vm, id: NodeId, start: bool) -> PyResult<()> {
         let sds = py::import_attr(vm, "renpy.python", "store_dicts")?;
         let fk = py::s(vm, &full);
         if ops::contains(vm, &sds, &fk)? {
-            return Err(py::error(vm, format!("{full} is being given a default, but a store with that name already exists.")));
+            return Err(py::error(
+                vm,
+                format!(
+                    "{full} is being given a default, but a store with that name already exists."
+                ),
+            ));
         }
     }
     if start || !ops::set_contains(vm, &ebc, &n)? {
@@ -438,7 +580,14 @@ fn f_redefine(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let Some(id) = nodes::id_of(&h) else { continue };
         let r = rt(vm);
         let kind = r.script.borrow().arena.get(id).kind.clone();
-        if let NodeKind::Define { store, name, index, operator, code } = kind {
+        if let NodeKind::Define {
+            store,
+            name,
+            index,
+            operator,
+            code,
+        } = kind
+        {
             let sk = py::s(vm, &store);
             if ops::contains(vm, &stores, &sk)? {
                 define_set(vm, &store, &name, &index, &operator, &code)?;
@@ -452,7 +601,10 @@ fn f_apply_arguments(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let params = arg_or(args, kw, 0, "parameters", Value::None);
     let a = arg_or(args, kw, 1, "args", Value::None);
     let k = arg_or(args, kw, 2, "kwargs", Value::None);
-    let ignore = py::truthy(vm, &arg_or(args, kw, 3, "ignore_errors", Value::Bool(false)))?;
+    let ignore = py::truthy(
+        vm,
+        &arg_or(args, kw, 3, "ignore_errors", Value::Bool(false)),
+    )?;
     let (a, k) = super::params::split(vm, &a, &k)?;
     let sig = py::native::<Rc<crate::ast::Signature>, _>(&params, |s| s.clone());
     if !py::is_none(&params) && sig.is_none() {
@@ -480,7 +632,9 @@ fn user_parsed(vm: &mut Vm, id: NodeId) -> PyResult<Value> {
     let h = nodes::handle(vm, id)?;
     let block = py::get(vm, &h, "block")?;
     let p = super::statements::parse(vm, &h, &line, &block)?;
-    if let NodeKind::UserStatement { parsed, .. } = &mut r.script.borrow_mut().arena.get_mut(id).kind {
+    if let NodeKind::UserStatement { parsed, .. } =
+        &mut r.script.borrow_mut().arena.get_mut(id).kind
+    {
         *parsed = Some(p.clone());
     }
     Ok(p)
@@ -504,7 +658,9 @@ pub fn scry(vm: &mut Vm, id: NodeId) -> PyResult<Value> {
     set_next(vm, next)?;
     match &kind {
         NodeKind::Say { .. } => scry_say(vm, id, &kind, &rv)?,
-        NodeKind::TranslateSay { identifier, say, .. } => {
+        NodeKind::TranslateSay {
+            identifier, say, ..
+        } => {
             let found = super::translation::lookup_translate(vm, identifier, None)?;
             let me = nodes::handle(vm, id)?;
             if py::is_none(&found) || py::same(&found, &me) {
@@ -512,7 +668,10 @@ pub fn scry(vm: &mut Vm, id: NodeId) -> PyResult<Value> {
             }
         }
         NodeKind::Python { .. } => py::set(vm, &rv, "interacts", Value::Bool(true))?,
-        NodeKind::Call { .. } | NodeKind::Return { .. } | NodeKind::While { .. } | NodeKind::If { .. } => set_next(vm, None)?,
+        NodeKind::Call { .. }
+        | NodeKind::Return { .. }
+        | NodeKind::While { .. }
+        | NodeKind::If { .. } => set_next(vm, None)?,
         NodeKind::Menu { has_caption, .. } => {
             set_next(vm, None)?;
             py::set(vm, &rv, "interacts", Value::Bool(true))?;
@@ -520,7 +679,9 @@ pub fn scry(vm: &mut Vm, id: NodeId) -> PyResult<Value> {
                 py::set(vm, &rv, "menu_with_caption", Value::Bool(true))?;
             }
         }
-        NodeKind::Jump { target, expression, .. } => {
+        NodeKind::Jump {
+            target, expression, ..
+        } => {
             if *expression {
                 set_next(vm, None)?;
             } else {
@@ -534,7 +695,11 @@ pub fn scry(vm: &mut Vm, id: NodeId) -> PyResult<Value> {
             py::set(vm, &rv, "_next", n)?;
             user_call(vm, id, "scry", vec![rv.clone()])?;
         }
-        NodeKind::Translate { identifier, alternate, .. } => {
+        NodeKind::Translate {
+            identifier,
+            alternate,
+            ..
+        } => {
             let n = super::translation::lookup_translate(vm, identifier, alternate.as_deref())?;
             py::set(vm, &rv, "_next", n)?;
         }
@@ -544,7 +709,15 @@ pub fn scry(vm: &mut Vm, id: NodeId) -> PyResult<Value> {
 }
 
 fn scry_say(vm: &mut Vm, id: NodeId, kind: &NodeKind, rv: &Value) -> PyResult<()> {
-    let NodeKind::Say { who, what, interact, .. } = kind else { return Ok(()) };
+    let NodeKind::Say {
+        who,
+        what,
+        interact,
+        ..
+    } = kind
+    else {
+        return Ok(());
+    };
     let who = eval_who(vm, who)?;
     py::set(vm, rv, "who", who.clone())?;
     py::set(vm, rv, "say", Value::Bool(true))?;
@@ -574,7 +747,13 @@ fn user_call(vm: &mut Vm, id: NodeId, method: &str, args: Vec<Value>) -> PyResul
     user_call_kw(vm, id, method, args, &[])
 }
 
-fn user_call_kw(vm: &mut Vm, id: NodeId, method: &str, args: Vec<Value>, kw: Kw) -> PyResult<Value> {
+fn user_call_kw(
+    vm: &mut Vm,
+    id: NodeId,
+    method: &str,
+    args: Vec<Value>,
+    kw: Kw,
+) -> PyResult<Value> {
     let parsed = user_parsed(vm, id)?;
     super::statements::call_method(vm, method, &parsed, args, kw)
 }
@@ -592,7 +771,12 @@ fn user_name(vm: &mut Vm, id: NodeId) -> PyResult<String> {
     py::string(vm, &n)
 }
 
-fn user_next(vm: &mut Vm, id: NodeId, next: Option<NodeId>, code_block: &Option<Vec<NodeId>>) -> PyResult<Value> {
+fn user_next(
+    vm: &mut Vm,
+    id: NodeId,
+    next: Option<NodeId>,
+    code_block: &Option<Vec<NodeId>>,
+) -> PyResult<Value> {
     let rv = match code_block.as_ref().and_then(|b| b.first()) {
         Some(first) => {
             let h = nodes::handle(vm, *first)?;
@@ -634,13 +818,17 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
     let node = r.script.borrow().arena.get(id).clone();
     let next = node.next;
     match &node.kind {
-        NodeKind::Say { .. } | NodeKind::TranslateSay { .. } => execute_say(vm, id, &node.kind, next),
+        NodeKind::Say { .. } | NodeKind::TranslateSay { .. } => {
+            execute_say(vm, id, &node.kind, next)
+        }
         NodeKind::Init { .. } => {
             next_id(vm, next)?;
             super::execution::not_infinite_loop(vm, 60.);
             statement_name(vm, "init")
         }
-        NodeKind::Label { name, parameters, .. } => {
+        NodeKind::Label {
+            name, parameters, ..
+        } => {
             next_id(vm, next)?;
             statement_name(vm, "label")?;
             let ctx = context(vm)?;
@@ -649,7 +837,8 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
             let k = store_get(vm, "_kwargs")?;
             let (a, k) = super::params::split(vm, &a, &k)?;
             let loc = (node.filename.clone(), node.linenumber);
-            let values = super::params::apply_arguments(vm, parameters.as_ref(), &loc, &a, &k, false)?;
+            let values =
+                super::params::apply_arguments(vm, parameters.as_ref(), &loc, &a, &k, false)?;
             let kw = py::str_items(vm, &values)?;
             exports(vm, "dynamic", Vec::new(), kw)?;
             store_set(vm, "_args", Value::None)?;
@@ -687,7 +876,9 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
             let img = match code {
                 Some(c) => eval_code(vm, c)?,
                 None => {
-                    let raw = atl.clone().ok_or_else(|| py::error(vm, "image statement without a value"))?;
+                    let raw = atl
+                        .clone()
+                        .ok_or_else(|| py::error(vm, "image statement without a value"))?;
                     super::atlrt::new_atl_transform(vm, raw, None, Value::None, Value::None)?
                 }
             };
@@ -695,13 +886,28 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
             exports(vm, "image", vec![n, img], Vec::new())?;
             Ok(())
         }
-        NodeKind::Transform { store, name, atl, parameters } => {
+        NodeKind::Transform {
+            store,
+            name,
+            atl,
+            parameters,
+        } => {
             next_id(vm, next)?;
             statement_name(vm, "transform")?;
             let sig = parameters.clone().unwrap_or_default();
-            let t = super::atlrt::new_atl_transform(vm, atl.clone(), Some(sig), Value::None, Value::None)?;
+            let t = super::atlrt::new_atl_transform(
+                vm,
+                atl.clone(),
+                Some(sig),
+                Value::None,
+                Value::None,
+            )?;
             if let Ok(dump) = py::import_attr(vm, "renpy.dump", "transforms") {
-                let tt = vec![py::s(vm, name), py::s(vm, &node.filename), Value::Int(node.linenumber as i64)];
+                let tt = vec![
+                    py::s(vm, name),
+                    py::s(vm, &node.filename),
+                    Value::Int(node.linenumber as i64),
+                ];
                 let tt = vm.types.new_tuple(tt);
                 ops::list_append(vm, &dump, tt)?;
             }
@@ -716,7 +922,16 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
             statement_name(vm, "show")?;
             show_imspec(vm, imspec, atl)
         }
-        NodeKind::ShowLayer { layer, at_list, atl } | NodeKind::Camera { layer, at_list, atl } => {
+        NodeKind::ShowLayer {
+            layer,
+            at_list,
+            atl,
+        }
+        | NodeKind::Camera {
+            layer,
+            at_list,
+            atl,
+        } => {
             let camera = matches!(node.kind, NodeKind::Camera { .. });
             next_id(vm, next)?;
             statement_name(vm, "show layer")?;
@@ -725,7 +940,13 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
                 at.push(ev(vm, e)?);
             }
             if let Some(a) = atl {
-                at.push(super::atlrt::new_atl_transform(vm, a.clone(), None, Value::None, Value::None)?);
+                at.push(super::atlrt::new_atl_transform(
+                    vm,
+                    a.clone(),
+                    None,
+                    Value::None,
+                    Value::None,
+                )?);
             }
             let mut kw: Vec<(Rc<str>, Value)> = vec![("layer".into(), py::s(vm, layer))];
             if camera {
@@ -753,7 +974,11 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
                 Some(t) => py::s(vm, t),
                 None => name,
             };
-            let layer = imspec.layer.as_ref().map(|l| py::s(vm, l)).unwrap_or(Value::None);
+            let layer = imspec
+                .layer
+                .as_ref()
+                .map(|l| py::s(vm, l))
+                .unwrap_or(Value::None);
             let layer = exports(vm, "default_layer", vec![layer, tag.clone()], Vec::new())?;
             let hide = py::config(vm, "hide")?;
             vm.call(&hide, vec![tag, layer], Vec::new())?;
@@ -770,10 +995,20 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
                 Some(p) => ev(vm, p)?,
                 None => Value::None,
             };
-            exports(vm, "with_statement", vec![trans], vec![("paired".into(), paired)])?;
+            exports(
+                vm,
+                "with_statement",
+                vec![trans],
+                vec![("paired".into(), paired)],
+            )?;
             Ok(())
         }
-        NodeKind::Call { label, expression, arguments, global_label } => {
+        NodeKind::Call {
+            label,
+            expression,
+            arguments,
+            global_label,
+        } => {
             statement_name(vm, "call")?;
             let mut target = py::s(vm, label);
             if *expression {
@@ -821,13 +1056,25 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
                     return Ok(());
                 }
             }
-            let n = py::method_kw(vm, &ctx, "lookup_return", Vec::new(), vec![("pop".into(), Value::Bool(true))])?;
+            let n = py::method_kw(
+                vm,
+                &ctx,
+                "lookup_return",
+                Vec::new(),
+                vec![("pop".into(), Value::Bool(true))],
+            )?;
             next_node(vm, n)?;
             vm.call_method(&ctx, "pop_dynamic", Vec::new())?;
             Ok(())
         }
-        NodeKind::Menu { .. } => execute_menu(vm, &node.kind, next, (&node.filename, node.linenumber)),
-        NodeKind::Jump { target, expression, global_label } => {
+        NodeKind::Menu { .. } => {
+            execute_menu(vm, &node.kind, next, (&node.filename, node.linenumber))
+        }
+        NodeKind::Jump {
+            target,
+            expression,
+            global_label,
+        } => {
             statement_name(vm, "jump")?;
             let mut t = py::s(vm, target);
             if *expression {
@@ -867,14 +1114,22 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
             }
             Ok(())
         }
-        NodeKind::UserStatement { code_block, atl, .. } => {
+        NodeKind::UserStatement {
+            code_block, atl, ..
+        } => {
             let n = user_next(vm, id, next, code_block)?;
             next_node(vm, n)?;
             let name = user_name(vm, id)?;
             statement_name(vm, &name)?;
             match atl {
                 Some(a) => {
-                    let t = super::atlrt::new_atl_transform(vm, a.clone(), None, Value::None, Value::None)?;
+                    let t = super::atlrt::new_atl_transform(
+                        vm,
+                        a.clone(),
+                        None,
+                        Value::None,
+                        Value::None,
+                    )?;
                     user_call_kw(vm, id, "execute", Vec::new(), &[("atl".into(), t)])?;
                 }
                 None => {
@@ -890,7 +1145,13 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
             user_call(vm, *parent, "post_execute", Vec::new())?;
             Ok(())
         }
-        NodeKind::Define { store, name, index, operator, code } => {
+        NodeKind::Define {
+            store,
+            name,
+            index,
+            operator,
+            code,
+        } => {
             next_id(vm, next)?;
             statement_name(vm, "define")?;
             let ds = mget(vm, "define_statements")?;
@@ -915,7 +1176,8 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
                 let v = eval_code(vm, code)?;
                 let n = py::s(vm, name);
                 vm.call_method(&ns, "set_default", vec![n, v])?;
-                let rep = py::get_opt(vm, &ns, "repeat_at_default_time")?.unwrap_or(Value::Bool(false));
+                let rep =
+                    py::get_opt(vm, &ns, "repeat_at_default_time")?.unwrap_or(Value::Bool(false));
                 if py::truthy(vm, &rep)? {
                     let ds = default_statements(vm)?;
                     let h = nodes::handle(vm, id)?;
@@ -932,10 +1194,17 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
             next_id(vm, next)?;
             statement_name(vm, "screen")?;
             let sv = super::slast::screen_value(vm, screen.clone())?;
-            let loc = vm.types.new_tuple(vec![py::s(vm, &node.filename), Value::Int(node.linenumber as i64)]);
+            let loc = vm.types.new_tuple(vec![
+                py::s(vm, &node.filename),
+                Value::Int(node.linenumber as i64),
+            ]);
             vm.call_method(&sv, "define", vec![loc])?;
             if let Ok(dump) = py::import_attr(vm, "renpy.dump", "screens") {
-                let t = vec![py::s(vm, &screen.name), py::s(vm, &node.filename), Value::Int(node.linenumber as i64)];
+                let t = vec![
+                    py::s(vm, &screen.name),
+                    py::s(vm, &node.filename),
+                    Value::Int(node.linenumber as i64),
+                ];
                 let t = vm.types.new_tuple(t);
                 ops::list_append(vm, &dump, t)?;
             }
@@ -967,7 +1236,12 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
             next_id(vm, next)?;
             statement_name(vm, "rpy")
         }
-        NodeKind::Translate { identifier, language, alternate, .. } => {
+        NodeKind::Translate {
+            identifier,
+            language,
+            alternate,
+            ..
+        } => {
             if language.is_some() {
                 next_id(vm, next)?;
                 return Err(py::error(vm, "Translation nodes cannot be run directly."));
@@ -977,7 +1251,10 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
             next_node(vm, target)?;
             let ctx = context(vm)?;
             py::set(vm, &ctx, "translate_identifier", py::s(vm, identifier))?;
-            let alt = alternate.as_ref().map(|a| py::s(vm, a)).unwrap_or(Value::None);
+            let alt = alternate
+                .as_ref()
+                .map(|a| py::s(vm, a))
+                .unwrap_or(Value::None);
             py::set(vm, &ctx, "alternate_translate_identifier", alt)?;
             Ok(())
         }
@@ -990,13 +1267,25 @@ pub fn execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
         }
         NodeKind::TranslateString { language, old, new } => {
             next_id(vm, next)?;
-            let lang = language.as_ref().map(|l| py::s(vm, l)).unwrap_or(Value::None);
-            let newloc = vm.types.new_tuple(vec![py::s(vm, &node.filename), Value::Int(node.linenumber as i64 + 1)]);
+            let lang = language
+                .as_ref()
+                .map(|l| py::s(vm, l))
+                .unwrap_or(Value::None);
+            let newloc = vm.types.new_tuple(vec![
+                py::s(vm, &node.filename),
+                Value::Int(node.linenumber as i64 + 1),
+            ]);
             let f = py::import_attr(vm, "renpy.translation", "add_string_translation")?;
-            vm.call(&f, vec![lang, py::s(vm, old), py::s(vm, new), newloc], Vec::new())?;
+            vm.call(
+                &f,
+                vec![lang, py::s(vm, old), py::s(vm, new), newloc],
+                Vec::new(),
+            )?;
             Ok(())
         }
-        NodeKind::TranslatePython { .. } | NodeKind::TranslateBlock { .. } | NodeKind::TranslateEarlyBlock { .. } => next_id(vm, next),
+        NodeKind::TranslatePython { .. }
+        | NodeKind::TranslateBlock { .. }
+        | NodeKind::TranslateEarlyBlock { .. } => next_id(vm, next),
     }
 }
 
@@ -1028,10 +1317,24 @@ fn lookup_translate(vm: &mut Vm, identifier: &str, alternate: &Option<String>) -
 
 fn execute_say(vm: &mut Vm, id: NodeId, kind: &NodeKind, next: Option<NodeId>) -> PyResult<()> {
     let (say, ident) = match kind {
-        NodeKind::TranslateSay { identifier, language, say } => (&**say, Some((identifier.clone(), language.clone()))),
+        NodeKind::TranslateSay {
+            identifier,
+            language,
+            say,
+        } => (&**say, Some((identifier.clone(), language.clone()))),
         k => (k, None),
     };
-    let NodeKind::Say { who, what, with_, interact, attributes, temporary_attributes, arguments, .. } = say else {
+    let NodeKind::Say {
+        who,
+        what,
+        with_,
+        interact,
+        attributes,
+        temporary_attributes,
+        arguments,
+        ..
+    } = say
+    else {
         return Err(py::error(vm, "malformed say node"));
     };
     next_id(vm, next)?;
@@ -1050,23 +1353,39 @@ fn execute_say(vm: &mut Vm, id: NodeId, kind: &NodeKind, next: Option<NodeId>) -
             }
         }
     }
-    let attrs = attributes.as_ref().map(|a| str_tuple(vm, a)).unwrap_or(Value::None);
-    let tattrs = temporary_attributes.as_ref().map(|a| str_tuple(vm, a)).unwrap_or(Value::None);
+    let attrs = attributes
+        .as_ref()
+        .map(|a| str_tuple(vm, a))
+        .unwrap_or(Value::None);
+    let tattrs = temporary_attributes
+        .as_ref()
+        .map(|a| str_tuple(vm, a))
+        .unwrap_or(Value::None);
     let r = (|| -> PyResult<()> {
         py::set(vm, &ctx, "say_attributes", attrs)?;
         py::set(vm, &ctx, "temporary_attributes", tattrs)?;
         let whov = eval_who(vm, who)?;
         if !py::is_none(&whov) {
             let sn = py::get_opt(vm, &whov, "statement_name")?.unwrap_or_else(|| py::s(vm, "say"));
-            let sn = if crysirror_python::builtins::is_callable(vm, &sn) { vm.call(&sn, Vec::new(), Vec::new())? } else { sn };
+            let sn = if crysirror_python::builtins::is_callable(vm, &sn) {
+                vm.call(&sn, Vec::new(), Vec::new())?
+            } else {
+                sn
+            };
             let sn = py::string(vm, &sn)?;
             statement_name(vm, &sn)?;
         } else {
             statement_name(vm, "say")?;
         }
-        if !py::is_none(&whov) && !crysirror_python::builtins::is_callable(vm, &whov) && whov.as_str().is_none() {
+        if !py::is_none(&whov)
+            && !crysirror_python::builtins::is_callable(vm, &whov)
+            && whov.as_str().is_none()
+        {
             let w = who.as_ref().map(|w| w.text.to_string()).unwrap_or_default();
-            return Err(py::error(vm, format!("Sayer {w} is not a function or string.")));
+            return Err(py::error(
+                vm,
+                format!("Sayer {w} is not a function or string."),
+            ));
         }
         let mut whatv = py::s(vm, what);
         let filter = py::config(vm, "say_menu_text_filter")?;
@@ -1086,10 +1405,17 @@ fn execute_say(vm: &mut Vm, id: NodeId, kind: &NodeKind, next: Option<NodeId>) -
             }
             None => (vm.types.new_tuple(Vec::new()), vm.types.new_dict()),
         };
-        vm.call_method(&kwargs, "setdefault", vec![py::s(vm, "interact"), Value::Bool(*interact)])?;
+        vm.call_method(
+            &kwargs,
+            "setdefault",
+            vec![py::s(vm, "interact"), Value::Bool(*interact)],
+        )?;
         let record = py::get_opt(vm, &whov, "record_say")?.unwrap_or(Value::Bool(true));
         if py::truthy(vm, &record)? {
-            let wt = who.as_ref().map(|w| py::s(vm, &w.text)).unwrap_or(Value::None);
+            let wt = who
+                .as_ref()
+                .map(|w| py::s(vm, &w.text))
+                .unwrap_or(Value::None);
             store_set(vm, "_last_say_who", wt)?;
             store_set(vm, "_last_say_what", whatv.clone())?;
             store_set(vm, "_last_say_args", args.clone())?;
@@ -1116,8 +1442,22 @@ fn execute_say(vm: &mut Vm, id: NodeId, kind: &NodeKind, next: Option<NodeId>) -
     Ok(())
 }
 
-fn execute_menu(vm: &mut Vm, kind: &NodeKind, next: Option<NodeId>, loc: (&Rc<str>, u32)) -> PyResult<()> {
-    let NodeKind::Menu { items, set, with_, has_caption, arguments } = kind else { unreachable!() };
+fn execute_menu(
+    vm: &mut Vm,
+    kind: &NodeKind,
+    next: Option<NodeId>,
+    loc: (&Rc<str>, u32),
+) -> PyResult<()> {
+    let NodeKind::Menu {
+        items,
+        set,
+        with_,
+        has_caption,
+        arguments,
+    } = kind
+    else {
+        unreachable!()
+    };
     next_id(vm, next)?;
     let loc = (loc.0.clone(), loc.1);
     let (args, kwargs) = match arguments {
@@ -1181,8 +1521,16 @@ fn execute_menu(vm: &mut Vm, kind: &NodeKind, next: Option<NodeId>, loc: (&Rc<st
         }
     }
     if !narration.is_empty() {
-        let parts: Vec<String> = narration.iter().map(|n| py::string(vm, n)).collect::<PyResult<_>>()?;
-        exports(vm, "say", vec![Value::None, py::s(vm, &parts.join("\n"))], vec![("interact".into(), Value::Bool(false))])?;
+        let parts: Vec<String> = narration
+            .iter()
+            .map(|n| py::string(vm, n))
+            .collect::<PyResult<_>>()?;
+        exports(
+            vm,
+            "say",
+            vec![Value::None, py::s(vm, &parts.join("\n"))],
+            vec![("interact".into(), Value::Bool(false))],
+        )?;
     }
     let iface = py::import_attr(vm, "renpy.game", "interface")?;
     let st = py::get(vm, &iface, "set_transition")?;
@@ -1191,12 +1539,26 @@ fn execute_menu(vm: &mut Vm, kind: &NodeKind, next: Option<NodeId>, loc: (&Rc<st
         Some(e) => ev(vm, e)?,
         None => Value::None,
     };
-    let choice = exports(vm, "menu", vec![vm.types.new_list(choices), setv, args, kwargs, vm.types.new_list(item_arguments)], Vec::new())?;
+    let choice = exports(
+        vm,
+        "menu",
+        vec![
+            vm.types.new_list(choices),
+            setv,
+            args,
+            kwargs,
+            vm.types.new_list(item_arguments),
+        ],
+        Vec::new(),
+    )?;
     if py::is_none(&choice) {
         return next_id(vm, next);
     }
     let i = py::int(vm, &choice)? as usize;
-    let first = items.get(i).and_then(|it| it.block.as_ref()).and_then(|b| b.first().copied());
+    let first = items
+        .get(i)
+        .and_then(|it| it.block.as_ref())
+        .and_then(|b| b.first().copied());
     next_id(vm, first)
 }
 
@@ -1246,7 +1608,13 @@ pub fn early_execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
             python::create_store(vm, &store)?;
             exec_code(vm, &code, hide, &store)
         }
-        NodeKind::Define { store, name, index, operator, code } => {
+        NodeKind::Define {
+            store,
+            name,
+            index,
+            operator,
+            code,
+        } => {
             create_store(vm, &store)?;
             if operator != "=" || index.is_some() {
                 return Ok(());
@@ -1258,7 +1626,9 @@ pub fn early_execute(vm: &mut Vm, id: NodeId) -> PyResult<()> {
             }
             Ok(())
         }
-        NodeKind::Default { store, .. } | NodeKind::Python { store, .. } | NodeKind::Transform { store, .. } => create_store(vm, &store),
+        NodeKind::Default { store, .. }
+        | NodeKind::Python { store, .. }
+        | NodeKind::Transform { store, .. } => create_store(vm, &store),
         _ => Ok(()),
     }
 }
@@ -1271,7 +1641,14 @@ pub fn predict(vm: &mut Vm, id: NodeId) -> PyResult<Vec<Option<NodeId>>> {
     let node = r.script.borrow().arena.get(id).clone();
     let next = node.next;
     Ok(match &node.kind {
-        NodeKind::Say { who, what, with_, attributes, temporary_attributes, .. } => {
+        NodeKind::Say {
+            who,
+            what,
+            with_,
+            attributes,
+            temporary_attributes,
+            ..
+        } => {
             predict_say(vm, who, what, with_, attributes, temporary_attributes)?;
             vec![next]
         }
@@ -1286,9 +1663,16 @@ pub fn predict(vm: &mut Vm, id: NodeId) -> PyResult<Vec<Option<NodeId>>> {
             vec![next]
         }
         NodeKind::Hide { imspec } => {
-            let tag = imspec.tag.clone().unwrap_or_else(|| imspec.name.first().cloned().unwrap_or_default());
+            let tag = imspec
+                .tag
+                .clone()
+                .unwrap_or_else(|| imspec.name.first().cloned().unwrap_or_default());
             let t = py::s(vm, &tag);
-            let layer = imspec.layer.as_ref().map(|l| py::s(vm, l)).unwrap_or(Value::None);
+            let layer = imspec
+                .layer
+                .as_ref()
+                .map(|l| py::s(vm, l))
+                .unwrap_or(Value::None);
             let layer = exports(vm, "default_layer", vec![layer, t.clone()], Vec::new())?;
             let ctx = context(vm)?;
             let images = py::get(vm, &ctx, "images")?;
@@ -1299,14 +1683,31 @@ pub fn predict(vm: &mut Vm, id: NodeId) -> PyResult<Vec<Option<NodeId>>> {
         NodeKind::With { expr: Some(e), .. } => {
             if let Ok(t) = ev(vm, e) {
                 if py::truthy(vm, &t).unwrap_or(false) {
-                    if let Ok(d) = vm.call(&t, Vec::new(), vec![("old_widget".into(), Value::None), ("new_widget".into(), Value::None)]) {
+                    if let Ok(d) = vm.call(
+                        &t,
+                        Vec::new(),
+                        vec![
+                            ("old_widget".into(), Value::None),
+                            ("new_widget".into(), Value::None),
+                        ],
+                    ) {
                         let _ = super::predict::displayable(vm, &d);
                     }
                 }
             }
             vec![next]
         }
-        NodeKind::Call { label, expression, global_label, .. } | NodeKind::Jump { target: label, expression, global_label } => {
+        NodeKind::Call {
+            label,
+            expression,
+            global_label,
+            ..
+        }
+        | NodeKind::Jump {
+            target: label,
+            expression,
+            global_label,
+        } => {
             let is_call = matches!(node.kind, NodeKind::Call { .. });
             let mut target = py::s(vm, label);
             if *expression {
@@ -1345,15 +1746,24 @@ pub fn predict(vm: &mut Vm, id: NodeId) -> PyResult<Vec<Option<NodeId>>> {
             say_menu_with(vm, with_, &cb)?;
             let pm = py::import_attr(vm, "store", "predict_menu")?;
             vm.call(&pm, Vec::new(), Vec::new())?;
-            items.iter().filter_map(|i| i.block.as_ref().and_then(|b| b.first().copied())).map(Some).collect()
+            items
+                .iter()
+                .filter_map(|i| i.block.as_ref().and_then(|b| b.first().copied()))
+                .map(Some)
+                .collect()
         }
         NodeKind::While { block, .. } => vec![block.first().copied(), next],
         NodeKind::If { entries } => {
-            let mut v: Vec<Option<NodeId>> = entries.iter().map(|(_, b)| b.first().copied()).collect();
+            let mut v: Vec<Option<NodeId>> =
+                entries.iter().map(|(_, b)| b.first().copied()).collect();
             v.push(next);
             v
         }
-        NodeKind::Translate { identifier, alternate, .. } => {
+        NodeKind::Translate {
+            identifier,
+            alternate,
+            ..
+        } => {
             let n = lookup_translate(vm, identifier, alternate)?;
             vec![nodes::id_of(&n)]
         }
@@ -1366,13 +1776,15 @@ pub fn predict(vm: &mut Vm, id: NodeId) -> PyResult<Vec<Option<NodeId>>> {
                 }
             }
             if let Some(a) = atl {
-                let t = super::atlrt::new_atl_transform(vm, a.clone(), None, Value::None, Value::None)?;
+                let t =
+                    super::atlrt::new_atl_transform(vm, a.clone(), None, Value::None, Value::None)?;
                 let pd = py::import_attr(vm, "renpy.display.predict", "displayable")?;
                 vm.call(&pd, vec![t], Vec::new())?;
             }
             let pa = user_get(vm, id, "predict_all")?;
             if py::truthy(vm, &pa)? {
-                let mut v: Vec<Option<NodeId>> = subparses.iter().map(|b| b.first().copied()).collect();
+                let mut v: Vec<Option<NodeId>> =
+                    subparses.iter().map(|b| b.first().copied()).collect();
                 v.push(next);
                 return Ok(v);
             }
@@ -1398,17 +1810,37 @@ pub fn predict(vm: &mut Vm, id: NodeId) -> PyResult<Vec<Option<NodeId>>> {
 }
 
 fn predict_with(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let d = vm.call(&args[0], Vec::new(), vec![("old_widget".into(), Value::None), ("new_widget".into(), Value::None)])?;
+    let d = vm.call(
+        &args[0],
+        Vec::new(),
+        vec![
+            ("old_widget".into(), Value::None),
+            ("new_widget".into(), Value::None),
+        ],
+    )?;
     super::predict::displayable(vm, &d)?;
     Ok(Value::None)
 }
 
-fn predict_say(vm: &mut Vm, who: &Option<PyExpr>, what: &str, with_: &Option<PyExpr>, attributes: &Option<Vec<String>>, temporary: &Option<Vec<String>>) -> PyResult<()> {
+fn predict_say(
+    vm: &mut Vm,
+    who: &Option<PyExpr>,
+    what: &str,
+    with_: &Option<PyExpr>,
+    attributes: &Option<Vec<String>>,
+    temporary: &Option<Vec<String>>,
+) -> PyResult<()> {
     let ctx = context(vm)?;
     let old_a = py::get_or_none(vm, &ctx, "say_attributes")?;
     let old_t = py::get_or_none(vm, &ctx, "temporary_attributes")?;
-    let a = attributes.as_ref().map(|a| str_tuple(vm, a)).unwrap_or(Value::None);
-    let t = temporary.as_ref().map(|a| str_tuple(vm, a)).unwrap_or(Value::None);
+    let a = attributes
+        .as_ref()
+        .map(|a| str_tuple(vm, a))
+        .unwrap_or(Value::None);
+    let t = temporary
+        .as_ref()
+        .map(|a| str_tuple(vm, a))
+        .unwrap_or(Value::None);
     py::set(vm, &ctx, "say_attributes", a)?;
     py::set(vm, &ctx, "temporary_attributes", t)?;
     let r = (|| -> PyResult<()> {
@@ -1436,9 +1868,24 @@ fn pe_new(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let str_t = Value::Obj(vm.types.str_.clone());
     let new = py::get(vm, &str_t, "__new__")?;
     let this = vm.call(&new, vec![cls, s], Vec::new())?;
-    py::set(vm, &this, "filename", arg_or(&args[1..], kw, 1, "filename", Value::None))?;
-    py::set(vm, &this, "linenumber", arg_or(&args[1..], kw, 2, "linenumber", Value::Int(0)))?;
-    py::set(vm, &this, "py", arg_or(&args[1..], kw, 3, "py", Value::Int(3)))?;
+    py::set(
+        vm,
+        &this,
+        "filename",
+        arg_or(&args[1..], kw, 1, "filename", Value::None),
+    )?;
+    py::set(
+        vm,
+        &this,
+        "linenumber",
+        arg_or(&args[1..], kw, 2, "linenumber", Value::Int(0)),
+    )?;
+    py::set(
+        vm,
+        &this,
+        "py",
+        arg_or(&args[1..], kw, 3, "py", Value::Int(3)),
+    )?;
     Ok(this)
 }
 
@@ -1464,19 +1911,165 @@ fn f_chain_block(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
+// Python-callable imspec helpers ---------------------------------------------------------------
+
+fn opt_text(vm: &mut Vm, v: &Value) -> PyResult<Option<String>> {
+    if py::is_none(v) { Ok(None) } else { py::string(vm, v).map(Some) }
+}
+
+fn pyexpr_of(vm: &mut Vm, v: &Value) -> PyResult<PyExpr> {
+    let text = py::string(vm, v)?;
+    let filename = py::get_opt(vm, v, "filename")?.filter(|f| !py::is_none(f));
+    let filename = match filename {
+        Some(f) => py::string(vm, &f)?,
+        None => "<imspec>".to_owned(),
+    };
+    let line = match py::get_opt(vm, v, "linenumber")? {
+        Some(l) if !py::is_none(&l) => py::int(vm, &l)? as u32,
+        _ => 1,
+    };
+    Ok(PyExpr::new(text, filename.into(), line))
+}
+
+/// An upstream imspec tuple: `(name, at_list, layer)` or the 6/7-tuple
+/// `(name, expression, tag, at_list, layer, zorder[, behind])`.
+fn imspec_from(vm: &mut Vm, v: &Value) -> PyResult<ImSpec> {
+    let t = py::items(vm, v)?;
+    let names = |vm: &mut Vm, v: &Value| -> PyResult<Vec<String>> {
+        if let Some(s) = v.as_str() {
+            return Ok(s.split_whitespace().map(str::to_owned).collect());
+        }
+        py::items(vm, v)?.iter().map(|x| py::string(vm, x)).collect()
+    };
+    let exprs = |vm: &mut Vm, v: &Value| -> PyResult<Vec<PyExpr>> {
+        if py::is_none(v) {
+            return Ok(Vec::new());
+        }
+        py::items(vm, v)?.iter().map(|x| pyexpr_of(vm, x)).collect()
+    };
+    let opt_expr = |vm: &mut Vm, v: &Value| -> PyResult<Option<PyExpr>> {
+        if py::is_none(v) { Ok(None) } else { pyexpr_of(vm, v).map(Some) }
+    };
+    match t.len() {
+        3 => Ok(ImSpec {
+            name: names(vm, &t[0])?,
+            expression: None,
+            tag: None,
+            at_list: exprs(vm, &t[1])?,
+            layer: opt_text(vm, &t[2])?,
+            zorder: None,
+            behind: Vec::new(),
+        }),
+        6 | 7 => Ok(ImSpec {
+            name: names(vm, &t[0])?,
+            expression: opt_expr(vm, &t[1])?,
+            tag: opt_text(vm, &t[2])?,
+            at_list: exprs(vm, &t[3])?,
+            layer: opt_text(vm, &t[4])?,
+            zorder: opt_expr(vm, &t[5])?,
+            behind: if t.len() == 7 && !py::is_none(&t[6]) { names(vm, &t[6])? } else { Vec::new() },
+        }),
+        n => Err(vm.exc_msg("ValueError", format!("an imspec has 3, 6 or 7 items, not {n}"))),
+    }
+}
+
+fn atl_arg(vm: &mut Vm, v: Option<&Value>) -> PyResult<Option<Rc<crate::atl::RawBlock>>> {
+    match v {
+        None => Ok(None),
+        Some(v) if py::is_none(v) => Ok(None),
+        Some(v) => super::atlrt::raw_of(v).map(Some).ok_or_else(|| vm.type_error("atl must be a renpy.atl.RawBlock")),
+    }
+}
+
+fn f_show_imspec(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    let spec = imspec_from(vm, &args[0])?;
+    let atl = atl_arg(vm, arg(args, kw, 1, "atl"))?;
+    show_imspec(vm, &spec, &atl)?;
+    Ok(Value::None)
+}
+
+fn f_predict_imspec(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    let spec = imspec_from(vm, &args[0])?;
+    let scene = match arg(args, kw, 1, "scene") {
+        Some(v) => py::truthy(vm, v)?,
+        None => false,
+    };
+    let atl = atl_arg(vm, arg(args, kw, 2, "atl"))?;
+    predict_imspec(vm, &spec, scene, &atl)?;
+    Ok(Value::None)
+}
+
+/// `get_imspec_tag(imspec)` (8.6): the tag, else the first name component.
+fn f_get_imspec_tag(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+    let t = py::items(vm, &args[0])?;
+    let rv = match t.len() {
+        6 | 7 if py::truthy(vm, &t[2])? => t[2].clone(),
+        _ => t[0].clone(),
+    };
+    if let Some(crysirror_python::Payload::Tuple(items)) = rv.payload() {
+        return Ok(items.first().cloned().unwrap_or(Value::None));
+    }
+    Ok(rv)
+}
+
+fn f_reach_any(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
+    Ok(Value::Bool(true))
+}
+
+/// `get_reachable_nodes(entry_nodes, node_validator=_reach_any, seen=None)`
+/// (8.4+): breadth-first closure over `Node.get_reachable()`.
+fn f_get_reachable_nodes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    let entry = py::items(vm, &args[0])?;
+    let validator = match arg(args, kw, 1, "node_validator") {
+        Some(v) => v.clone(),
+        None => mget(vm, "_reach_any")?,
+    };
+    let seen = match arg(args, kw, 2, "seen") {
+        Some(v) if !py::is_none(v) => v.clone(),
+        _ => vm.types.new_set(Default::default()),
+    };
+    let mut result = Vec::new();
+    let mut work: std::collections::VecDeque<Value> = entry.into();
+    while let Some(node) = work.pop_front() {
+        if ops::contains(vm, &seen, &node)? {
+            continue;
+        }
+        ops::set_add(vm, &seen, node.clone())?;
+        result.push(node.clone());
+        let reach = py::method(vm, &node, "get_reachable", Vec::new())?;
+        for n in py::items(vm, &reach)? {
+            if ops::contains(vm, &seen, &n)? {
+                continue;
+            }
+            let ok = vm.call(&validator, vec![node.clone(), n.clone()], Vec::new())?;
+            if !py::truthy(vm, &ok)? {
+                continue;
+            }
+            work.push_back(n);
+        }
+    }
+    Ok(vm.types.new_list(result))
+}
+
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("statement_name", f_statement_name),
-        ("next_node", f_next_node),
-        ("say_menu_with", f_say_menu_with),
-        ("eval_who", f_eval_who),
-        ("create_store", f_create_store),
-        ("get_namespace", f_get_namespace),
-        ("redefine", f_redefine),
-        ("apply_arguments", f_apply_arguments),
-        ("probably_side_effect_free", f_probably_side_effect_free),
-        ("chain_block", f_chain_block),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("statement_name", f_statement_name),
+            ("next_node", f_next_node),
+            ("say_menu_with", f_say_menu_with),
+            ("eval_who", f_eval_who),
+            ("create_store", f_create_store),
+            ("get_namespace", f_get_namespace),
+            ("redefine", f_redefine),
+            ("apply_arguments", f_apply_arguments),
+            ("probably_side_effect_free", f_probably_side_effect_free),
+            ("chain_block", f_chain_block),
+            ("show_imspec", f_show_imspec),
+            ("predict_imspec", f_predict_imspec),
+        ],
+    );
     nodes::add_ast_classes(vm, &m)?;
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     set(vm, "current_statement_name", py::s(vm, "init"));
@@ -1488,7 +2081,22 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     }
     set(vm, "EARLY_CONFIG", ec);
     let obj = Value::Obj(vm.types.object.clone());
-    let sn = py::class(vm, MODULE, "StoreNamespace", &[obj.clone()], &[("__init__", sn_init), ("set", sn_set), ("set_default", sn_set), ("get", sn_get)], &[("pure", Value::Bool(true)), ("repeat_at_default_time", Value::Bool(false))])?;
+    let sn = py::class(
+        vm,
+        MODULE,
+        "StoreNamespace",
+        &[obj.clone()],
+        &[
+            ("__init__", sn_init),
+            ("set", sn_set),
+            ("set_default", sn_set),
+            ("get", sn_get),
+        ],
+        &[
+            ("pure", Value::Bool(true)),
+            ("repeat_at_default_time", Value::Bool(false)),
+        ],
+    )?;
     set(vm, "StoreNamespace", Value::Obj(sn));
     let str_t = Value::Obj(vm.types.str_.clone());
     let pn = vm.types.new_builtin("__new__", pe_new);
@@ -1497,7 +2105,14 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let cp = py::staticmethod(vm, cp);
     let rv = vm.types.new_builtin("revert", pe_none);
     let rv = py::staticmethod(vm, rv);
-    let pe = py::class(vm, MODULE, "PyExpr", &[str_t], &[("__getnewargs__", pe_getnewargs)], &[("__new__", pn), ("checkpoint", cp), ("revert", rv)])?;
+    let pe = py::class(
+        vm,
+        MODULE,
+        "PyExpr",
+        &[str_t],
+        &[("__getnewargs__", pe_getnewargs)],
+        &[("__new__", pn), ("checkpoint", cp), ("revert", rv)],
+    )?;
     set(vm, "PyExpr", Value::Obj(pe));
     let sentinel = py::import_attr(vm, "renpy.object", "Sentinel")?;
     let dne = vm.call(&sentinel, vec![py::s(vm, "DoesNotExtend")], Vec::new())?;
@@ -1510,6 +2125,43 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
         if let Ok(v) = py::import_attr(vm, "renpy.atl", "Signature") {
             set(vm, n, v);
         }
+    }
+    let profile = rt(vm).profile.clone();
+    let at_least = |a: u32, b: u32| profile.at_least(a, b);
+    if at_least(7, 5) {
+        for n in ["EMPTY_PARAMETERS", "EMPTY_ARGUMENTS", "Parameter"] {
+            if let Ok(v) = py::import_attr(vm, "renpy.parameter", n) {
+                set(vm, n, v);
+            }
+        }
+    }
+    if at_least(7, 0) && !at_least(7, 4) {
+        let re_compile = py::import_attr(vm, "re", "compile")?;
+        let p = vm.call(&re_compile, vec![py::s(vm, "[a-zA-Z_][a-zA-Z_0-9]*$")], Vec::new())?;
+        set(vm, "fast_who_pattern", p);
+    }
+    if at_least(7, 0) && !at_least(7, 5) {
+        set(vm, "pyexpr_list", vm.types.new_list(Vec::new()));
+    }
+    if at_least(8, 4) {
+        for (src, n) in [
+            ("renpy.astsupport", "PyExpr"),
+            ("renpy.astsupport", "hash32"),
+            ("renpy.cslots", "Object"),
+            ("renpy.cslots", "Slot"),
+            ("renpy.cslots", "IntegerSlot"),
+        ] {
+            let v = py::import_attr(vm, src, n)?;
+            set(vm, n, v);
+        }
+        let ra = py::builtin(vm, "_reach_any", f_reach_any);
+        set(vm, "_reach_any", ra);
+        let gr = py::builtin(vm, "get_reachable_nodes", f_get_reachable_nodes);
+        set(vm, "get_reachable_nodes", gr);
+    }
+    if at_least(8, 6) {
+        let g = py::builtin(vm, "get_imspec_tag", f_get_imspec_tag);
+        set(vm, "get_imspec_tag", g);
     }
     Ok(m)
 }

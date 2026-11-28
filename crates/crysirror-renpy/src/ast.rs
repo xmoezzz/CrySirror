@@ -14,7 +14,11 @@ pub type NodeId = usize;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum NodeName {
     Label(Rc<str>),
-    Generated { filename: Rc<str>, stamp: i64, serial: i64 },
+    Generated {
+        filename: Rc<str>,
+        stamp: i64,
+        serial: i64,
+    },
     /// Any other tuple name, such as the `(..., "translate")` names of
     /// restructured translation nodes.
     Tuple(Rc<[NameAtom]>),
@@ -35,7 +39,15 @@ impl NodeName {
     /// The elements of a generated or tuple name.
     pub fn atoms(&self) -> Option<Vec<NameAtom>> {
         match self {
-            NodeName::Generated { filename, stamp, serial } => Some(vec![NameAtom::Str(filename.clone()), NameAtom::Int(*stamp), NameAtom::Int(*serial)]),
+            NodeName::Generated {
+                filename,
+                stamp,
+                serial,
+            } => Some(vec![
+                NameAtom::Str(filename.clone()),
+                NameAtom::Int(*stamp),
+                NameAtom::Int(*serial),
+            ]),
             NodeName::Tuple(t) => Some(t.to_vec()),
             _ => None,
         }
@@ -54,7 +66,11 @@ impl NodeName {
     /// The canonical form: 3-tuples of (str, int, int) are `Generated`.
     pub fn from_atoms(a: Vec<NameAtom>) -> NodeName {
         if let [NameAtom::Str(f), NameAtom::Int(s), NameAtom::Int(n)] = a.as_slice() {
-            return NodeName::Generated { filename: f.clone(), stamp: *s, serial: *n };
+            return NodeName::Generated {
+                filename: f.clone(),
+                stamp: *s,
+                serial: *n,
+            };
         }
         NodeName::Tuple(a.into())
     }
@@ -141,43 +157,159 @@ pub enum NodeKind {
         identifier: Option<String>,
         explicit_identifier: bool,
     },
-    Init { block: Vec<NodeId>, priority: i32 },
-    Label { name: Rc<str>, block: Vec<NodeId>, parameters: Option<Signature>, hide: bool },
-    Python { code: PyCode, hide: bool, store: String },
-    EarlyPython { code: PyCode, hide: bool, store: String },
-    Image { name: Vec<String>, code: Option<PyCode>, atl: Option<Rc<crate::atl::RawBlock>> },
-    Transform { store: String, name: String, atl: Rc<crate::atl::RawBlock>, parameters: Option<Signature> },
-    Show { imspec: ImSpec, atl: Option<Rc<crate::atl::RawBlock>> },
-    ShowLayer { layer: String, at_list: Vec<PyExpr>, atl: Option<Rc<crate::atl::RawBlock>> },
-    Camera { layer: String, at_list: Vec<PyExpr>, atl: Option<Rc<crate::atl::RawBlock>> },
-    Scene { imspec: Option<ImSpec>, layer: Option<String>, atl: Option<Rc<crate::atl::RawBlock>> },
-    Hide { imspec: ImSpec },
+    Init {
+        block: Vec<NodeId>,
+        priority: i32,
+    },
+    Label {
+        name: Rc<str>,
+        block: Vec<NodeId>,
+        parameters: Option<Signature>,
+        hide: bool,
+    },
+    Python {
+        code: PyCode,
+        hide: bool,
+        store: String,
+    },
+    EarlyPython {
+        code: PyCode,
+        hide: bool,
+        store: String,
+    },
+    Image {
+        name: Vec<String>,
+        code: Option<PyCode>,
+        atl: Option<Rc<crate::atl::RawBlock>>,
+    },
+    Transform {
+        store: String,
+        name: String,
+        atl: Rc<crate::atl::RawBlock>,
+        parameters: Option<Signature>,
+    },
+    Show {
+        imspec: ImSpec,
+        atl: Option<Rc<crate::atl::RawBlock>>,
+    },
+    ShowLayer {
+        layer: String,
+        at_list: Vec<PyExpr>,
+        atl: Option<Rc<crate::atl::RawBlock>>,
+    },
+    Camera {
+        layer: String,
+        at_list: Vec<PyExpr>,
+        atl: Option<Rc<crate::atl::RawBlock>>,
+    },
+    Scene {
+        imspec: Option<ImSpec>,
+        layer: Option<String>,
+        atl: Option<Rc<crate::atl::RawBlock>>,
+    },
+    Hide {
+        imspec: ImSpec,
+    },
     /// `expr` is the transition; `paired` marks the opening half of a
     /// `show ... with` pair (Ren'Py's `With(loc, None, expr)`).
-    With { expr: Option<PyExpr>, paired: Option<PyExpr> },
-    Call { label: String, expression: bool, arguments: Option<ArgumentInfo>, global_label: String },
-    Return { expression: Option<PyExpr> },
-    Menu { items: Vec<MenuItem>, set: Option<PyExpr>, with_: Option<PyExpr>, has_caption: bool, arguments: Option<ArgumentInfo> },
-    Jump { target: String, expression: bool, global_label: String },
+    With {
+        expr: Option<PyExpr>,
+        paired: Option<PyExpr>,
+    },
+    Call {
+        label: String,
+        expression: bool,
+        arguments: Option<ArgumentInfo>,
+        global_label: String,
+    },
+    Return {
+        expression: Option<PyExpr>,
+    },
+    Menu {
+        items: Vec<MenuItem>,
+        set: Option<PyExpr>,
+        with_: Option<PyExpr>,
+        has_caption: bool,
+        arguments: Option<ArgumentInfo>,
+    },
+    Jump {
+        target: String,
+        expression: bool,
+        global_label: String,
+    },
     Pass,
-    While { condition: PyExpr, block: Vec<NodeId> },
-    If { entries: Vec<(PyExpr, Vec<NodeId>)> },
+    While {
+        condition: PyExpr,
+        block: Vec<NodeId>,
+    },
+    If {
+        entries: Vec<(PyExpr, Vec<NodeId>)>,
+    },
     /// Creator-defined statement; `parsed` is the registry's Python value.
-    UserStatement { line: String, block: Rc<Vec<crate::lexer::GroupedLine>>, parsed: Option<crysirror_python::Value>, subparses: Vec<Vec<NodeId>>, code_block: Option<Vec<NodeId>>, init_priority: i32, translatable: bool, atl: Option<Rc<crate::atl::RawBlock>> },
-    PostUserStatement { parent: NodeId },
-    Define { store: String, name: String, index: Option<PyExpr>, operator: String, code: PyCode },
-    Default { store: String, name: String, code: PyCode },
-    Screen { screen: Rc<crate::sl2::Screen> },
+    UserStatement {
+        line: String,
+        block: Rc<Vec<crate::lexer::GroupedLine>>,
+        parsed: Option<crysirror_python::Value>,
+        subparses: Vec<Vec<NodeId>>,
+        code_block: Option<Vec<NodeId>>,
+        init_priority: i32,
+        translatable: bool,
+        atl: Option<Rc<crate::atl::RawBlock>>,
+    },
+    PostUserStatement {
+        parent: NodeId,
+    },
+    Define {
+        store: String,
+        name: String,
+        index: Option<PyExpr>,
+        operator: String,
+        code: PyCode,
+    },
+    Default {
+        store: String,
+        name: String,
+        code: PyCode,
+    },
+    Screen {
+        screen: Rc<crate::sl2::Screen>,
+    },
     Style(Box<Style>),
-    Testcase { name: String },
-    Rpy { rest: (String, String) },
-    Translate { identifier: String, language: Option<String>, block: Vec<NodeId>, alternate: Option<String> },
-    TranslateSay { identifier: String, language: Option<String>, say: Box<NodeKind> },
+    Testcase {
+        name: String,
+    },
+    Rpy {
+        rest: (String, String),
+    },
+    Translate {
+        identifier: String,
+        language: Option<String>,
+        block: Vec<NodeId>,
+        alternate: Option<String>,
+    },
+    TranslateSay {
+        identifier: String,
+        language: Option<String>,
+        say: Box<NodeKind>,
+    },
     EndTranslate,
-    TranslateString { language: Option<String>, old: String, new: String },
-    TranslatePython { language: Option<String>, code: PyCode },
-    TranslateBlock { language: Option<String>, block: Vec<NodeId> },
-    TranslateEarlyBlock { language: Option<String>, block: Vec<NodeId> },
+    TranslateString {
+        language: Option<String>,
+        old: String,
+        new: String,
+    },
+    TranslatePython {
+        language: Option<String>,
+        code: PyCode,
+    },
+    TranslateBlock {
+        language: Option<String>,
+        block: Vec<NodeId>,
+    },
+    TranslateEarlyBlock {
+        language: Option<String>,
+        block: Vec<NodeId>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -210,8 +342,11 @@ impl NodeKind {
     /// ATL blocks owned directly by this node.
     pub fn atl_blocks(&self) -> Vec<&Rc<crate::atl::RawBlock>> {
         match self {
-            NodeKind::Image { atl: Some(a), .. } | NodeKind::Show { atl: Some(a), .. } | NodeKind::ShowLayer { atl: Some(a), .. }
-            | NodeKind::Camera { atl: Some(a), .. } | NodeKind::Scene { atl: Some(a), .. }
+            NodeKind::Image { atl: Some(a), .. }
+            | NodeKind::Show { atl: Some(a), .. }
+            | NodeKind::ShowLayer { atl: Some(a), .. }
+            | NodeKind::Camera { atl: Some(a), .. }
+            | NodeKind::Scene { atl: Some(a), .. }
             | NodeKind::UserStatement { atl: Some(a), .. } => vec![a],
             NodeKind::Transform { atl, .. } => vec![atl],
             _ => Vec::new(),
@@ -224,7 +359,15 @@ impl Arena {
         self.nodes.len()
     }
     pub fn add(&mut self, loc: &(Rc<str>, u32), kind: NodeKind) -> NodeId {
-        self.nodes.push(Node { filename: loc.0.clone(), linenumber: loc.1, name: None, next: None, rollback: Rollback::Normal, statement_start: None, kind });
+        self.nodes.push(Node {
+            filename: loc.0.clone(),
+            linenumber: loc.1,
+            name: None,
+            next: None,
+            rollback: Rollback::Normal,
+            statement_start: None,
+            kind,
+        });
         self.nodes.len() - 1
     }
     pub fn get(&self, id: NodeId) -> &Node {
@@ -237,10 +380,19 @@ impl Arena {
     /// Child blocks of a node (for chaining and traversal).
     pub fn child_blocks(&self, id: NodeId) -> Vec<Vec<NodeId>> {
         match &self.nodes[id].kind {
-            NodeKind::Init { block, .. } | NodeKind::Label { block, .. } | NodeKind::While { block, .. } | NodeKind::Translate { block, .. } | NodeKind::TranslateBlock { block, .. } | NodeKind::TranslateEarlyBlock { block, .. } => vec![block.clone()],
+            NodeKind::Init { block, .. }
+            | NodeKind::Label { block, .. }
+            | NodeKind::While { block, .. }
+            | NodeKind::Translate { block, .. }
+            | NodeKind::TranslateBlock { block, .. }
+            | NodeKind::TranslateEarlyBlock { block, .. } => vec![block.clone()],
             NodeKind::If { entries } => entries.iter().map(|(_, b)| b.clone()).collect(),
             NodeKind::Menu { items, .. } => items.iter().filter_map(|i| i.block.clone()).collect(),
-            NodeKind::UserStatement { subparses, code_block, .. } => {
+            NodeKind::UserStatement {
+                subparses,
+                code_block,
+                ..
+            } => {
                 let mut v = subparses.clone();
                 if let Some(c) = code_block {
                     v.push(c.clone());
@@ -263,7 +415,14 @@ impl Arena {
 
     fn chain(&mut self, id: NodeId, next: Option<NodeId>) {
         // `Return.chain` and `Jump.chain` leave `next` unset.
-        self.nodes[id].next = if matches!(self.nodes[id].kind, NodeKind::Return { .. } | NodeKind::Jump { .. }) { None } else { next };
+        self.nodes[id].next = if matches!(
+            self.nodes[id].kind,
+            NodeKind::Return { .. } | NodeKind::Jump { .. }
+        ) {
+            None
+        } else {
+            next
+        };
         match self.nodes[id].kind.clone() {
             // A label/init/translate block runs into what follows the node.
             NodeKind::Label { block, .. } => {
@@ -271,7 +430,9 @@ impl Arena {
                 self.nodes[id].next = first;
                 self.chain_block(&block, next);
             }
-            NodeKind::Init { block, .. } | NodeKind::TranslateBlock { block, .. } | NodeKind::TranslateEarlyBlock { block, .. } => self.chain_block(&block, None),
+            NodeKind::Init { block, .. }
+            | NodeKind::TranslateBlock { block, .. }
+            | NodeKind::TranslateEarlyBlock { block, .. } => self.chain_block(&block, None),
             NodeKind::Translate { block, .. } => self.chain_block(&block, next),
             NodeKind::While { block, .. } => self.chain_block(&block, Some(id)),
             NodeKind::If { entries } => {
@@ -286,7 +447,11 @@ impl Arena {
                     }
                 }
             }
-            NodeKind::UserStatement { subparses, code_block, .. } => {
+            NodeKind::UserStatement {
+                subparses,
+                code_block,
+                ..
+            } => {
                 for b in subparses {
                     self.chain_block(&b, next);
                 }

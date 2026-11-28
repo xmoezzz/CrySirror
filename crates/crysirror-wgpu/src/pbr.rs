@@ -17,10 +17,8 @@ use glam::{Mat4, Vec3};
 use std::{collections::HashMap, sync::Arc};
 use wgpu::util::DeviceExt;
 
-const HDR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-const MSAA: u32 = 4;
-const SHADOW_SIZE: u32 = 2048;
+pub(crate) const HDR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+pub(crate) const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const CASCADES: usize = 4;
 const PREFILTER_W: u32 = 1024;
 const PREFILTER_MIPS: u32 = 7;
@@ -220,6 +218,7 @@ struct FrameUniform {
     /// Toon key light: xyz direction, w intensity; rgb colour.
     toon_dir: [f32; 4],
     toon_color: [f32; 4],
+    baked_lighting: [f32; 4],
 }
 /// Byte offset of the irradiance probes in the shadow-data buffer
 /// (after 64 tile matrices and the virtual shadow page table).
@@ -759,7 +758,7 @@ struct GpuEnv {
 }
 struct Targets {
     size: [u32; 2],
-    msaa_color: wgpu::TextureView,
+    msaa_color: Option<wgpu::TextureView>,
     msaa_depth: wgpu::TextureView,
     resolved: wgpu::TextureView,
     composite: wgpu::TextureView,
@@ -786,9 +785,9 @@ fn blend_state(alpha: AlphaMode) -> Option<wgpu::BlendState> {
         AlphaMode::Opaque | AlphaMode::Mask => None,
         AlphaMode::Blend => Some(wgpu::BlendState::ALPHA_BLENDING),
         AlphaMode::Premultiplied => Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-        AlphaMode::Additive => Some(wgpu::BlendState {
+        AlphaMode::Additive | AlphaMode::SoftAdditive => Some(wgpu::BlendState {
             color: B {
-                src_factor: F::SrcAlpha,
+                src_factor: if alpha == AlphaMode::SoftAdditive { F::OneMinusDst } else { F::SrcAlpha },
                 dst_factor: F::One,
                 operation: O::Add,
             },
@@ -811,6 +810,7 @@ fn halton(mut i: u32, base: u32) -> f32 {
 }
 
 pub struct PbrRenderer {
+    pub(crate) quality: crysirror_scene::view::RasterQuality,
     pub(super) photo_alpha: bool,
     profiler: crysirror_tasks::profile::Profiler,
     profile_frame: u64,
@@ -1085,6 +1085,7 @@ fn bytes_of_vertices(v: &[PbrVertex]) -> Vec<u8> {
 }
 
 struct SurfacePipelines {
+    samples: u32,
     validation: crate::pipeline::Validation,
     opaque: wgpu::RenderPipeline,
     opaque_double: wgpu::RenderPipeline,
@@ -1112,12 +1113,12 @@ struct SurfacePipelines {
 }
 impl SurfacePipelines {
     fn forward_pipeline(d: &wgpu::Device, layout: &wgpu::PipelineLayout, module: &wgpu::ShaderModule,
-        cull: Option<wgpu::Face>, skinned: bool, alpha: AlphaMode, depth_write: bool, geometry: bool, authored: bool) -> wgpu::RenderPipeline {
-        Self::forward_pipeline_streams(d, layout, module, cull, skinned, false, alpha, depth_write, geometry, authored)
+        cull: Option<wgpu::Face>, skinned: bool, alpha: AlphaMode, depth_write: bool, geometry: bool, authored: bool, samples: u32) -> wgpu::RenderPipeline {
+        Self::forward_pipeline_streams(d, layout, module, cull, skinned, false, alpha, depth_write, geometry, authored, samples)
     }
     /// `aux`: static primitives with an `_AUX` stream (`vs_aux`, buffer 1).
     fn forward_pipeline_streams(d: &wgpu::Device, layout: &wgpu::PipelineLayout, module: &wgpu::ShaderModule,
-        cull: Option<wgpu::Face>, skinned: bool, aux: bool, alpha: AlphaMode, depth_write: bool, geometry: bool, authored: bool) -> wgpu::RenderPipeline {
+        cull: Option<wgpu::Face>, skinned: bool, aux: bool, alpha: AlphaMode, depth_write: bool, geometry: bool, authored: bool, samples: u32) -> wgpu::RenderPipeline {
         let buffers = [Some(vertex_layout()), Some(if aux { aux_layout() } else { skin_layout() })];
         d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             cache: None,
@@ -1153,7 +1154,7 @@ impl SurfacePipelines {
             multisample: if !geometry {
                 Default::default()
             } else {
-                wgpu::MultisampleState { count: MSAA, ..Default::default() }
+                wgpu::MultisampleState { count: samples, ..Default::default() }
             },
             multiview_mask: None,
         })
@@ -1167,10 +1168,10 @@ impl SurfacePipelines {
             let mut late_depth_blend = Vec::new();
             for skin in [false, true] {
                 for cull in [Some(wgpu::Face::Back), None] {
-                    depth_blend.push(Self::forward_pipeline(d, &self.forward_layout, &self.forward_module, cull, skin, AlphaMode::Blend, true, true, true));
-                    geometry_blend.push(Self::forward_pipeline(d, &self.forward_layout, &self.forward_module, cull, skin, AlphaMode::Blend, false, true, true));
-                    geometry_no_write.push(Self::forward_pipeline(d, &self.forward_layout, &self.forward_module, cull, skin, AlphaMode::Opaque, false, true, true));
-                    late_depth_blend.push(Self::forward_pipeline(d, &self.forward_layout, &self.forward_module, cull, skin, AlphaMode::Blend, true, false, true));
+                    depth_blend.push(Self::forward_pipeline(d, &self.forward_layout, &self.forward_module, cull, skin, AlphaMode::Blend, true, true, true, self.samples));
+                    geometry_blend.push(Self::forward_pipeline(d, &self.forward_layout, &self.forward_module, cull, skin, AlphaMode::Blend, false, true, true, self.samples));
+                    geometry_no_write.push(Self::forward_pipeline(d, &self.forward_layout, &self.forward_module, cull, skin, AlphaMode::Opaque, false, true, true, self.samples));
+                    late_depth_blend.push(Self::forward_pipeline(d, &self.forward_layout, &self.forward_module, cull, skin, AlphaMode::Blend, true, false, true, self.samples));
                 }
             }
             self.depth_blend = depth_blend;
@@ -1190,6 +1191,7 @@ impl SurfacePipelines {
         object_bgl: &wgpu::BindGroupLayout,
         shadow_bgl: &wgpu::BindGroupLayout,
         custom: Option<&str>,
+        samples: u32,
     ) -> Result<Self> {
         let [color, pre, shadow] = crate::effect::modules(custom)?;
         let d = &gpu.device;
@@ -1210,11 +1212,11 @@ impl SurfacePipelines {
             bias: Default::default(),
         };
         let msaa = wgpu::MultisampleState {
-            count: MSAA,
+            count: samples,
             ..Default::default()
         };
         let opaque_pipeline = |cull, skinned, alpha, depth_write, geometry, authored|
-            Self::forward_pipeline(d, &main_layout, &pbr_sh, cull, skinned, alpha, depth_write, geometry, authored);
+            Self::forward_pipeline(d, &main_layout, &pbr_sh, cull, skinned, alpha, depth_write, geometry, authored, samples);
         let outline_pipeline = |skinned: bool| {
             let buffers = [Some(vertex_layout()), Some(skin_layout())];
             d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1252,13 +1254,14 @@ impl SurfacePipelines {
         let opaque_double = opaque_pipeline(None, false, AlphaMode::Opaque, true, true, false);
         let opaque_skin = opaque_pipeline(Some(wgpu::Face::Back), true, AlphaMode::Opaque, true, true, false);
         let opaque_skin_double = opaque_pipeline(None, true, AlphaMode::Opaque, true, true, false);
-        let opaque_aux = Self::forward_pipeline_streams(d, &main_layout, &pbr_sh, Some(wgpu::Face::Back), false, true, AlphaMode::Opaque, true, true, false);
-        let opaque_aux_double = Self::forward_pipeline_streams(d, &main_layout, &pbr_sh, None, false, true, AlphaMode::Opaque, true, true, false);
+        let opaque_aux = Self::forward_pipeline_streams(d, &main_layout, &pbr_sh, Some(wgpu::Face::Back), false, true, AlphaMode::Opaque, true, true, false, samples);
+        let opaque_aux_double = Self::forward_pipeline_streams(d, &main_layout, &pbr_sh, None, false, true, AlphaMode::Opaque, true, true, false, samples);
         let mut transparent = Vec::new();
         for alpha in [
             AlphaMode::Blend,
             AlphaMode::Additive,
             AlphaMode::Premultiplied,
+            AlphaMode::SoftAdditive,
         ] {
             for skin in [false, true] {
                 for double in [false, true] {
@@ -1348,6 +1351,7 @@ impl SurfacePipelines {
         let shadow_skin = shadow_pipeline(true);
         let validation = crate::pipeline::Validation::new(error_scope.pop())?;
         Ok(Self {
+            samples,
             validation,
             opaque,
             opaque_double,
@@ -1463,7 +1467,10 @@ impl LocalShadows {
 }
 
 impl PbrRenderer {
-    pub fn new(gpu: Arc<Gpu>, output: wgpu::TextureFormat) -> Result<Self> {
+    pub fn new(
+        gpu: Arc<Gpu>, output: wgpu::TextureFormat, quality: crysirror_scene::view::RasterQuality,
+    ) -> Result<Self> {
+        let samples = quality.samples;
         let d = &gpu.device;
         let frag = wgpu::ShaderStages::FRAGMENT;
         let both = wgpu::ShaderStages::VERTEX_FRAGMENT;
@@ -1651,7 +1658,7 @@ impl PbrRenderer {
             bias: Default::default(),
         };
         let msaa = wgpu::MultisampleState {
-            count: MSAA,
+            count: samples,
             ..Default::default()
         };
         let sky_layout = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1867,7 +1874,7 @@ impl PbrRenderer {
         use wgpu::{AddressMode as A, FilterMode as F};
         let linear = sampler(F::Linear, A::ClampToEdge, A::ClampToEdge, 1, None);
         let env_sampler = sampler(F::Linear, A::Repeat, A::ClampToEdge, 1, None);
-        let material_sampler = sampler(F::Linear, A::Repeat, A::Repeat, 16, None);
+        let material_sampler = sampler(F::Linear, A::Repeat, A::Repeat, quality.anisotropy, None);
         let shadow_sampler = sampler(
             F::Linear,
             A::ClampToEdge,
@@ -1891,7 +1898,7 @@ impl PbrRenderer {
         let post_buf = uniform("post", 96);
         let object_capacity = 256;
         let object_buf = uniform("pbr objects", OBJECT_STRIDE * object_capacity);
-        let particles = crate::particles::Particles::new(d, HDR, MSAA)?;
+        let particles = crate::particles::Particles::new(d, HDR, samples)?;
         let palette_capacity = 1024u64;
         let palette_buf = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("joint palettes"),
@@ -1905,8 +1912,8 @@ impl PbrRenderer {
         let shadow_tex = d.create_texture(&wgpu::TextureDescriptor {
             label: Some("sun shadow map"),
             size: wgpu::Extent3d {
-                width: SHADOW_SIZE,
-                height: SHADOW_SIZE,
+                width: quality.shadow_map_size,
+                height: quality.shadow_map_size,
                 depth_or_array_layers: CASCADES as u32,
             },
             mip_level_count: 1,
@@ -2007,8 +2014,10 @@ impl PbrRenderer {
             &object_bgl,
             &shadow_bgl,
             None,
+            samples,
         )?;
         Ok(Self {
+            quality,
             profiler: Default::default(),
             profile_frame: 0,
             hardware_rt: None,
@@ -2032,7 +2041,7 @@ impl PbrRenderer {
                 &gpu.queue,
                 HDR,
                 DEPTH,
-                MSAA,
+                samples,
                 PREFILTER_MIPS,
                 &shader(
                     d,
@@ -2687,6 +2696,7 @@ impl PbrRenderer {
                 &self.object_bgl,
                 &self.shadow_bgl,
                 Some(source),
+                self.quality.samples,
             )
             .with_context(|| format!("custom shader client {client} asset {asset}"))?;
             self.custom_pipelines.insert(key.clone(), pipelines);
@@ -3140,8 +3150,8 @@ impl PbrRenderer {
         };
         self.targets = Some(Targets {
             size,
-            msaa_color: mk("hdr msaa", size, HDR, MSAA, ra),
-            msaa_depth: mk("depth msaa", size, DEPTH, MSAA, ra),
+            msaa_color: (self.quality.samples > 1).then(|| mk("hdr msaa", size, HDR, self.quality.samples, ra)),
+            msaa_depth: mk("depth msaa", size, DEPTH, self.quality.samples, ra),
             resolved: mk("hdr resolved", size, HDR, 1, rs),
             composite: mk("HDR transparency composite", size, HDR, 1, rs),
             pre_depth: mk("prepass depth", size, DEPTH, 1, rs | wgpu::TextureUsages::COPY_SRC),
@@ -4090,7 +4100,7 @@ impl PbrRenderer {
                 .max(0.01);
             // Stable cascades: snap the center to shadow texels.
             let light_view = Mat4::look_at_rh(Vec3::ZERO, l, up);
-            let texel = 2. * radius / SHADOW_SIZE as f32;
+            let texel = 2. * radius / self.quality.shadow_map_size as f32;
             let mut lc = light_view.transform_point3(center);
             lc.x = (lc.x / texel).floor() * texel;
             lc.y = (lc.y / texel).floor() * texel;
@@ -4137,7 +4147,7 @@ impl PbrRenderer {
                 env.intensity,
                 env.rotation_degrees.to_radians(),
                 (PREFILTER_MIPS - 1) as f32,
-                1. / SHADOW_SIZE as f32,
+                1. / self.quality.shadow_map_size as f32,
             ],
             screen: [
                 canvas[0] as f32,
@@ -4208,6 +4218,7 @@ impl PbrRenderer {
                 let c = env.toon_light.as_ref().map_or(sun.color, |t| t.color);
                 [c[0], c[1], c[2], 0.]
             },
+            baked_lighting: [env.baked_vertex_scale, 0., 0., 0.],
         };
         // Irradiance volume (ADR 0028): the first volume; a few probes refresh
         // per frame, nearest to the camera first. After three complete sweeps
@@ -5282,12 +5293,14 @@ impl PbrRenderer {
                         label: Some("probe capture face"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             depth_slice: None,
-                            view: if gi {
+                            view: if self.quality.samples == 1 {
+                                &face_view
+                            } else if gi {
                                 &pr.gi_msaa_color
                             } else {
                                 &pr.msaa_color
                             },
-                            resolve_target: Some(&face_view),
+                            resolve_target: (self.quality.samples > 1).then_some(&face_view),
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                 store: wgpu::StoreOp::Store,
@@ -5879,18 +5892,19 @@ impl PbrRenderer {
             });
             simple_pass(encoder, "ssr", &t.ssr, &self.ssr_pipe, &bind);
         }
-        // 4. Opaque + sky, 4x MSAA, resolved into HDR.
+        // 4. Opaque + sky, with an HDR resolve when multisampling is enabled.
+        self.particles.render_coverage_layer(d, encoder, &t.pre_depth);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 multiview_mask: None,
                 label: Some("pbr opaque"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     depth_slice: None,
-                    view: &t.msaa_color,
-                    resolve_target: Some(&t.resolved),
+                    view: t.msaa_color.as_ref().unwrap_or(&t.resolved),
+                    resolve_target: (self.quality.samples > 1).then_some(&t.resolved),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(if self.photo_alpha { wgpu::Color::TRANSPARENT } else { wgpu::Color::BLACK }),
-                        store: wgpu::StoreOp::Discard,
+                        store: if self.quality.samples > 1 { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store },
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -6069,6 +6083,7 @@ impl PbrRenderer {
                         AlphaMode::Blend => 0,
                         AlphaMode::Additive => 1,
                         AlphaMode::Premultiplied => 2,
+                        AlphaMode::SoftAdditive => 3,
                         _ => unreachable!(),
                     };
                     let slot = usize::from(r.skinned) * 2 + usize::from(double);

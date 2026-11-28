@@ -76,7 +76,9 @@ fn deleted(vm: &mut Vm) -> PyResult<Value> {
 /// `isinstance(v, classes)` for a class or tuple of classes.
 fn isinstance_any(vm: &mut Vm, v: &Value, classes: &Value) -> PyResult<bool> {
     let list = py::seq(classes).unwrap_or_else(|| vec![classes.clone()]);
-    Ok(list.iter().any(|c| c.obj().is_some_and(|c| ops::isinstance(vm, v, c))))
+    Ok(list
+        .iter()
+        .any(|c| c.obj().is_some_and(|c| ops::isinstance(vm, v, c))))
 }
 
 // Markers ----------------------------------------------------------------------------------------------
@@ -108,7 +110,13 @@ fn norollback_types(vm: &mut Vm) -> PyResult<Value> {
 }
 
 /// `reached(obj, reachable, wait)`: marks everything reachable from `obj`.
-fn reached(vm: &mut Vm, obj: &Value, reachable: &Value, seen: &mut HashSet<i64>, types: &Value) -> PyResult<()> {
+fn reached(
+    vm: &mut Vm,
+    obj: &Value,
+    reachable: &Value,
+    seen: &mut HashSet<i64>,
+    types: &Value,
+) -> PyResult<()> {
     let mut work = vec![obj.clone()];
     while let Some(obj) = work.pop() {
         let idobj = obj.id();
@@ -127,8 +135,15 @@ fn reached(vm: &mut Vm, obj: &Value, reachable: &Value, seen: &mut HashSet<i64>,
             let nosave = py::get_opt(vm, &obj, "nosave").ok().flatten();
             let skip = match nosave {
                 Some(ns) if !py::is_none(&ns) => {
-                    let nr = py::get_opt(vm, &obj, "noreach").ok().flatten().unwrap_or(ns);
-                    py::items(vm, &nr).unwrap_or_default().iter().filter_map(|v| v.as_str().map(|s| s.to_owned())).collect::<Vec<_>>()
+                    let nr = py::get_opt(vm, &obj, "noreach")
+                        .ok()
+                        .flatten()
+                        .unwrap_or(ns);
+                    py::items(vm, &nr)
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                        .collect::<Vec<_>>()
                 }
                 _ => Vec::new(),
             };
@@ -176,7 +191,13 @@ fn f_reached(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
-fn reached_vars(vm: &mut Vm, store: &Value, reachable: &Value, seen: &mut HashSet<i64>, types: &Value) -> PyResult<()> {
+fn reached_vars(
+    vm: &mut Vm,
+    store: &Value,
+    reachable: &Value,
+    seen: &mut HashSet<i64>,
+    types: &Value,
+) -> PyResult<()> {
     let vals = vm.call_method(store, "values", Vec::new())?;
     for v in ops::collect(vm, &vals)? {
         reached(vm, &v, reachable, seen, types)?;
@@ -215,13 +236,25 @@ fn rb_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     st(vm, this, "purged", Value::Bool(false))?;
     st(vm, this, "random", vm.types.new_list(Vec::new()))?;
     st(vm, this, "forward", Value::None)?;
+    if super::state::fixed_forward(vm) {
+        st(vm, this, "fixed", Value::Bool(false))?;
+    }
     st(vm, this, "stores", vm.types.new_dict())?;
     st(vm, this, "delta_ebc", vm.types.new_dict())?;
-    for n in ["retain_after_load", "checkpoint", "hard_checkpoint", "not_greedy"] {
+    for n in [
+        "retain_after_load",
+        "checkpoint",
+        "hard_checkpoint",
+        "not_greedy",
+    ] {
         st(vm, this, n, Value::Bool(false))?;
     }
     let l = log(vm)?;
-    let cs = if py::is_none(&l) { Value::Bool(false) } else { g(vm, &l, "checkpointing_suspended")? };
+    let cs = if py::is_none(&l) {
+        Value::Bool(false)
+    } else {
+        g(vm, &l, "checkpointing_suspended")?
+    };
     st(vm, this, "checkpointing_suspended", cs)?;
     let generation = mget(vm, "generation")?;
     let serial = SERIAL.with(|s| {
@@ -348,11 +381,18 @@ fn rb_rollback(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
                 let ex = py::config(vm, "ex_rollback_classes")?;
                 let ex = py::items(vm, &ex)?;
                 let ex = vm.types.new_tuple(ex);
-                if isinstance_any(vm, &p[0], &ex).unwrap_or(false) || !py::config_bool(vm, "developer")? {
+                if isinstance_any(vm, &p[0], &ex).unwrap_or(false)
+                    || !py::config_bool(vm, "developer")?
+                {
                     continue;
                 }
                 let t = ops::type_name(vm, &p[0]);
-                return Err(py::error(vm, format!("Load or rollback failed because class {t} does not inherit from store.object, but did in the past. If this was an intentional change, add the class to config.ex_rollback_classes.")));
+                return Err(py::error(
+                    vm,
+                    format!(
+                        "Load or rollback failed because class {t} does not inherit from store.object, but did in the past. If this was an intentional change, add the class to config.ex_rollback_classes."
+                    ),
+                ));
             }
         }
     }
@@ -417,10 +457,19 @@ fn rl_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     st(vm, this, "mutated", vm.types.new_dict())?;
     st(vm, this, "rollback_limit", Value::Int(0))?;
     st(vm, this, "rollback_block", Value::Int(0))?;
-    for n in ["rollback_is_fixed", "checkpointing_suspended", "rolled_forward", "retain_after_load_flag", "force_checkpoint"] {
+    let fixed_forward = super::state::fixed_forward(vm);
+    if !fixed_forward {
+        st(vm, this, "rollback_is_fixed", Value::Bool(false))?;
+        st(vm, this, "fixed_rollback_boundary", Value::None)?;
+    }
+    for n in [
+        "checkpointing_suspended",
+        "rolled_forward",
+        "retain_after_load_flag",
+        "force_checkpoint",
+    ] {
         st(vm, this, n, Value::Bool(false))?;
     }
-    st(vm, this, "fixed_rollback_boundary", Value::None)?;
     st(vm, this, "forward", vm.types.new_list(Vec::new()))?;
     st(vm, this, "old_store", vm.types.new_dict())?;
     let rng = mget(vm, "rng")?;
@@ -446,7 +495,8 @@ fn rl_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         py::dict_set(vm, &d, "store", s)?;
         st(vm, this, "ever_been_changed", d)?;
     }
-    if version < 3 {
+    let fixed_forward = super::state::fixed_forward(vm);
+    if version < 3 && !fixed_forward {
         st(vm, this, "rollback_is_fixed", Value::Bool(false))?;
         st(vm, this, "fixed_rollback_boundary", Value::None)?;
     }
@@ -478,6 +528,15 @@ fn rl_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let block = (hard - limit).max(0);
         st(vm, this, "rollback_block", Value::Int(block))?;
         st(vm, this, "rollback_limit", Value::Int(hard - block))?;
+    }
+    if version < 7 && fixed_forward {
+        let fc = mget(vm, "Forward")?;
+        let mut out = Vec::new();
+        for pair in py::get_items(vm, this, "forward")? {
+            let p = py::items(vm, &pair)?;
+            out.push(vm.call(&fc, vec![p[0].clone(), p[1].clone(), Value::Bool(false)], Vec::new())?);
+        }
+        st(vm, this, "forward", vm.types.new_list(out))?;
     }
     Ok(Value::None)
 }
@@ -538,7 +597,7 @@ fn rl_begin(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         }
     }
     let n = ops::len(vm, &lv)?;
-    if n >= 2 {
+    if n >= 2 && !super::state::fixed_forward(vm) {
         let e = ops::getitem(vm, &lv, Value::Int(-2))?;
         let ec = g(vm, &e, "context")?;
         let ecc = g(vm, &ec, "current")?;
@@ -548,7 +607,7 @@ fn rl_begin(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         }
     }
     let fwd = g(vm, this, "forward")?;
-    if gb(vm, this, "rollback_is_fixed")? && !py::truthy(vm, &fwd)? {
+    if !super::state::fixed_forward(vm) && gb(vm, this, "rollback_is_fixed")? && !py::truthy(vm, &fwd)? {
         let cur = g(vm, this, "current")?;
         let cc = g(vm, &cur, "context")?;
         let ccc = g(vm, &cc, "current")?;
@@ -583,7 +642,13 @@ fn rl_complete(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         None => false,
     };
     if gb(vm, this, "force_checkpoint")? {
-        py::method_kw(vm, this, "checkpoint", Vec::new(), vec![("hard".into(), Value::Bool(false))])?;
+        py::method_kw(
+            vm,
+            this,
+            "checkpoint",
+            Vec::new(),
+            vec![("hard".into(), Value::Bool(false))],
+        )?;
         st(vm, this, "force_checkpoint", Value::Bool(false))?;
     }
     let current = g(vm, this, "current")?;
@@ -627,7 +692,11 @@ fn rl_get_roots(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let ebc = g(vm, &sd, "ever_been_changed")?;
         for name in ops::collect(vm, &ebc)? {
             let n = py::string(vm, &name)?;
-            let v = if ops::contains(vm, &sd, &name)? { ops::getitem(vm, &sd, name)? } else { del.clone() };
+            let v = if ops::contains(vm, &sd, &name)? {
+                ops::getitem(vm, &sd, name)?
+            } else {
+                del.clone()
+            };
             py::dict_set(vm, &rv, &format!("{sname}.{n}"), v)?;
         }
     }
@@ -645,7 +714,12 @@ fn rl_purge_unreachable(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let roots = args[1].clone();
     let store_module = py::import_attr(vm, "renpy.python", "StoreModule")?;
     let snr = mget(vm, "SlottedNoRollback")?;
-    let types = vm.types.new_tuple(vec![Value::Obj(vm.types.module.clone()), store_module, snr, Value::Obj(vm.types.type_.clone())]);
+    let types = vm.types.new_tuple(vec![
+        Value::Obj(vm.types.module.clone()),
+        store_module,
+        snr,
+        Value::Obj(vm.types.type_.clone()),
+    ]);
     let m = py::import(vm, MODULE)?;
     py::set(vm, &m, "NOROLLBACK_TYPES", types.clone())?;
     let reachable = vm.types.new_dict();
@@ -667,7 +741,31 @@ fn rl_in_rollback(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn rl_in_fixed_rollback(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    g(vm, &args[0], "rollback_is_fixed")
+    if !super::state::fixed_forward(vm) {
+        return g(vm, &args[0], "rollback_is_fixed");
+    }
+    // `self.forward and self.forward[0].fixed`
+    let f = g(vm, &args[0], "forward")?;
+    if !py::truthy(vm, &f)? {
+        return Ok(f);
+    }
+    let first = ops::getitem(vm, &f, Value::Int(0))?;
+    g(vm, &first, "fixed")
+}
+
+fn in_fixed_rollback(vm: &mut Vm, this: &Value) -> PyResult<bool> {
+    let v = rl_in_fixed_rollback(vm, std::slice::from_ref(this), &[])?;
+    py::truthy(vm, &v)
+}
+
+/// A forward entry's (name, data): a `Forward` from 8.4, a pair before.
+fn forward_entry(vm: &mut Vm, e: &Value) -> PyResult<(Value, Value)> {
+    if super::state::fixed_forward(vm) {
+        Ok((g(vm, e, "name")?, g(vm, e, "data")?))
+    } else {
+        let p = py::items(vm, e)?;
+        Ok((p[0].clone(), p[1].clone()))
+    }
 }
 
 fn current_name(vm: &mut Vm, this: &Value) -> PyResult<Value> {
@@ -681,10 +779,10 @@ fn rl_forward_info(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let f = g(vm, this, "forward")?;
     if py::truthy(vm, &f)? {
         let first = ops::getitem(vm, &f, Value::Int(0))?;
-        let p = py::items(vm, &first)?;
+        let (name, data) = forward_entry(vm, &first)?;
         let cn = current_name(vm, this)?;
-        if ops::eq(vm, &cn, &p[0])? {
-            return Ok(p[1].clone());
+        if ops::eq(vm, &cn, &name)? {
+            return Ok(data);
         }
     }
     Ok(Value::None)
@@ -730,24 +828,30 @@ fn rl_checkpoint(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let fwd = g(vm, this, "forward")?;
     let has_fwd = py::truthy(vm, &fwd)?;
-    if gb(vm, this, "rollback_is_fixed")? && has_fwd {
+    let fixed_forward = super::state::fixed_forward(vm);
+    if in_fixed_rollback(vm, this)? && has_fwd {
         let first = ops::getitem(vm, &fwd, Value::Int(0))?;
-        let p = py::items(vm, &first)?;
+        let (name, fdata) = forward_entry(vm, &first)?;
         let cn = current_name(vm, this)?;
-        if ops::eq(vm, &cn, &p[0])? {
-            st(vm, &current, "forward", p[1].clone())?;
+        if ops::eq(vm, &cn, &name)? {
+            st(vm, &current, "forward", fdata)?;
+            if fixed_forward {
+                let fixed = g(vm, &first, "fixed")?;
+                st(vm, &current, "fixed", fixed)?;
+            }
             vm.call_method(&fwd, "pop", vec![Value::Int(0)])?;
-        } else {
+        } else if !fixed_forward {
+            // 8.4+ tests `not self.forward` here, which cannot hold.
             st(vm, &current, "forward", data)?;
             vm.call_method(&fwd, "clear", Vec::new())?;
         }
     } else if !py::is_none(&data) {
         if has_fwd {
             let first = ops::getitem(vm, &fwd, Value::Int(0))?;
-            let p = py::items(vm, &first)?;
+            let (name, fdata) = forward_entry(vm, &first)?;
             let cn = current_name(vm, this)?;
             let rf = gb(vm, this, "rolled_forward")?;
-            if ops::eq(vm, &cn, &p[0])? && ops::eq(vm, &data, &p[1])? && (keep_rollback || rf) {
+            if ops::eq(vm, &cn, &name)? && ops::eq(vm, &data, &fdata)? && (keep_rollback || rf) {
                 vm.call_method(&fwd, "pop", vec![Value::Int(0)])?;
             } else {
                 vm.call_method(&fwd, "clear", Vec::new())?;
@@ -816,7 +920,11 @@ fn rl_retain_after_load(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn rl_fix_rollback(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let lv = g(vm, this, "log")?;
-    if !gb(vm, this, "rollback_is_fixed")? && ops::len(vm, &lv)? > 1 {
+    if super::state::fixed_forward(vm) {
+        for rb in py::items(vm, &lv)? {
+            st(vm, &rb, "fixed", Value::Bool(true))?;
+        }
+    } else if !gb(vm, this, "rollback_is_fixed")? && ops::len(vm, &lv)? > 1 {
         let e = ops::getitem(vm, &lv, Value::Int(-2))?;
         let c = g(vm, &e, "context")?;
         let cc = g(vm, &c, "current")?;
@@ -827,7 +935,12 @@ fn rl_fix_rollback(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
-fn rl_can_rollback(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+fn rl_can_rollback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    if super::state::deferred_rollback(vm) {
+        let checkpoints = py::int(vm, &arg_or(args, kw, 1, "checkpoints", Value::Int(1)))?;
+        let force = py::truthy(vm, &arg_or(args, kw, 2, "force", Value::Bool(false)))?;
+        return Ok(Value::Bool(can_rollback_to(vm, &args[0], checkpoints, force)?));
+    }
     Ok(Value::Bool(gi(vm, &args[0], "rollback_limit")? > 0))
 }
 
@@ -838,7 +951,10 @@ fn rl_load_failed(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         lfl = vm.call(&lfl, Vec::new(), Vec::new())?;
     }
     if !py::truthy(vm, &lfl)? {
-        return Err(py::error(vm, "Couldn't find a place to stop rolling back. Perhaps the script changed in an incompatible way?"));
+        return Err(py::error(
+            vm,
+            "Couldn't find a place to stop rolling back. Perhaps the script changed in an incompatible way?",
+        ));
     }
     let lv = g(vm, this, "log")?;
     let rb = vm.call_method(&lv, "pop", Vec::new())?;
@@ -856,27 +972,105 @@ fn rl_load_failed(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let c0 = ops::getitem(vm, &contexts, Value::Int(0))?;
     st(vm, &c0, "force_checkpoint", Value::Bool(true))?;
     vm.call_method(&c0, "goto_label", vec![lfl])?;
-    Err(raise(vm, "renpy.game", "RestartTopContext"))
+    let module = super::state::restart_module(vm);
+    Err(raise(vm, module, "RestartTopContext"))
 }
 
-fn rl_rollback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let this = &args[0];
-    let mut checkpoints = py::int(vm, &arg_or(args, kw, 1, "checkpoints", Value::Int(0)))?;
+struct RollbackArgs {
+    checkpoints: i64,
+    force: bool,
+    label: Value,
+    greedy: bool,
+    on_load: bool,
+    abnormal: bool,
+    current_label: Value,
+}
+
+fn rollback_args(vm: &mut Vm, args: &[Value], kw: Kw, with_force: bool) -> PyResult<RollbackArgs> {
     let flag = |vm: &mut Vm, i: usize, n: &str, d: bool| -> PyResult<bool> {
         match arg(args, kw, i, n) {
             Some(v) => py::truthy(vm, v),
             None => Ok(d),
         }
     };
-    let force = flag(vm, 2, "force", false)?;
-    let mut label = arg_or(args, kw, 3, "label", Value::None);
-    let greedy = flag(vm, 4, "greedy", true)?;
-    let on_load = flag(vm, 5, "on_load", false)?;
-    let abnormal = flag(vm, 6, "abnormal", true)?;
-    let current_label = arg_or(args, kw, 7, "current_label", Value::None);
+    // `rollback_core` has no `force` parameter.
+    let o = usize::from(!with_force);
+    Ok(RollbackArgs {
+        checkpoints: py::int(vm, &arg_or(args, kw, 1, "checkpoints", Value::Int(0)))?,
+        force: if with_force { flag(vm, 2, "force", false)? } else { false },
+        label: arg_or(args, kw, 3 - o, "label", Value::None),
+        greedy: flag(vm, 4 - o, "greedy", true)?,
+        on_load: flag(vm, 5 - o, "on_load", false)?,
+        abnormal: flag(vm, 6 - o, "abnormal", true)?,
+        current_label: arg_or(args, kw, 7 - o, "current_label", Value::None),
+    })
+}
+
+/// 8.5.1+ `can_rollback(checkpoints=1, force=False)`: whether a labelled
+/// statement lies `checkpoints` hard checkpoints back.
+fn can_rollback_to(vm: &mut Vm, this: &Value, mut checkpoints: i64, force: bool) -> PyResult<bool> {
     if checkpoints != 0 && gi(vm, this, "rollback_limit")? <= 0 && !force {
+        return Ok(false);
+    }
+    for rb in py::get_items(vm, this, "log")?.iter().rev() {
+        if gb(vm, rb, "hard_checkpoint")? {
+            checkpoints -= 1;
+        }
+        if checkpoints <= 0 {
+            let c = g(vm, rb, "context")?;
+            let cc = g(vm, &c, "current")?;
+            if has_label(vm, &cc)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// `rollback(...)`. From 8.5.1 it only checks and raises
+/// `RollbackException`, which `run_context` performs via `rollback_core`.
+fn rl_rollback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    let a = rollback_args(vm, args, kw, true)?;
+    let this = &args[0];
+    if super::state::deferred_rollback(vm) {
+        if !can_rollback_to(vm, this, a.checkpoints, a.force)? {
+            return Ok(Value::None);
+        }
+        let c = mget(vm, "RollbackException")?;
+        let e = vm.call(
+            &c,
+            vec![
+                Value::Int(a.checkpoints),
+                a.label,
+                Value::Bool(a.greedy),
+                Value::Bool(a.on_load),
+                Value::Bool(a.abnormal),
+                a.current_label,
+            ],
+            Vec::new(),
+        )?;
+        return Err(PyErr::Exc(e.obj().cloned().ok_or_else(|| vm.type_error("RollbackException"))?));
+    }
+    if a.checkpoints != 0 && gi(vm, this, "rollback_limit")? <= 0 && !a.force {
         return Ok(Value::None);
     }
+    rollback_impl(vm, this, a, false)
+}
+
+fn rl_rollback_core(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    let a = rollback_args(vm, args, kw, false)?;
+    if !a.on_load {
+        vm.call_method(&args[0], "complete", vec![Value::Bool(false)])?;
+    }
+    rollback_impl(vm, &args[0], a, true)
+}
+
+/// The rollback itself: `rollback` before 8.5.1, `rollback_core` after
+/// (`core`), which keeps nested contexts, keys the load paths on
+/// `on_load`, and returns instead of raising a restart.
+fn rollback_impl(vm: &mut Vm, this: &Value, a: RollbackArgs, core: bool) -> PyResult<Value> {
+    let RollbackArgs { mut checkpoints, force, mut label, greedy, on_load, abnormal, current_label } = a;
+    let fixed_forward = super::state::fixed_forward(vm);
     let roots = vm.call_method(this, "get_roots", Vec::new())?;
     vm.call_method(this, "purge_unreachable", vec![roots])?;
     let lv = g(vm, this, "log")?;
@@ -912,16 +1106,28 @@ fn rl_rollback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !found {
         revlog.reverse();
         vm.call_method(&lv, "extend", vec![vm.types.new_list(revlog)])?;
-        if force {
+        if (core && on_load) || (!core && force) {
             vm.call_method(this, "load_failed", Vec::new())?;
         }
         return Ok(Value::None);
     }
     while greedy && ops::len(vm, &lv)? > 0 {
+        // 8.5.1+ keeps the retained entry and stops after it.
+        if core {
+            if let Some(last) = revlog.last() {
+                if gb(vm, last, "retain_after_load")? {
+                    break;
+                }
+            }
+        }
         let rb = ops::getitem(vm, &lv, Value::Int(-1))?;
         let c = g(vm, &rb, "context")?;
         let cc = g(vm, &c, "current")?;
-        if !has_label(vm, &cc)? || gb(vm, &rb, "hard_checkpoint")? || gb(vm, &rb, "not_greedy")? || gb(vm, &rb, "retain_after_load")? {
+        if !has_label(vm, &cc)?
+            || gb(vm, &rb, "hard_checkpoint")?
+            || gb(vm, &rb, "not_greedy")?
+            || (!core && gb(vm, &rb, "retain_after_load")?)
+        {
             break;
         }
         revlog.push(vm.call_method(&lv, "pop", Vec::new())?);
@@ -930,9 +1136,14 @@ fn rl_rollback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let contexts = game(vm, "contexts")?;
     let old_contexts = py::items(vm, &contexts)?;
     let ctx = context(vm)?;
-    let replace_context = !gb(vm, &ctx, "rollback")?;
+    let replace_context = !core && !gb(vm, &ctx, "rollback")?;
     let other_contexts = if replace_context {
-        py::set(vm, &gm, "contexts", vm.types.new_list(old_contexts[..1].to_vec()))?;
+        py::set(
+            vm,
+            &gm,
+            "contexts",
+            vm.types.new_list(old_contexts[..1].to_vec()),
+        )?;
         old_contexts[1..].to_vec()
     } else {
         Vec::new()
@@ -958,18 +1169,32 @@ fn rl_rollback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             vm.call_method(rb, "rollback", Vec::new())?;
             let c = g(vm, rb, "context")?;
             let cc = g(vm, &c, "current")?;
-            let frb = g(vm, this, "fixed_rollback_boundary")?;
-            if ops::eq(vm, &cc, &frb)? && py::truthy(vm, &cc)? {
-                st(vm, this, "rollback_is_fixed", Value::Bool(true))?;
+            if !fixed_forward {
+                let frb = g(vm, this, "fixed_rollback_boundary")?;
+                if ops::eq(vm, &cc, &frb)? && py::truthy(vm, &cc)? {
+                    st(vm, this, "rollback_is_fixed", Value::Bool(true))?;
+                }
             }
             let f = g(vm, rb, "forward")?;
             if !py::is_none(&f) {
-                let t = vm.types.new_tuple(vec![cc, f]);
+                let t = if fixed_forward {
+                    let fc = mget(vm, "Forward")?;
+                    let fixed = g(vm, rb, "fixed")?;
+                    vm.call(&fc, vec![cc, f, fixed], Vec::new())?
+                } else {
+                    vm.types.new_tuple(vec![cc, f])
+                };
                 vm.call_method(&fwd, "insert", vec![Value::Int(0), t])?;
             }
         }
         if !py::is_none(&retained) {
             vm.call_method(&retained, "rollback_control", Vec::new())?;
+            if core {
+                let c = g(vm, &retained, "context")?;
+                let copy = vm.call_method(&c, "rollback_copy", Vec::new())?;
+                st(vm, &retained, "context", copy)?;
+                st(vm, this, "current", retained.clone())?;
+            }
             ops::list_append(vm, &lv, retained)?;
         }
         Ok(come_from)
@@ -993,7 +1218,7 @@ fn rl_rollback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !py::is_none(&iface) {
         st(vm, &iface, "suppress_transition", Value::Bool(abnormal))?;
     }
-    if force {
+    if (core && on_load) || (!core && force) {
         let rng = mget(vm, "rng")?;
         vm.call_method(&rng, "reset", Vec::new())?;
         let fwd = g(vm, this, "forward")?;
@@ -1015,7 +1240,11 @@ fn rl_rollback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let bs = py::import_attr(vm, "renpy.python", "begin_stores")?;
     vm.call(&bs, Vec::new(), Vec::new())?;
     let rb = new_rollback(vm)?;
-    let target = if replace_context { ops::getitem(vm, &contexts, Value::Int(0))? } else { context(vm)? };
+    let target = if replace_context {
+        ops::getitem(vm, &contexts, Value::Int(0))?
+    } else {
+        context(vm)?
+    };
     let copy = vm.call_method(&target, "rollback_copy", Vec::new())?;
     st(vm, &rb, "context", copy)?;
     st(vm, this, "current", rb.clone())?;
@@ -1023,7 +1252,18 @@ fn rl_rollback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !py::is_none(&lv) {
         ops::list_append(vm, &lv, rb)?;
     }
-    Err(raise(vm, "renpy.game", if replace_context { "RestartTopContext" } else { "RestartContext" }))
+    if core {
+        return Ok(Value::None);
+    }
+    Err(raise(
+        vm,
+        "renpy.game",
+        if replace_context {
+            "RestartTopContext"
+        } else {
+            "RestartContext"
+        },
+    ))
 }
 
 fn rl_freeze(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -1031,7 +1271,13 @@ fn rl_freeze(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let wait = arg_or(args, kw, 1, "wait", Value::None);
     rl_complete(vm, &[this.clone(), Value::Bool(false)], &[])?;
     let roots = vm.call_method(this, "get_roots", Vec::new())?;
-    py::method_kw(vm, this, "purge_unreachable", vec![roots.clone()], vec![("wait".into(), wait)])?;
+    py::method_kw(
+        vm,
+        this,
+        "purge_unreachable",
+        vec![roots.clone()],
+        vec![("wait".into(), wait)],
+    )?;
     let cur = g(vm, this, "current")?;
     st(vm, &cur, "purged", Value::Bool(false))?;
     Ok(roots)
@@ -1044,12 +1290,39 @@ fn rl_discard_freeze(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
+/// `unfreeze(roots, label=None)`. From 8.5.1 it checks that the log can
+/// roll back and raises `UnfreezeException`, which the top `run_context`
+/// performs via `unfreeze_core`.
 fn rl_unfreeze(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    if !super::state::deferred_rollback(vm) {
+        return rl_unfreeze_core(vm, args, kw);
+    }
+    let this = &args[0];
+    let roots = arg_or(args, kw, 1, "roots", Value::None);
+    let label = arg_or(args, kw, 2, "label", Value::None);
+    if !can_rollback_to(vm, this, 0, true)? {
+        let lfl = py::config(vm, "load_failed_label")?;
+        if !py::truthy(vm, &lfl)? {
+            return Err(py::error(vm, "Could not load the game. Perhaps the script changed in an incompatible way."));
+        }
+    }
+    let c = mget(vm, "UnfreezeException")?;
+    let e = vm.call(&c, vec![this.clone(), roots, label], Vec::new())?;
+    Err(PyErr::Exc(e.obj().cloned().ok_or_else(|| vm.type_error("UnfreezeException"))?))
+}
+
+fn rl_unfreeze_core(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let roots = arg_or(args, kw, 1, "roots", Value::None);
     let label = arg_or(args, kw, 2, "label", Value::None);
     let br = py::import_attr(vm, "renpy.display.screen", "before_restart")?;
     vm.call(&br, Vec::new(), Vec::new())?;
+    if super::state::try_rt(vm).is_some_and(|r| r.profile.at_least(8, 6)) {
+        // Pose selections are unsaved and must not outlive the old state.
+        if let Ok(f) = py::import_attr(vm, "renpy.gl2.live2d", "reset_pose_states") {
+            vm.call(&f, Vec::new(), Vec::new())?;
+        }
+    }
     let gm = py::import(vm, "renpy.game")?;
     py::set(vm, &gm, "log", this.clone())?;
     let cs = py::import_attr(vm, "renpy.python", "clean_stores")?;
@@ -1079,12 +1352,18 @@ fn rl_unfreeze(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let gr = py::import_attr(vm, "store", "_greedy_rollback").unwrap_or(Value::Bool(true));
     let session = py::import_attr(vm, "renpy", "session")?;
     let greedy = vm.call_method(&session, "pop", vec![py::s(vm, "_greedy_rollback"), gr])?;
-    py::method_kw(vm, this, "rollback", vec![Value::Int(0)], vec![
-        ("force".into(), Value::Bool(true)),
-        ("label".into(), label),
-        ("greedy".into(), greedy),
-        ("on_load".into(), Value::Bool(true)),
-    ])
+    py::method_kw(
+        vm,
+        this,
+        "rollback",
+        vec![Value::Int(0)],
+        vec![
+            ("force".into(), Value::Bool(true)),
+            ("label".into(), label),
+            ("greedy".into(), greedy),
+            ("on_load".into(), Value::Bool(true)),
+        ],
+    )
 }
 
 fn rl_build_identifier_cache(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -1126,15 +1405,34 @@ fn rl_get_identifier_checkpoints(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[("reached", f_reached), ("reached_vars", f_reached_vars)]);
+    let fixed_forward = super::state::fixed_forward(vm);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[("reached", f_reached), ("reached_vars", f_reached_vars)],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     let obj = Value::Obj(vm.types.object.clone());
-    let sd = py::class(vm, MODULE, "StoreDeleted", &[obj.clone()], &[("__reduce__", sd_reduce)], &[])?;
+    let sd = py::class(
+        vm,
+        MODULE,
+        "StoreDeleted",
+        &[obj.clone()],
+        &[("__reduce__", sd_reduce)],
+        &[],
+    )?;
     let dv = vm.call(&Value::Obj(sd.clone()), Vec::new(), Vec::new())?;
     set(vm, "StoreDeleted", Value::Obj(sd));
     set(vm, "deleted", dv);
     let slots = vm.types.new_tuple(Vec::new());
-    let snr = py::class(vm, MODULE, "SlottedNoRollback", &[obj], &[], &[("__slots__", slots)])?;
+    let snr = py::class(
+        vm,
+        MODULE,
+        "SlottedNoRollback",
+        &[obj],
+        &[],
+        &[("__slots__", slots)],
+    )?;
     let snr = Value::Obj(snr);
     set(vm, "SlottedNoRollback", snr.clone());
     let nr = py::class(vm, MODULE, "NoRollback", &[snr], &[], &[])?;
@@ -1151,44 +1449,156 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let rng = vm.call(&dr, Vec::new(), Vec::new())?;
     set(vm, "rng", rng);
     let object = py::import_attr(vm, "renpy.object", "Object")?;
-    let rb = py::class(vm, MODULE, "Rollback", &[object.clone()], &[
-        ("__init__", rb_init),
-        ("after_upgrade", rb_after_upgrade),
-        ("purge_unreachable", rb_purge_unreachable),
-        ("rollback", rb_rollback),
-        ("rollback_control", rb_rollback_control),
-    ], &[("__version__", Value::Int(5)), ("identifier", Value::None), ("not_greedy", Value::Bool(false)), ("checkpointing_suspended", Value::Bool(false))])?;
+    let rb = py::class(
+        vm,
+        MODULE,
+        "Rollback",
+        &[object.clone()],
+        &[
+            ("__init__", rb_init),
+            ("after_upgrade", rb_after_upgrade),
+            ("purge_unreachable", rb_purge_unreachable),
+            ("rollback", rb_rollback),
+            ("rollback_control", rb_rollback_control),
+        ],
+        &[
+            ("__version__", Value::Int(5)),
+            ("identifier", Value::None),
+            ("not_greedy", Value::Bool(false)),
+            ("checkpointing_suspended", Value::Bool(false)),
+        ],
+    )?;
+    if fixed_forward {
+        vm.types.set_attr(&rb, "fixed", Value::Bool(false));
+    }
     set(vm, "Rollback", Value::Obj(rb));
-    let ns: Vec<Value> = ["old_store", "mutated", "identifier_cache"].iter().map(|s| vm.types.new_str(s)).collect();
+    let ns: Vec<Value> = ["old_store", "mutated", "identifier_cache"]
+        .iter()
+        .map(|s| vm.types.new_str(s))
+        .collect();
     let nosave = vm.types.new_list(ns);
-    let rl = py::class(vm, MODULE, "RollbackLog", &[object], &[
-        ("__init__", rl_init),
-        ("after_setstate", rl_after_setstate),
-        ("after_upgrade", rl_after_upgrade),
-        ("begin", rl_begin),
-        ("replace_node", rl_replace_node),
-        ("complete", rl_complete),
-        ("get_roots", rl_get_roots),
-        ("purge_unreachable", rl_purge_unreachable),
-        ("in_rollback", rl_in_rollback),
-        ("in_fixed_rollback", rl_in_fixed_rollback),
-        ("forward_info", rl_forward_info),
-        ("checkpoint", rl_checkpoint),
-        ("suspend_checkpointing", rl_suspend_checkpointing),
-        ("block", rl_block),
-        ("retain_after_load", rl_retain_after_load),
-        ("fix_rollback", rl_fix_rollback),
-        ("can_rollback", rl_can_rollback),
-        ("load_failed", rl_load_failed),
-        ("rollback", rl_rollback),
-        ("freeze", rl_freeze),
-        ("discard_freeze", rl_discard_freeze),
-        ("unfreeze", rl_unfreeze),
-        ("build_identifier_cache", rl_build_identifier_cache),
-        ("get_identifier_checkpoints", rl_get_identifier_checkpoints),
-    ], &[("__version__", Value::Int(6)), ("nosave", nosave), ("identifier_cache", Value::None), ("force_checkpoint", Value::Bool(false))])?;
+    let rl = py::class(
+        vm,
+        MODULE,
+        "RollbackLog",
+        &[object],
+        &[
+            ("__init__", rl_init),
+            ("after_setstate", rl_after_setstate),
+            ("after_upgrade", rl_after_upgrade),
+            ("begin", rl_begin),
+            ("replace_node", rl_replace_node),
+            ("complete", rl_complete),
+            ("get_roots", rl_get_roots),
+            ("purge_unreachable", rl_purge_unreachable),
+            ("in_rollback", rl_in_rollback),
+            ("in_fixed_rollback", rl_in_fixed_rollback),
+            ("forward_info", rl_forward_info),
+            ("checkpoint", rl_checkpoint),
+            ("suspend_checkpointing", rl_suspend_checkpointing),
+            ("block", rl_block),
+            ("retain_after_load", rl_retain_after_load),
+            ("fix_rollback", rl_fix_rollback),
+            ("can_rollback", rl_can_rollback),
+            ("load_failed", rl_load_failed),
+            ("rollback", rl_rollback),
+            ("freeze", rl_freeze),
+            ("discard_freeze", rl_discard_freeze),
+            ("unfreeze", rl_unfreeze),
+            ("unfreeze_core", rl_unfreeze_core),
+            ("rollback_core", rl_rollback_core),
+            ("build_identifier_cache", rl_build_identifier_cache),
+            ("get_identifier_checkpoints", rl_get_identifier_checkpoints),
+        ],
+        &[
+            ("__version__", Value::Int(if fixed_forward { 7 } else { 6 })),
+            ("nosave", nosave),
+            ("identifier_cache", Value::None),
+            ("force_checkpoint", Value::Bool(false)),
+        ],
+    )?;
     set(vm, "RollbackLog", Value::Obj(rl));
+    if fixed_forward {
+        let f = py::class(vm, MODULE, "Forward", &[], &[("__init__", forward_init)], &[])?;
+        set(vm, "Forward", Value::Obj(f));
+    }
+    if super::state::deferred_rollback(vm) {
+        let base = Value::Obj(vm.types.exc("BaseException"));
+        let re = py::class(
+            vm,
+            MODULE,
+            "RollbackException",
+            &[base.clone()],
+            &[("__init__", rbexc_init), ("perform_rollback", rbexc_perform)],
+            &[],
+        )?;
+        set(vm, "RollbackException", Value::Obj(re));
+        let ue = py::class(
+            vm,
+            MODULE,
+            "UnfreezeException",
+            &[base],
+            &[("__init__", ufexc_init), ("perform_unfreeze", ufexc_perform)],
+            &[],
+        )?;
+        set(vm, "UnfreezeException", Value::Obj(ue));
+    }
     Ok(m)
+}
+
+/// `Forward(name, data, fixed)` (8.4+).
+fn forward_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    for (i, n) in ["name", "data", "fixed"].iter().enumerate() {
+        let v = arg_or(&args[1..], kw, i, n, Value::None);
+        st(vm, &args[0], n, v)?;
+    }
+    Ok(Value::None)
+}
+
+const RBEXC_FIELDS: &[(&str, fn() -> Value)] = &[
+    ("checkpoints", || Value::Int(0)),
+    ("label", || Value::None),
+    ("greedy", || Value::Bool(true)),
+    ("on_load", || Value::Bool(false)),
+    ("abnormal", || Value::Bool(true)),
+    ("current_label", || Value::None),
+];
+
+fn rbexc_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    for (i, (n, d)) in RBEXC_FIELDS.iter().enumerate() {
+        let v = arg_or(&args[1..], kw, i, n, d());
+        st(vm, &args[0], n, v)?;
+    }
+    Ok(Value::None)
+}
+
+/// `RollbackException.perform_rollback()`: `renpy.game.log.rollback_core`.
+fn rbexc_perform(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+    let mut a = vec![g(vm, &args[0], "checkpoints")?];
+    let mut kw = Vec::new();
+    for (n, _) in &RBEXC_FIELDS[1..] {
+        kw.push(((*n).into(), g(vm, &args[0], n)?));
+    }
+    let lg = log(vm)?;
+    let core = g(vm, &lg, "rollback_core")?;
+    a.truncate(1);
+    vm.call(&core, a, kw)
+}
+
+fn ufexc_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    for (i, n) in ["log", "roots", "label"].iter().enumerate() {
+        let v = arg_or(&args[1..], kw, i, n, Value::None);
+        st(vm, &args[0], n, v)?;
+    }
+    Ok(Value::None)
+}
+
+/// `UnfreezeException.perform_unfreeze()`: `self.log.unfreeze_core`.
+fn ufexc_perform(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+    let lg = g(vm, &args[0], "log")?;
+    let roots = g(vm, &args[0], "roots")?;
+    let label = g(vm, &args[0], "label")?;
+    vm.call_method(&lg, "unfreeze_core", vec![roots, label])
 }
 
 pub fn install(vm: &mut Vm) {

@@ -16,24 +16,33 @@ use std::sync::Arc;
 
 #[derive(Debug, PartialEq)]
 pub(super) struct Definition {
-    slot: usize,
-    layers: [u32; 2],
+    slot: Option<usize>,
+    layers: [i32; 2],
 }
 
 impl Definition {
+    #[cfg(test)]
     pub fn parse(raw: &[u8]) -> Result<Self> {
-        let fields: Vec<_> = raw.splitn(3, |&c| c == b',').collect();
-        ensure!(fields.len() == 2, "unsupported Midori draw-slot definition");
-        let slot = number(fields[0])?;
-        let layer = number(fields[1])?;
-        // cmdLid2lid range 800..=809 subtracts 663.
-        ensure!(
-            (0..=2).contains(&slot) && layer == 800 + 2 * slot,
-            "unsupported Midori draw-slot layer alias"
-        );
+        Self::parse_profile(raw, crate::profile::Resident::Midori2011)
+    }
+
+    pub fn parse_profile(raw: &[u8], resident: crate::profile::Resident) -> Result<Self> {
+        use crate::{native_numbers::integer2011, view_definitions};
+        let mut fields = raw.split(|&c| c == b',');
+        let slot = integer2011(fields.next().unwrap_or_default());
+        if !(0..=7).contains(&slot) {
+            return Ok(Self { slot: None, layers: [-2; 2] });
+        }
+        let alias = integer2011(fields.next().unwrap_or_default());
+        let layer = if resident.late() {
+            view_definitions::layer_late(alias)?
+        } else {
+            view_definitions::layer2011(alias)?
+        };
+        let next = layer.wrapping_add(1);
         Ok(Self {
-            slot: slot as usize,
-            layers: [(layer - 663) as u32, (layer - 662) as u32],
+            slot: Some(slot as usize),
+            layers: [layer.min(next), layer.max(next)],
         })
     }
 }
@@ -172,7 +181,7 @@ struct Visible {
 }
 
 struct DrawSlot {
-    layers: [u32; 2],
+    layers: [i32; 2],
     active: Option<Visible>,
     last_authored_point: Option<[i32; 2]>,
 }
@@ -190,14 +199,14 @@ enum Pending {
 
 #[derive(Default)]
 pub(super) struct Slots {
-    slots: [Option<DrawSlot>; 3],
+    slots: [Option<DrawSlot>; 8],
     pending: Option<Pending>,
     view: [u32; 2],
     color_filter: ColorFilter,
 }
 
-fn layer_id(native: u32) -> u32 {
-    256 + native
+fn layer_id(native: i32) -> u32 {
+    256 + native as u32
 }
 
 fn submit(h: &mut dyn HostServices, c: ClientId, updates: Vec<Value>) -> Result<()> {
@@ -228,7 +237,9 @@ impl Slots {
     }
 
     pub fn define(&mut self, definition: Definition) -> Result<()> {
-        let slot = &mut self.slots[definition.slot];
+        let Some(slot) = definition.slot.map(|index| &mut self.slots[index]) else {
+            return Ok(());
+        };
         ensure!(
             self.pending.is_none() && slot.as_ref().is_none_or(|s| s.active.is_none()),
             "unsupported Midori active actor draw-slot redefinition"
@@ -243,7 +254,7 @@ impl Slots {
     }
 
     #[cfg(test)]
-    pub fn startup_layers(&self) -> [Option<[u32; 2]>; 3] {
+    pub fn startup_layers(&self) -> [Option<[i32; 2]>; 3] {
         std::array::from_fn(|i| self.slots[i].as_ref().map(|slot| slot.layers))
     }
 
@@ -257,7 +268,7 @@ impl Slots {
         }
         Some(std::array::from_fn(|i| {
             let slot = self.slots.get(i).and_then(Option::as_ref);
-            let layers = slot.map_or([-2, -2], |s| s.layers.map(|v| v as i32));
+            let layers = slot.map_or([-2, -2], |s| s.layers);
             let raw = slot.and_then(|s| s.last_authored_point);
             let (mut row, origin) = match slot.and_then(|s| s.active.as_ref()) {
                 Some(visible) => {
@@ -331,9 +342,10 @@ impl Slots {
         worker: &TaskPool,
     ) -> Result<()> {
         ensure!(self.pending.is_none(), "overlapping Midori portrait jobs");
-        self.slots[draw.slot]
+        let slot = self.slots[draw.slot]
             .as_ref()
             .context("undefined Midori draw slot")?;
+        ensure!(slot.layers[0] >= 0, "invalid Midori portrait layer ID");
         draw.preflight(self.view)?;
         let plan = draw.face_plan(catalog)?;
         let prepared = Prepared {

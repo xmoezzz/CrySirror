@@ -35,6 +35,12 @@ pub mod reveal;
 pub mod rich;
 pub mod sdf;
 pub mod decoration;
+pub mod pair_linebreak;
+pub mod emoji;
+pub mod arabic;
+pub mod bidi_visual;
+pub mod thai_c90;
+pub mod webfont;
 
 /// One process-wide copy of each distinct font file (by content). Outline
 /// faces borrow it as `'static` data and shaping sources share the same
@@ -228,6 +234,128 @@ impl TextSystem {
     pub fn font_digest(&self, alias: &str) -> Result<String> {
         if let Some((_, digest)) = self.fonts.get(alias) { return Ok(digest.clone()); }
         Ok(self.dynamic_face(alias)?.digest.clone())
+    }
+    /// Legacy pair kerning between two characters in pixels at `size`, the
+    /// same adjustment the simple layout applies; zero for precomputed faces.
+    pub fn kerning(&self, alias: &str, size: f32, left: char, right: char) -> Result<f32> {
+        ensure!(size.is_finite() && (1.0..=512.0).contains(&size), "font kerning size");
+        if self.precomputed_face(alias)?.is_some() {
+            return Ok(0.);
+        }
+        let font = self.font(alias)?;
+        let scaled = font.as_scaled(PxScale::from(size));
+        Ok(scaled.kern(font.glyph_id(left), font.glyph_id(right)))
+    }
+    /// OpenType shaping of one run with variation coordinates and features.
+    pub fn shape(
+        &self,
+        request: &crysirror_core::service::ShapeRequest,
+    ) -> Result<Vec<crysirror_core::service::ShapedGlyph>> {
+        ensure!(
+            request.size.is_finite() && (1.0..=512.0).contains(&request.size),
+            "shaping size"
+        );
+        ensure!(request.text.len() <= 1024 * 1024, "shaping text limit");
+        let (bytes, index) = self.font_source(&request.font)?;
+        let mut face = rustybuzz::Face::from_slice(&bytes, index).context("shaping face")?;
+        if !request.variations.is_empty() {
+            let v: Vec<rustybuzz::Variation> = request
+                .variations
+                .iter()
+                .map(|(t, value)| rustybuzz::Variation {
+                    tag: rustybuzz::ttf_parser::Tag::from_bytes(t),
+                    value: *value,
+                })
+                .collect();
+            face.set_variations(&v);
+        }
+        let features: Vec<rustybuzz::Feature> = request
+            .features
+            .iter()
+            .map(|(t, value)| {
+                rustybuzz::Feature::new(rustybuzz::ttf_parser::Tag::from_bytes(t), *value, ..)
+            })
+            .collect();
+        let mut buffer = rustybuzz::UnicodeBuffer::new();
+        buffer.push_str(&request.text);
+        buffer.guess_segment_properties();
+        buffer.set_direction(match request.direction {
+            crysirror_core::service::ShapeDirection::LeftToRight => rustybuzz::Direction::LeftToRight,
+            crysirror_core::service::ShapeDirection::RightToLeft => rustybuzz::Direction::RightToLeft,
+            crysirror_core::service::ShapeDirection::TopToBottom => rustybuzz::Direction::TopToBottom,
+        });
+        let output = rustybuzz::shape(&face, &features, buffer);
+        let scale = request.size / face.units_per_em() as f32;
+        Ok(output
+            .glyph_infos()
+            .iter()
+            .zip(output.glyph_positions())
+            .map(|(i, p)| crysirror_core::service::ShapedGlyph {
+                glyph_id: i.glyph_id,
+                cluster: i.cluster,
+                x_advance: p.x_advance as f32 * scale,
+                y_advance: p.y_advance as f32 * scale,
+                x_offset: p.x_offset as f32 * scale,
+                y_offset: p.y_offset as f32 * scale,
+            })
+            .collect())
+    }
+    /// `fvar` axes and named instances, with names from the `name` table.
+    pub fn variations(&self, alias: &str) -> Result<crysirror_core::service::FontVariations> {
+        use rustybuzz::ttf_parser::{self, Tag};
+        let (bytes, index) = self.font_source(alias)?;
+        let face = ttf_parser::Face::parse(&bytes, index).context("variation face")?;
+        let name_of = |id: u16| -> Option<String> {
+            let names = face.names();
+            let mut best: Option<String> = None;
+            for n in names {
+                if n.name_id != id {
+                    continue;
+                }
+                if let Some(s) = n.to_string() {
+                    if n.language_id == 0x409 || best.is_none() {
+                        best = Some(s);
+                    }
+                }
+            }
+            best
+        };
+        let mut rv = crysirror_core::service::FontVariations::default();
+        for a in face.variation_axes() {
+            let tag = a.tag.to_bytes();
+            rv.axes.push(crysirror_core::service::FontVariationAxis {
+                tag,
+                name: name_of(a.name_id)
+                    .unwrap_or_else(|| String::from_utf8_lossy(&tag).into_owned()),
+                minimum: a.min_value,
+                default: a.def_value,
+                maximum: a.max_value,
+            });
+        }
+        if let Some(fvar) = face.raw_face().table(Tag::from_bytes(b"fvar")) {
+            let u16_at = |o: usize| fvar.get(o..o + 2).map(|b| u16::from_be_bytes([b[0], b[1]]));
+            if let (Some(axes_off), Some(axis_count), Some(axis_size), Some(count), Some(size)) =
+                (u16_at(4), u16_at(8), u16_at(10), u16_at(12), u16_at(14))
+            {
+                let start = axes_off as usize + axis_count as usize * axis_size as usize;
+                for i in 0..count as usize {
+                    let o = start + i * size as usize;
+                    let Some(name_id) = u16_at(o) else { break };
+                    let coordinates = (0..axis_count as usize)
+                        .filter_map(|k| {
+                            let p = o + 4 + k * 4;
+                            fvar.get(p..p + 4)
+                                .map(|b| i32::from_be_bytes([b[0], b[1], b[2], b[3]]) as f32 / 65536.)
+                        })
+                        .collect();
+                    rv.instances.push(crysirror_core::service::FontNamedInstance {
+                        name: name_of(name_id).unwrap_or_default(),
+                        coordinates,
+                    });
+                }
+            }
+        }
+        Ok(rv)
     }
     fn font(&self, alias: &str) -> Result<FontArc> {
         if let Some((font, _)) = self.fonts.get(alias) { return Ok(font.clone()); }

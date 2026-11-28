@@ -945,6 +945,8 @@ declare class Ui {
   defineCursor(id: number, cursor: Record<string, any>): void;
   /** Select the pointer shape: {kind:'standard', shape:'default'|'pointer'|'text'|'wait'|...} or {kind:'custom', id} for a cursor this client defined. */
   setCursor(cursor: Record<string, any>): void;
+  /** Set the presentation screenshot magnification (1, 2 or 4) in client-owned state. */
+  setCaptureScale(scale: number): void;
   /** Request borderless desktop fullscreen. Headless hosts retain client-owned state; the desktop applies it at frame publication. */
   setFullscreen(enabled: boolean): void;
   /** Request desktop decorations and resizing through engine-owned client state. Headless hosts retain the request; the desktop applies it at frame publication. */

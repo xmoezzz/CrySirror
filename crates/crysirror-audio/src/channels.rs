@@ -282,6 +282,7 @@ pub(super) fn prepare(
         looping,
         loop_passes: p.loop_passes,
         swap_channels: p.swap_channels,
+        spatial: p.spatial_position.map(|position| crate::mixer::Spatial { position, ..Default::default() }),
         loop_points,
         fade_in_ms: p.fade_ms,
         paused: p.paused,
@@ -516,6 +517,7 @@ impl ChannelAudio {
             | AudioRequest::SetChannelSwap { channel, .. }
             | AudioRequest::SetTrackGains { channel, .. }
             | AudioRequest::SetPan { channel, .. }
+            | AudioRequest::SetChannelSpatial { channel, .. }
             | AudioRequest::SetStereoGain { channel, .. } => Some(*channel),
         };
         match request {
@@ -730,6 +732,17 @@ impl ChannelAudio {
                     .filter(|h| self.mixer.is_playing(client, **h))
                 {
                     self.mixer.set_stereo_gain(client, h, gains, fade_ms)?;
+                }
+            }
+            AudioRequest::SetChannelSpatial { channel, position } => {
+                let spatial = position.map(|position| crate::mixer::Spatial { position, ..Default::default() });
+                if let Some(spec) = &spatial {
+                    spec.validate()?;
+                }
+                if let Some(&handle) = self.voices.get(&(client, channel))
+                    .filter(|h| self.mixer.is_playing(client, **h))
+                {
+                    self.mixer.set_spatial(client, handle, spatial)?;
                 }
             }
             AudioRequest::SetPan {

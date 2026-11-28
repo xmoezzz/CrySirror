@@ -15,6 +15,8 @@ use crysirror_kag::{KagError, KagHost, KagParser, ParserOptions, Tag};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
+mod save_literal;
+
 /// `ScriptManager.tjs_`, shared by the ADV and motion KAG managers.
 pub type SharedTjs = Arc<Mutex<Tjs>>;
 
@@ -93,10 +95,11 @@ pub enum AdvUi {
     RetailDeactivate(usize),
     RetailTrophy(i32),
     RetailClearMotionStacks,
+    RetailFreeCall(String),
     RetailSwap { man:bool, slot:usize, other:usize },
     RetailStock { index: usize, slot: usize, visible: Option<bool> },
     /// `YotogiManager.TagYotogiCall` (on the ADV KAG).
-    YotogiCall { name: String, label: String, edit_label: Option<String> },
+    YotogiCall { name: String, label: String, edit_label: Option<String>, cancel_label: Option<String> },
     /// `YotogiManager.TagPlayBGMRoom`: the selected stage's BGM.
     PlayBgmRoom { fade_s: f32 },
     /// `YotogiManager.TagControlMask`.
@@ -361,6 +364,7 @@ pub struct AdvKag {
     fade_wait: bool,
     /// Waiting for the message window's click after `[hitret]`.
     hitret_wait: bool,
+    pub(crate) special_se: bool,
     /// Time the `[hitret]` text was shown (`MessageClass.exit_wait_count_`).
     hitret_at: u64,
     talk_name: String,
@@ -376,6 +380,8 @@ pub struct AdvKag {
     random_choices: Vec<(String, String,bool)>,
     /// `KagStackCall` of `R_call`: caller storage, called stem, id.
     r_stack: Vec<(String, String, i32)>,
+    /// Native read-label hashes carried forward from the loaded checkpoint.
+    saved_read_history: Option<Vec<u8>>,
     /// xorshift state for `Random` draws.
     rng: u64,
     /// `MotionKagManager.next_flag`.
@@ -439,6 +445,7 @@ impl AdvKag {
             ui: Vec::new(),
             fade_wait: false,
             hitret_wait: false,
+            special_se: true,
             hitret_at: 0,
             talk_name: String::new(),
             talk_voice: None,
@@ -448,6 +455,7 @@ impl AdvKag {
             choices: Vec::new(),
             random_choices: Vec::new(),
             r_stack: Vec::new(),
+            saved_read_history: None,
             trace: std::env::var_os("CM3D2_TRACE").map(|_| Vec::new()),
             rng: 0x2545_f491_4f6c_dd1d,
             next_motion: false,
@@ -517,6 +525,7 @@ impl AdvKag {
             ui: Vec::new(),
             fade_wait: false,
             hitret_wait: false,
+            special_se: true,
             hitret_at: 0,
             talk_name: String::new(),
             talk_voice: None,
@@ -526,6 +535,7 @@ impl AdvKag {
             choices: Vec::new(),
             random_choices: Vec::new(),
             r_stack: Vec::new(),
+            saved_read_history: None,
             trace: None,
             rng: 0x2545_f491_4f6c_dd1d,
             next_motion: false,
@@ -584,8 +594,7 @@ impl AdvKag {
     /// `Dictionary.toStructString` of `KAGParser.store()` with its NUL], the
     /// tag-callback flag (always 0 between tags) and `KagStackCall` (u32
     /// count; per frame UTF-16 caller storage and called stem with byte
-    /// lengths including the NUL, i32 id). Read history is not kept by this
-    /// port; an empty block is written (SATD-cm3d2-game-logic).
+    /// lengths including the NUL, i32 id).
     pub fn serialize_blob(&self) -> Result<Vec<u8>> {
         let text = {
             let mut tjs = self.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
@@ -595,9 +604,9 @@ impl AdvKag {
         };
         let mut out = Vec::new();
         let utf16 = |s: &str| -> Vec<u8> { s.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect() };
-        let history: Vec<u8> = [b"reda".as_slice(), &0u32.to_le_bytes()].concat();
+        let history = self.saved_read_history.as_deref().unwrap_or(b"reda\0\0\0\0");
         out.extend_from_slice(&(history.len() as u32).to_le_bytes());
-        out.extend_from_slice(&history);
+        out.extend_from_slice(history);
         let s = utf16(&text);
         out.extend_from_slice(&(s.len() as u32).to_le_bytes());
         out.extend_from_slice(&s);
@@ -617,17 +626,37 @@ impl AdvKag {
     /// `KagScript.Deserialize`: restore the parser from the struct string,
     /// then `GoToLabel(GetCurrentLabel())`; the `R_call` stack follows.
     pub fn deserialize_blob(&mut self, files: &GameFiles, storage: &dyn ClientStorage, blob: &[u8]) -> Result<()> {
+        self.read_checkpoint(files, storage, blob, false)
+    }
+
+    pub(crate) fn deserialize_disk_blob(&mut self, files: &GameFiles, storage: &dyn ClientStorage, blob: &[u8]) -> Result<()> {
+        self.read_checkpoint(files, storage, blob, true)
+    }
+
+    fn read_checkpoint(&mut self, files: &GameFiles, storage: &dyn ClientStorage, blob: &[u8], from_disk: bool) -> Result<()> {
         let mut r = crate::binio::Reader::new(blob);
         let n = r.u32()? as usize;
         let history = r.take(n)?;
-        anyhow::ensure!(history.len() >= 8 && &history[..4] == b"reda", "KAG read history header");
+        let mut history_reader = crate::binio::Reader::new(history);
+        anyhow::ensure!(history_reader.take(4)? == b"reda", "KAG read history header");
+        let file_count = history_reader.count()?;
+        for _ in 0..file_count {
+            history_reader.u64()?;
+            let labels = usize::try_from(history_reader.u32()?)?;
+            history_reader.take(labels.checked_mul(8).context("KAG label count overflow")?)?;
+        }
+        anyhow::ensure!(history_reader.at == history.len(), "KAG read history length");
         let utf16 = |b: &[u8]| -> Result<String> {
-            let units: Vec<u16> = b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|u| *u != 0).collect();
+            anyhow::ensure!(b.len() <= 2 * 1024 * 1024 && b.len().is_multiple_of(2), "invalid KAG checkpoint string length");
+            let (text, terminator) = b.split_last_chunk::<2>().context("missing KAG string terminator")?;
+            anyhow::ensure!(*terminator == [0, 0], "missing KAG string terminator");
+            let units: Vec<u16> = text.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            anyhow::ensure!(!units.contains(&0), "embedded NUL in KAG checkpoint string");
             String::from_utf16(&units).context("KAG save UTF-16")
         };
         let n = r.u32()? as usize;
         let text = utf16(r.take(n)?)?;
-        let _flag = r.take(1)?;
+        anyhow::ensure!(!r.bool()?, "KAG checkpoint saved during tag callback");
         let frames = r.u32()? as usize;
         anyhow::ensure!(frames <= 4096, "KagStackCall count {frames}");
         let mut r_stack = Vec::with_capacity(frames);
@@ -638,12 +667,31 @@ impl AdvKag {
             let stem = utf16(r.take(n)?)?;
             r_stack.push((caller, stem, r.i32()?));
         }
+        anyhow::ensure!(r.at == blob.len(), "unexpected trailing KAG checkpoint data");
         let tjs = self.tjs.clone();
         let mut ctx = Ctx { adv: self.kind == KagKind::Adv, r_depth: self.r_stack.len(), files, storage, tjs: tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock poisoned"))? };
-        let dict = if text.is_empty() { None } else { Some(ctx.tjs.eval(&text)?) };
+        let dict = if text.is_empty() { None } else { Some(save_literal::read(&mut ctx.tjs.runtime, &text)?) };
         if let Some(v) = dict {
             use crysirror_kag::krkr_store::{self, Profile};
             let h = v.object_handle().context("KAGParser save data is not a dictionary")?;
+            if from_disk {
+                use crysirror_tjs2::runtime::Variant;
+                // A saved macro is executable KAG source. A disk slot may
+                // reference the registered definitions by value.
+                match ctx.tjs.runtime.object_member(h, "macros") {
+                    Variant::Void => {}
+                    Variant::Object(macros) => {
+                        let trusted: BTreeMap<_, _> = self.parser.macro_definitions().collect();
+                        for (name, body) in ctx.tjs.runtime.object_members(macros) {
+                            anyhow::ensure!(
+                                matches!(body, Variant::String(body) if trusted.get(name.as_str()) == Some(&body.as_str())),
+                                "KAG checkpoint references an unverified macro {name}",
+                            );
+                        }
+                    }
+                    _ => bail!("invalid KAG checkpoint macro dictionary"),
+                }
+            }
             if let Some(what) = krkr_store::unrestorable(&ctx.tjs.runtime, h, Profile::Cm3d2).map_err(|e| anyhow::anyhow!("{e}"))? {
                 bail!("CM3D2 save: KAGParser state needs {what}");
             }
@@ -658,6 +706,7 @@ impl AdvKag {
         }
         drop(ctx);
         self.r_stack = r_stack;
+        self.saved_read_history = Some(history.to_vec());
         self.loaded = true;
         self.stopped = false;
         self.wait = None;
@@ -898,6 +947,20 @@ impl AdvKag {
             return Ok(None);
         }
         Ok(match name {
+            "freerestorebackupdata" if self.retail_tags => {
+                let mut vm = self.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+                crate::tjs::retail::restore_recollection(&mut vm.runtime.host_mut().state);
+                None
+            }
+            "freecall" if self.retail_tags => {
+                let vm = self.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+                if vm.runtime.host().state.retail.recollection_returns.is_some() {
+                    self.ui.push(AdvUi::RetailFreeCall(property(a, name, "name")?.to_owned()));
+                    Some(KagStep::Waiting)
+                } else {
+                    None
+                }
+            }
             "setdance" if self.retail_sound.is_some() => {
                 if let Some(mode)=a.get("dancetype") {
                     let mut vm=self.tjs.lock().map_err(|_|anyhow::anyhow!("TJS lock"))?;
@@ -1639,6 +1702,9 @@ impl AdvKag {
             "playse" => {
                 use crate::sound::{ogg, Kind, SoundOp};
                 let file = ogg(property(a, name, "file")?);
+                if file == "SE016.ogg" && !self.special_se {
+                    return Ok(None);
+                }
                 let op = SoundOp::Play { kind: Kind::Se, file, fade_s: 0., looping: a.contains_key("loop") };
                 let wait = a.get("wait").map(|v| crate::text::atoi(v.as_bytes())).unwrap_or(0);
                 if wait <= 0 {
@@ -1655,10 +1721,18 @@ impl AdvKag {
             }
             // YotogiManager registers it on the ADV KAG.
             "yotogicall" if self.kind == KagKind::Adv => {
+                let standalone = self.retail_sound.is_some();
+                if standalone && self.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?
+                    .runtime.host().state.retail.yotogi_profile().is_none() {
+                    return Ok(None);
+                }
                 let n = property(a, name, "name")?.to_owned();
                 let label = property(a, name, "label")?.to_owned();
-                self.ui.push(AdvUi::YotogiCall { name: n, label, edit_label: a.get("edit_label").cloned() });
-                None
+                self.ui.push(AdvUi::YotogiCall {
+                    name: n, label, edit_label: a.get("edit_label").cloned(),
+                    cancel_label: a.get("cancel_label").cloned(),
+                });
+                standalone.then_some(KagStep::Waiting)
             }
             // SceneSingleEffect registers it while that scene runs.
             "startmvpeffect" if self.kind == KagKind::Adv => {

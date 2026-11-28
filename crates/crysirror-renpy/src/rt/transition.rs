@@ -13,16 +13,24 @@ use crysirror_python::{ObjRef, PyResult, Value, Vm, builtins::Kw, ops};
 const MODULE: &str = "renpy.display.transition";
 
 fn less_updates(vm: &mut Vm) -> bool {
-    py::import_attr(vm, "renpy.game", "less_updates").map(|v| ops::truthy(vm, &v).unwrap_or(false)).unwrap_or(false)
+    py::import_attr(vm, "renpy.game", "less_updates")
+        .map(|v| ops::truthy(vm, &v).unwrap_or(false))
+        .unwrap_or(false)
 }
 
 fn less_imagedissolve(vm: &mut Vm) -> bool {
-    py::import_attr(vm, "renpy.display", "less_imagedissolve").map(|v| ops::truthy(vm, &v).unwrap_or(false)).unwrap_or(false)
+    py::import_attr(vm, "renpy.display", "less_imagedissolve")
+        .map(|v| ops::truthy(vm, &v).unwrap_or(false))
+        .unwrap_or(false)
 }
 
 fn f(vm: &mut Vm, this: &Value, n: &str) -> PyResult<f64> {
     let v = py::get_or_none(vm, this, n)?;
-    if py::is_none(&v) { Ok(0.) } else { py::f64_of(vm, &v) }
+    if py::is_none(&v) {
+        Ok(0.)
+    } else {
+        py::f64_of(vm, &v)
+    }
 }
 
 fn tr_init_base(vm: &mut Vm, this: &Value, delay: Value, props: Kw) -> PyResult<()> {
@@ -34,7 +42,11 @@ fn tr_init_base(vm: &mut Vm, this: &Value, delay: Value, props: Kw) -> PyResult<
 
 fn tr_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let delay = arg_or(args, kw, 1, "delay", Value::Int(0));
-    let props: Vec<_> = kw.iter().filter(|(k, _)| &**k != "delay").cloned().collect();
+    let props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| &**k != "delay")
+        .cloned()
+        .collect();
     tr_init_base(vm, &args[0], delay, &props)?;
     Ok(Value::None)
 }
@@ -90,7 +102,10 @@ fn widgets(vm: &mut Vm, this: &Value, kw: Kw, args: &[Value], first: usize) -> P
 }
 
 fn strip<'a>(kw: Kw<'a>, names: &[&str]) -> Vec<(std::rc::Rc<str>, Value)> {
-    kw.iter().filter(|(k, _)| !names.contains(&&**k)).cloned().collect()
+    kw.iter()
+        .filter(|(k, _)| !names.contains(&&**k))
+        .cloned()
+        .collect()
 }
 
 // NoTransition ------------------------------------------------------------------------------
@@ -98,7 +113,12 @@ fn strip<'a>(kw: Kw<'a>, names: &[&str]) -> Vec<(std::rc::Rc<str>, Value)> {
 fn notrans_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let delay = arg_or(args, kw, 1, "delay", Value::Int(0));
-    tr_init_base(vm, this, delay, &strip(kw, &["delay", "old_widget", "new_widget"]))?;
+    tr_init_base(
+        vm,
+        this,
+        delay,
+        &strip(kw, &["delay", "old_widget", "new_widget"]),
+    )?;
     widgets(vm, this, kw, args, 2)?;
     Ok(Value::None)
 }
@@ -116,7 +136,10 @@ fn multiple_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let old_widget = arg_or(args, kw, 2, "old_widget", Value::None);
     let new_widget = arg_or(args, kw, 3, "new_widget", Value::None);
     if items.len() % 2 != 1 || items.len() < 3 {
-        return Err(py::error(vm, "MultipleTransition requires an odd number of items, and at least 3 items."));
+        return Err(py::error(
+            vm,
+            "MultipleTransition requires an odd number of items, and at least 3 items.",
+        ));
     }
     let mut screens = Vec::new();
     for i in items.iter().step_by(2) {
@@ -132,11 +155,20 @@ fn multiple_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     for (k, trans) in items.iter().skip(1).step_by(2).enumerate() {
         let old = oldnew(&screens[k]);
         let new = oldnew(&screens[k + 1]);
-        let t = vm.call(trans, Vec::new(), vec![("old_widget".into(), old), ("new_widget".into(), new)])?;
+        let t = vm.call(
+            trans,
+            Vec::new(),
+            vec![("old_widget".into(), old), ("new_widget".into(), new)],
+        )?;
         total += f(vm, &t, "delay")?;
         transitions.push(t);
     }
-    tr_init_base(vm, this, Value::Float(total), &strip(kw, &["args", "old_widget", "new_widget"]))?;
+    tr_init_base(
+        vm,
+        this,
+        Value::Float(total),
+        &strip(kw, &["args", "old_widget", "new_widget"]),
+    )?;
     py::set(vm, this, "screens", vm.types.new_list(screens))?;
     let last = transitions.last().cloned().unwrap_or(Value::None);
     py::set(vm, this, "transitions", vm.types.new_list(transitions))?;
@@ -219,16 +251,29 @@ fn f_fade(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let nc = py::import_attr(vm, MODULE, "NoTransition")?;
     let dissolve = vm.call(&curry, vec![dc], Vec::new())?;
     let notrans = vm.call(&curry, vec![nc], Vec::new())?;
-    let mut widget = if py::is_none(&widget) { Value::None } else { super::easy::displayable(vm, &widget, &Value::None, true)? };
+    let mut widget = if py::is_none(&widget) {
+        Value::None
+    } else {
+        super::easy::displayable(vm, &widget, &Value::None, true)?
+    };
     let solid = py::import_attr(vm, "renpy.display.imagelike", "Solid")?;
     if ops::truthy(vm, &color)? {
         widget = vm.call(&solid, vec![color], Vec::new())?;
     }
     if !ops::truthy(vm, &widget)? {
-        let black = vm.types.new_tuple(vec![Value::Int(0), Value::Int(0), Value::Int(0), Value::Int(255)]);
+        let black = vm.types.new_tuple(vec![
+            Value::Int(0),
+            Value::Int(0),
+            Value::Int(0),
+            Value::Int(255),
+        ]);
         widget = vm.call(&solid, vec![black], Vec::new())?;
     }
-    let d_out = vm.call(&dissolve, vec![out_time], vec![("alpha".into(), alpha.clone())])?;
+    let d_out = vm.call(
+        &dissolve,
+        vec![out_time],
+        vec![("alpha".into(), alpha.clone())],
+    )?;
     let mut items = vec![Value::Bool(false), d_out, widget.clone()];
     if ops::truthy(vm, &hold_time)? {
         items.push(vm.call(&notrans, vec![hold_time], Vec::new())?);
@@ -238,7 +283,14 @@ fn f_fade(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     items.push(Value::Bool(true));
     let mc = py::import_attr(vm, MODULE, "MultipleTransition")?;
     let l = vm.types.new_list(items);
-    vm.call(&mc, vec![l], vec![("old_widget".into(), old_widget), ("new_widget".into(), new_widget)])
+    vm.call(
+        &mc,
+        vec![l],
+        vec![
+            ("old_widget".into(), old_widget),
+            ("new_widget".into(), new_widget),
+        ],
+    )
 }
 
 // Pixellate ---------------------------------------------------------------------------------------
@@ -247,7 +299,12 @@ fn pixellate_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let time = py::f64_of(vm, &arg_or(args, kw, 1, "time", Value::Int(0)))?;
     let steps = arg_or(args, kw, 2, "steps", Value::Int(1));
-    tr_init_base(vm, this, Value::Float(time), &strip(kw, &["time", "steps", "old_widget", "new_widget"]))?;
+    tr_init_base(
+        vm,
+        this,
+        Value::Float(time),
+        &strip(kw, &["time", "steps", "old_widget", "new_widget"]),
+    )?;
     py::set(vm, this, "time", Value::Float(time))?;
     py::set(vm, this, "steps", steps.clone())?;
     widgets(vm, this, kw, args, 3)?;
@@ -282,7 +339,13 @@ fn pixellate_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (rw, rh) = size(&rdr);
     let mut rd = RenderData::new(rw, rh);
     let src = render::source_of(vm, &rdr)?;
-    rd.children.push(render::Blit { source: src, x: 0., y: 0., focus: true, main: true });
+    rd.children.push(render::Blit {
+        source: src,
+        x: 0.,
+        y: 0.,
+        focus: true,
+        main: true,
+    });
     rd.operation = render::PIXELLATE;
     rd.operation_parameter = 2f64.powf(step);
     render::redraw(vm, this, 0.);
@@ -294,12 +357,30 @@ fn pixellate_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn dissolve_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let time = arg_or(args, kw, 1, "time", Value::Int(0));
-    tr_init_base(vm, this, time.clone(), &strip(kw, &["time", "old_widget", "new_widget", "alpha", "time_warp"]))?;
+    tr_init_base(
+        vm,
+        this,
+        time.clone(),
+        &strip(
+            kw,
+            &["time", "old_widget", "new_widget", "alpha", "time_warp"],
+        ),
+    )?;
     py::set(vm, this, "time", time)?;
     widgets(vm, this, kw, args, 2)?;
     py::set(vm, this, "events", Value::Bool(false))?;
-    py::set(vm, this, "alpha", arg_or(args, kw, 4, "alpha", Value::Bool(false)))?;
-    py::set(vm, this, "time_warp", arg_or(args, kw, 5, "time_warp", Value::None))?;
+    py::set(
+        vm,
+        this,
+        "alpha",
+        arg_or(args, kw, 4, "alpha", Value::Bool(false)),
+    )?;
+    py::set(
+        vm,
+        this,
+        "time_warp",
+        arg_or(args, kw, 5, "time_warp", Value::None),
+    )?;
     Ok(Value::None)
 }
 
@@ -324,9 +405,15 @@ fn op_size(vm: &mut Vm, renders: &[&Value]) -> (f64, f64) {
     let shrink = py::config_bool(vm, "dissolve_shrinks").unwrap_or(false);
     let sizes: Vec<(f64, f64)> = renders.iter().map(|r| size(r)).collect();
     if shrink {
-        (sizes.iter().map(|s| s.0).fold(f64::MAX, f64::min), sizes.iter().map(|s| s.1).fold(f64::MAX, f64::min))
+        (
+            sizes.iter().map(|s| s.0).fold(f64::MAX, f64::min),
+            sizes.iter().map(|s| s.1).fold(f64::MAX, f64::min),
+        )
     } else {
-        (sizes.iter().map(|s| s.0).fold(0., f64::max), sizes.iter().map(|s| s.1).fold(0., f64::max))
+        (
+            sizes.iter().map(|s| s.0).fold(0., f64::max),
+            sizes.iter().map(|s| s.1).fold(0., f64::max),
+        )
     }
 }
 
@@ -349,21 +436,58 @@ fn dissolve_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (rw, rh) = op_size(vm, &[&top, &bottom]);
     let mut rd = RenderData::new(rw, rh);
     rd.operation = render::DISSOLVE;
-    let alpha = { let a = py::get_or_none(vm, this, "alpha")?; ops::truthy(vm, &a)? };
+    let alpha = {
+        let a = py::get_or_none(vm, this, "alpha")?;
+        ops::truthy(vm, &a)?
+    };
     rd.operation_alpha = alpha || py::config_bool(vm, "dissolve_force_alpha").unwrap_or(true);
     rd.operation_complete = complete;
     let b = render::source_of(vm, &bottom)?;
     let t = render::source_of(vm, &top)?;
-    rd.children.push(render::Blit { source: b, x: 0., y: 0., focus: false, main: false });
-    rd.children.push(render::Blit { source: t, x: 0., y: 0., focus: true, main: true });
+    rd.children.push(render::Blit {
+        source: b,
+        x: 0.,
+        y: 0.,
+        focus: false,
+        main: false,
+    });
+    rd.children.push(render::Blit {
+        source: t,
+        x: 0.,
+        y: 0.,
+        focus: true,
+        main: true,
+    });
     render::redraw(vm, this, 0.);
     Ok(new_render(vm, rd))
 }
 
 fn imagedissolve_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["image", "time", "ramplen", "ramptype", "ramp", "reverse", "alpha", "old_widget", "new_widget", "time_warp"];
-    let mut vals = vec![Value::None, Value::Int(0), Value::Int(8), vm.types.new_str("linear"), Value::None, Value::Bool(false), Value::Bool(false), Value::None, Value::None, Value::None];
+    let names = [
+        "image",
+        "time",
+        "ramplen",
+        "ramptype",
+        "ramp",
+        "reverse",
+        "alpha",
+        "old_widget",
+        "new_widget",
+        "time_warp",
+    ];
+    let mut vals = vec![
+        Value::None,
+        Value::Int(0),
+        Value::Int(8),
+        vm.types.new_str("linear"),
+        Value::None,
+        Value::Bool(false),
+        Value::Bool(false),
+        Value::None,
+        Value::None,
+        Value::None,
+    ];
     for (i, v) in args[1..].iter().enumerate().take(names.len()) {
         vals[i] = v.clone();
     }
@@ -428,15 +552,27 @@ fn imagedissolve_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let mut rd = RenderData::new(rw, rh);
     let complete = warp(vm, this, st / delay)?;
     rd.operation = render::IMAGEDISSOLVE;
-    let alpha = { let a = py::get_or_none(vm, this, "alpha")?; ops::truthy(vm, &a)? };
+    let alpha = {
+        let a = py::get_or_none(vm, this, "alpha")?;
+        ops::truthy(vm, &a)?
+    };
     rd.operation_alpha = alpha || py::config_bool(vm, "dissolve_force_alpha").unwrap_or(true);
     rd.operation_complete = complete;
     rd.operation_parameter = f(vm, this, "ramplen")?;
-    let reverse = { let r = py::get_or_none(vm, this, "reverse")?; ops::truthy(vm, &r)? };
+    let reverse = {
+        let r = py::get_or_none(vm, this, "reverse")?;
+        ops::truthy(vm, &r)?
+    };
     set_reverse(vm, &mut rd, reverse)?;
     for (r, focus) in [(&image, false), (&bottom, false), (&top, true)] {
         let s = render::source_of(vm, r)?;
-        rd.children.push(render::Blit { source: s, x: 0., y: 0., focus, main: focus });
+        rd.children.push(render::Blit {
+            source: s,
+            x: 0.,
+            y: 0.,
+            focus,
+            main: focus,
+        });
     }
     render::redraw(vm, this, 0.);
     Ok(new_render(vm, rd))
@@ -444,8 +580,22 @@ fn imagedissolve_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn alphadissolve_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["control", "delay", "old_widget", "new_widget", "alpha", "reverse"];
-    let mut vals = vec![Value::None, Value::Float(0.), Value::None, Value::None, Value::Bool(false), Value::Bool(false)];
+    let names = [
+        "control",
+        "delay",
+        "old_widget",
+        "new_widget",
+        "alpha",
+        "reverse",
+    ];
+    let mut vals = vec![
+        Value::None,
+        Value::Float(0.),
+        Value::None,
+        Value::None,
+        Value::Bool(false),
+        Value::Bool(false),
+    ];
     for (i, v) in args[1..].iter().enumerate().take(names.len()) {
         vals[i] = v.clone();
     }
@@ -502,21 +652,57 @@ fn alphadissolve_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let control = render::render(vm, &ctl, rw, rh, st, at)?;
     let mut rd = RenderData::new(rw, rh);
     rd.operation = render::IMAGEDISSOLVE;
-    let alpha = { let a = py::get_or_none(vm, this, "alpha")?; ops::truthy(vm, &a)? };
+    let alpha = {
+        let a = py::get_or_none(vm, this, "alpha")?;
+        ops::truthy(vm, &a)?
+    };
     rd.operation_alpha = alpha || py::config_bool(vm, "dissolve_force_alpha").unwrap_or(true);
     rd.operation_complete = 0.5;
     rd.operation_parameter = 256.;
-    let reverse = { let r = py::get_or_none(vm, this, "reverse")?; ops::truthy(vm, &r)? };
+    let reverse = {
+        let r = py::get_or_none(vm, this, "reverse")?;
+        ops::truthy(vm, &r)?
+    };
     let c = render::source_of(vm, &control)?;
-    rd.children.push(render::Blit { source: c, x: 0., y: 0., focus: false, main: false });
+    rd.children.push(render::Blit {
+        source: c,
+        x: 0.,
+        y: 0.,
+        focus: false,
+        main: false,
+    });
     let b = render::source_of(vm, &bottom)?;
     let t = render::source_of(vm, &top)?;
     if !reverse {
-        rd.children.push(render::Blit { source: b, x: 0., y: 0., focus: false, main: false });
-        rd.children.push(render::Blit { source: t, x: 0., y: 0., focus: true, main: true });
+        rd.children.push(render::Blit {
+            source: b,
+            x: 0.,
+            y: 0.,
+            focus: false,
+            main: false,
+        });
+        rd.children.push(render::Blit {
+            source: t,
+            x: 0.,
+            y: 0.,
+            focus: true,
+            main: true,
+        });
     } else {
-        rd.children.push(render::Blit { source: t, x: 0., y: 0., focus: true, main: true });
-        rd.children.push(render::Blit { source: b, x: 0., y: 0., focus: false, main: false });
+        rd.children.push(render::Blit {
+            source: t,
+            x: 0.,
+            y: 0.,
+            focus: true,
+            main: true,
+        });
+        rd.children.push(render::Blit {
+            source: b,
+            x: 0.,
+            y: 0.,
+            focus: false,
+            main: false,
+        });
     }
     Ok(new_render(vm, rd))
 }
@@ -547,7 +733,8 @@ fn crop_mode(mode: &str) -> Option<(Rect4, [f64; 2], Rect4, [f64; 2], bool)> {
 }
 
 fn tuple_vals(vm: &mut Vm, v: &[f64]) -> Value {
-    vm.types.new_tuple(v.iter().map(|x| Value::Float(*x)).collect())
+    vm.types
+        .new_tuple(v.iter().map(|x| Value::Float(*x)).collect())
 }
 
 fn read4(vm: &mut Vm, this: &Value, n: &str) -> PyResult<Vec<f64>> {
@@ -556,13 +743,37 @@ fn read4(vm: &mut Vm, this: &Value, n: &str) -> PyResult<Vec<f64>> {
 }
 
 fn interp_tuple(a: &[f64], b: &[f64], t: f64, scales: &[f64]) -> Vec<f64> {
-    a.iter().zip(b).zip(scales).map(|((a, b), s)| (s * (a * (1. - t) + b * t)).round()).collect()
+    a.iter()
+        .zip(b)
+        .zip(scales)
+        .map(|((a, b), s)| (s * (a * (1. - t) + b * t)).round())
+        .collect()
 }
 
 fn cropmove_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["time", "mode", "startcrop", "startpos", "endcrop", "endpos", "topnew", "old_widget", "new_widget"];
-    let mut vals = vec![Value::Int(0), vm.types.new_str("slideright"), Value::None, Value::None, Value::None, Value::None, Value::Bool(true), Value::None, Value::None];
+    let names = [
+        "time",
+        "mode",
+        "startcrop",
+        "startpos",
+        "endcrop",
+        "endpos",
+        "topnew",
+        "old_widget",
+        "new_widget",
+    ];
+    let mut vals = vec![
+        Value::Int(0),
+        vm.types.new_str("slideright"),
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::Bool(true),
+        Value::None,
+        Value::None,
+    ];
     for (i, v) in args[1..].iter().enumerate().take(names.len()) {
         vals[i] = v.clone();
     }
@@ -576,7 +787,16 @@ fn cropmove_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     tr_init_base(vm, this, vals[0].clone(), &props)?;
     let mode = py::string(vm, &vals[1])?;
     let (sc, sp, ec, ep, topnew) = if mode == "custom" {
-        let g4 = |vm: &mut Vm, v: &Value, d: &[f64]| -> PyResult<Vec<f64>> { if py::is_none(v) { Ok(d.to_vec()) } else { py::items(vm, v)?.iter().map(|x| py::f64_of(vm, x)).collect() } };
+        let g4 = |vm: &mut Vm, v: &Value, d: &[f64]| -> PyResult<Vec<f64>> {
+            if py::is_none(v) {
+                Ok(d.to_vec())
+            } else {
+                py::items(vm, v)?
+                    .iter()
+                    .map(|x| py::f64_of(vm, x))
+                    .collect()
+            }
+        };
         let sc = g4(vm, &vals[2], &[0., 0., 0., 1.])?;
         let sp = g4(vm, &vals[3], &[0., 0.])?;
         let ec = g4(vm, &vals[4], &[0., 0., 1., 1.])?;
@@ -584,11 +804,17 @@ fn cropmove_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let tn = ops::truthy(vm, &vals[6])?;
         (sc, sp, ec, ep, tn)
     } else {
-        let (sc, sp, ec, ep, tn) = crop_mode(&mode).ok_or_else(|| py::error(vm, format!("Invalid mode {mode} passed into CropMove.")))?;
+        let (sc, sp, ec, ep, tn) = crop_mode(&mode)
+            .ok_or_else(|| py::error(vm, format!("Invalid mode {mode} passed into CropMove.")))?;
         (sc.to_vec(), sp.to_vec(), ec.to_vec(), ep.to_vec(), tn)
     };
     py::set(vm, this, "time", vals[0].clone())?;
-    for (n, v) in [("startcrop", &sc), ("startpos", &sp), ("endcrop", &ec), ("endpos", &ep)] {
+    for (n, v) in [
+        ("startcrop", &sc),
+        ("startpos", &sp),
+        ("endcrop", &ec),
+        ("endpos", &ep),
+    ] {
         let t = tuple_vals(vm, v);
         py::set(vm, this, n, t)?;
     }
@@ -596,7 +822,11 @@ fn cropmove_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     py::set(vm, this, "old_widget", vals[7].clone())?;
     py::set(vm, this, "new_widget", vals[8].clone())?;
     py::set(vm, this, "events", Value::Bool(false))?;
-    let (bottom, top) = if topnew { (vals[7].clone(), vals[8].clone()) } else { (vals[8].clone(), vals[7].clone()) };
+    let (bottom, top) = if topnew {
+        (vals[7].clone(), vals[8].clone())
+    } else {
+        (vals[8].clone(), vals[7].clone())
+    };
     py::set(vm, this, "bottom", bottom)?;
     py::set(vm, this, "top", top)?;
     Ok(Value::None)
@@ -626,13 +856,34 @@ fn cropmove_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let top = render::render(vm, &topd, w, h, st, at)?;
     let bottom = render::render(vm, &botd, w, h, st, at)?;
     let (bw, bh) = size(&bottom);
-    let topnew = { let v = py::get_or_none(vm, this, "topnew")?; ops::truthy(vm, &v)? };
+    let topnew = {
+        let v = py::get_or_none(vm, this, "topnew")?;
+        ops::truthy(vm, &v)?
+    };
     let mut rd = RenderData::new(bw.min(w), bh.min(h));
     let b = render::source_of(vm, &bottom)?;
-    rd.children.push(render::Blit { source: b, x: 0., y: 0., focus: !topnew, main: true });
-    let ss = render::subsurface(vm, &top, [crop[0], crop[1], crop[2], crop[3]], topnew, false)?;
+    rd.children.push(render::Blit {
+        source: b,
+        x: 0.,
+        y: 0.,
+        focus: !topnew,
+        main: true,
+    });
+    let ss = render::subsurface(
+        vm,
+        &top,
+        [crop[0], crop[1], crop[2], crop[3]],
+        topnew,
+        false,
+    )?;
     let s = render::source_of(vm, &ss)?;
-    rd.children.push(render::Blit { source: s, x: pos[0].trunc(), y: pos[1].trunc(), focus: topnew, main: true });
+    rd.children.push(render::Blit {
+        source: s,
+        x: pos[0].trunc(),
+        y: pos[1].trunc(),
+        focus: topnew,
+        main: true,
+    });
     render::redraw(vm, this, 0.);
     Ok(new_render(vm, rd))
 }
@@ -640,10 +891,30 @@ fn cropmove_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn push_mode(mode: &str) -> Option<[[f64; 4]; 4]> {
     // new_startcrop, new_endcrop, old_startcrop, old_endcrop; positions below.
     Some(match mode {
-        "pushright" => [[1., 0., 0., 1.], [0., 0., 1., 1.], [0., 0., 1., 1.], [0., 0., 0., 1.]],
-        "pushleft" => [[0., 0., 0., 1.], [0., 0., 1., 1.], [0., 0., 1., 1.], [1., 0., 0., 1.]],
-        "pushup" => [[0., 0., 1., 0.], [0., 0., 1., 1.], [0., 0., 1., 1.], [0., 1., 1., 0.]],
-        "pushdown" => [[0., 1., 1., 0.], [0., 0., 1., 1.], [0., 0., 1., 1.], [0., 0., 1., 0.]],
+        "pushright" => [
+            [1., 0., 0., 1.],
+            [0., 0., 1., 1.],
+            [0., 0., 1., 1.],
+            [0., 0., 0., 1.],
+        ],
+        "pushleft" => [
+            [0., 0., 0., 1.],
+            [0., 0., 1., 1.],
+            [0., 0., 1., 1.],
+            [1., 0., 0., 1.],
+        ],
+        "pushup" => [
+            [0., 0., 1., 0.],
+            [0., 0., 1., 1.],
+            [0., 0., 1., 1.],
+            [0., 1., 1., 0.],
+        ],
+        "pushdown" => [
+            [0., 1., 1., 0.],
+            [0., 0., 1., 1.],
+            [0., 0., 1., 1.],
+            [0., 0., 1., 0.],
+        ],
         _ => return None,
     })
 }
@@ -662,15 +933,31 @@ fn pushmove_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let time = arg_or(args, kw, 1, "time", Value::Int(0));
     let mode = arg_or(args, kw, 2, "mode", vm.types.new_str("pushright"));
-    tr_init_base(vm, this, time.clone(), &strip(kw, &["time", "mode", "old_widget", "new_widget"]))?;
+    tr_init_base(
+        vm,
+        this,
+        time.clone(),
+        &strip(kw, &["time", "mode", "old_widget", "new_widget"]),
+    )?;
     let mode = py::string(vm, &mode)?;
-    let crops = push_mode(&mode).ok_or_else(|| py::error(vm, format!("Invalid mode {mode} passed into PushMove.")))?;
+    let crops = push_mode(&mode)
+        .ok_or_else(|| py::error(vm, format!("Invalid mode {mode} passed into PushMove.")))?;
     let pos = push_pos(&mode);
-    for (n, v) in [("new_startcrop", &crops[0]), ("new_endcrop", &crops[1]), ("old_startcrop", &crops[2]), ("old_endcrop", &crops[3])] {
+    for (n, v) in [
+        ("new_startcrop", &crops[0]),
+        ("new_endcrop", &crops[1]),
+        ("old_startcrop", &crops[2]),
+        ("old_endcrop", &crops[3]),
+    ] {
         let t = tuple_vals(vm, v);
         py::set(vm, this, n, t)?;
     }
-    for (n, v) in [("new_startpos", &pos[0]), ("new_endpos", &pos[1]), ("old_startpos", &pos[2]), ("old_endpos", &pos[3])] {
+    for (n, v) in [
+        ("new_startpos", &pos[0]),
+        ("new_endpos", &pos[1]),
+        ("old_startpos", &pos[2]),
+        ("old_endpos", &pos[3]),
+    ] {
         let t = tuple_vals(vm, v);
         py::set(vm, this, n, t)?;
     }
@@ -694,7 +981,16 @@ fn pushmove_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let scales = [w, h, w, h];
     let mut v = std::collections::HashMap::new();
-    for n in ["new_startcrop", "new_endcrop", "old_startcrop", "old_endcrop", "new_startpos", "new_endpos", "old_startpos", "old_endpos"] {
+    for n in [
+        "new_startcrop",
+        "new_endcrop",
+        "old_startcrop",
+        "old_endcrop",
+        "new_startpos",
+        "new_endpos",
+        "old_startpos",
+        "old_endpos",
+    ] {
         v.insert(n, read4(vm, this, n)?);
     }
     let new_crop = interp_tuple(&v["new_startcrop"], &v["new_endcrop"], time, &scales);
@@ -705,12 +1001,36 @@ fn pushmove_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let new = render::render(vm, &nw, w, h, st, at)?;
     let old = render::render(vm, &ow, w, h, st, at)?;
     let mut rd = RenderData::new(w, h);
-    let oss = render::subsurface(vm, &old, [old_crop[0], old_crop[1], old_crop[2], old_crop[3]], true, false)?;
+    let oss = render::subsurface(
+        vm,
+        &old,
+        [old_crop[0], old_crop[1], old_crop[2], old_crop[3]],
+        true,
+        false,
+    )?;
     let s = render::source_of(vm, &oss)?;
-    rd.children.push(render::Blit { source: s, x: old_pos[0], y: old_pos[1], focus: true, main: true });
-    let nss = render::subsurface(vm, &new, [new_crop[0], new_crop[1], new_crop[2], new_crop[3]], true, false)?;
+    rd.children.push(render::Blit {
+        source: s,
+        x: old_pos[0],
+        y: old_pos[1],
+        focus: true,
+        main: true,
+    });
+    let nss = render::subsurface(
+        vm,
+        &new,
+        [new_crop[0], new_crop[1], new_crop[2], new_crop[3]],
+        true,
+        false,
+    )?;
     let s = render::source_of(vm, &nss)?;
-    rd.children.push(render::Blit { source: s, x: new_pos[0], y: new_pos[1], focus: true, main: true });
+    rd.children.push(render::Blit {
+        source: s,
+        x: new_pos[0],
+        y: new_pos[1],
+        focus: true,
+        main: true,
+    });
     render::redraw(vm, this, 0.);
     Ok(new_render(vm, rd))
 }
@@ -723,10 +1043,27 @@ fn f_compose(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let after = arg_or(args, kw, 2, "after", Value::None);
     let nw = arg_or(args, kw, 3, "new_widget", Value::None);
     let ow = arg_or(args, kw, 4, "old_widget", Value::None);
-    let pair = || -> Vec<(std::rc::Rc<str>, Value)> { vec![("new_widget".into(), nw.clone()), ("old_widget".into(), ow.clone())] };
-    let old = if py::is_none(&before) { ow.clone() } else { vm.call(&before, Vec::new(), pair())? };
-    let new = if py::is_none(&after) { nw.clone() } else { vm.call(&after, Vec::new(), pair())? };
-    vm.call(&trans, Vec::new(), vec![("new_widget".into(), new), ("old_widget".into(), old)])
+    let pair = || -> Vec<(std::rc::Rc<str>, Value)> {
+        vec![
+            ("new_widget".into(), nw.clone()),
+            ("old_widget".into(), ow.clone()),
+        ]
+    };
+    let old = if py::is_none(&before) {
+        ow.clone()
+    } else {
+        vm.call(&before, Vec::new(), pair())?
+    };
+    let new = if py::is_none(&after) {
+        nw.clone()
+    } else {
+        vm.call(&after, Vec::new(), pair())?
+    };
+    vm.call(
+        &trans,
+        Vec::new(),
+        vec![("new_widget".into(), new), ("old_widget".into(), old)],
+    )
 }
 
 fn f_sub(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -738,24 +1075,64 @@ fn f_sub(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let crop = py::import_attr(vm, "renpy.display.layout", "LiveCrop")?;
     let old = vm.call(&crop, vec![rect.clone(), ow], Vec::new())?;
     let new = vm.call(&crop, vec![rect, nw.clone()], Vec::new())?;
-    let inner = vm.call(&trans, Vec::new(), vec![("old_widget".into(), old), ("new_widget".into(), new)])?;
+    let inner = vm.call(
+        &trans,
+        Vec::new(),
+        vec![("old_widget".into(), old), ("new_widget".into(), new)],
+    )?;
     let delay = py::get_or_none(vm, &inner, "delay")?;
     let pos = py::import_attr(vm, "renpy.display.layout", "Position")?;
-    let inner = vm.call(&pos, vec![inner], vec![("xpos".into(), r[0].clone()), ("ypos".into(), r[1].clone()), ("xanchor".into(), Value::Int(0)), ("yanchor".into(), Value::Int(0))])?;
+    let inner = vm.call(
+        &pos,
+        vec![inner],
+        vec![
+            ("xpos".into(), r[0].clone()),
+            ("ypos".into(), r[1].clone()),
+            ("xanchor".into(), Value::Int(0)),
+            ("yanchor".into(), Value::Int(0)),
+        ],
+    )?;
     let mb = py::import_attr(vm, "renpy.display.layout", "MultiBox")?;
-    let box_ = vm.call(&mb, Vec::new(), vec![("layout".into(), vm.types.new_str("fixed"))])?;
+    let box_ = vm.call(
+        &mb,
+        Vec::new(),
+        vec![("layout".into(), vm.types.new_str("fixed"))],
+    )?;
     vm.call_method(&box_, "add", vec![nw])?;
     vm.call_method(&box_, "add", vec![inner])?;
     let nt = py::import_attr(vm, MODULE, "NoTransition")?;
-    vm.call(&nt, vec![delay], vec![("old_widget".into(), box_.clone()), ("new_widget".into(), box_)])
+    vm.call(
+        &nt,
+        vec![delay],
+        vec![
+            ("old_widget".into(), box_.clone()),
+            ("new_widget".into(), box_),
+        ],
+    )
 }
 
 // Swing (`renpy.display.transition.Swing`, 7.x+) ---------------------------------------------------------
 
 fn swing_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["delay", "vertical", "reverse", "background", "flatten", "old_widget", "new_widget"];
-    let mut vals = vec![Value::Float(1.), Value::Bool(false), Value::Bool(false), vm.types.new_str("#000"), Value::Bool(true), Value::None, Value::None];
+    let names = [
+        "delay",
+        "vertical",
+        "reverse",
+        "background",
+        "flatten",
+        "old_widget",
+        "new_widget",
+    ];
+    let mut vals = vec![
+        Value::Float(1.),
+        Value::Bool(false),
+        Value::Bool(false),
+        vm.types.new_str("#000"),
+        Value::Bool(true),
+        Value::None,
+        Value::None,
+    ];
     for (i, v) in args[1..].iter().enumerate().take(names.len()) {
         vals[i] = v.clone();
     }
@@ -782,8 +1159,14 @@ fn swing_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         return null_render(vm, this, w, h, st, at);
     }
     let mut t = st / delay;
-    let reverse = { let v = py::get_or_none(vm, this, "reverse")?; ops::truthy(vm, &v)? };
-    let vertical = { let v = py::get_or_none(vm, this, "vertical")?; ops::truthy(vm, &v)? };
+    let reverse = {
+        let v = py::get_or_none(vm, this, "reverse")?;
+        ops::truthy(vm, &v)?
+    };
+    let vertical = {
+        let v = py::get_or_none(vm, this, "vertical")?;
+        ops::truthy(vm, &v)?
+    };
     let (child, angle) = if t < 0.5 {
         (py::get(vm, this, "old_widget")?, t * 180.)
     } else {
@@ -794,7 +1177,15 @@ fn swing_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let angle = if reverse { -angle } else { angle };
     let tc = py::import_attr(vm, "renpy.display.transform", "Transform")?;
     let key = if vertical { "xrotate" } else { "yrotate" };
-    let tr = vm.call(&tc, vec![child], vec![(key.into(), Value::Float(angle)), ("xalign".into(), Value::Float(0.5)), ("yalign".into(), Value::Float(0.5))])?;
+    let tr = vm.call(
+        &tc,
+        vec![child],
+        vec![
+            (key.into(), Value::Float(angle)),
+            ("xalign".into(), Value::Float(0.5)),
+            ("yalign".into(), Value::Float(0.5)),
+        ],
+    )?;
     let bg = py::get_or_none(vm, this, "background")?;
     let bgd = super::easy::displayable(vm, &bg, &Value::None, true)?;
     let back = render::render(vm, &bgd, w, h, st, at)?;
@@ -802,45 +1193,160 @@ fn swing_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let mut rd = RenderData::new(w, h);
     let b = render::source_of(vm, &back)?;
     let f = render::source_of(vm, &front)?;
-    rd.children.push(render::Blit { source: b, x: 0., y: 0., focus: false, main: false });
-    rd.children.push(render::Blit { source: f, x: 0., y: 0., focus: true, main: true });
+    rd.children.push(render::Blit {
+        source: b,
+        x: 0.,
+        y: 0.,
+        focus: false,
+        main: false,
+    });
+    rd.children.push(render::Blit {
+        source: f,
+        x: 0.,
+        y: 0.,
+        focus: true,
+        main: true,
+    });
     render::redraw(vm, this, 0.);
     let _ = render_data;
     Ok(new_render(vm, rd))
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("null_render", f_null_render),
-        ("Fade", f_fade),
-        ("ComposeTransition", f_compose),
-        ("SubTransition", f_sub),
-        ("interpolate_tuple", |vm, a, _| {
-            let t0: Vec<f64> = py::items(vm, &a[0])?.iter().map(|x| py::f64_of(vm, x)).collect::<PyResult<_>>()?;
-            let t1: Vec<f64> = py::items(vm, &a[1])?.iter().map(|x| py::f64_of(vm, x)).collect::<PyResult<_>>()?;
-            let t = py::f64_of(vm, &a[2])?;
-            let s: Vec<f64> = py::items(vm, &a[3])?.iter().map(|x| py::f64_of(vm, x)).collect::<PyResult<_>>()?;
-            let r = interp_tuple(&t0, &t1, t, &s);
-            Ok(vm.types.new_tuple(r.iter().map(|v| Value::Int(*v as i64)).collect()))
-        }),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("null_render", f_null_render),
+            ("Fade", f_fade),
+            ("ComposeTransition", f_compose),
+            ("SubTransition", f_sub),
+            ("interpolate_tuple", |vm, a, _| {
+                let t0: Vec<f64> = py::items(vm, &a[0])?
+                    .iter()
+                    .map(|x| py::f64_of(vm, x))
+                    .collect::<PyResult<_>>()?;
+                let t1: Vec<f64> = py::items(vm, &a[1])?
+                    .iter()
+                    .map(|x| py::f64_of(vm, x))
+                    .collect::<PyResult<_>>()?;
+                let t = py::f64_of(vm, &a[2])?;
+                let s: Vec<f64> = py::items(vm, &a[3])?
+                    .iter()
+                    .map(|x| py::f64_of(vm, x))
+                    .collect::<PyResult<_>>()?;
+                let r = interp_tuple(&t0, &t1, t, &s);
+                Ok(vm
+                    .types
+                    .new_tuple(r.iter().map(|v| Value::Int(*v as i64)).collect()))
+            }),
+        ],
+    );
     let d = Value::Obj(super::core::displayable_class(vm));
-    let c = |vm: &mut Vm, name: &str, bases: &[Value], methods: Methods, attrs: &[(&str, Value)]| -> PyResult<Value> {
+    let c = |vm: &mut Vm,
+             name: &str,
+             bases: &[Value],
+             methods: Methods,
+             attrs: &[(&str, Value)]|
+     -> PyResult<Value> {
         let cls = py::class(vm, MODULE, name, bases, methods, attrs)?;
         let v = Value::Obj(cls);
         crysirror_python::modules::set(vm, &m, name, v.clone());
         Ok(v)
     };
-    let tr = c(vm, "Transition", &[d], &[("__init__", tr_init), ("event", tr_event), ("visit", tr_visit), ("get_placement", tr_get_placement)], &[("new_widget", Value::None), ("old_widget", Value::None)])?;
-    c(vm, "NoTransition", &[tr.clone()], &[("__init__", notrans_init), ("render", notrans_render)], &[])?;
-    c(vm, "MultipleTransition", &[tr.clone()], &[("__init__", multiple_init), ("visit", multiple_visit), ("event", multiple_event), ("render", multiple_render)], &[])?;
-    c(vm, "Pixellate", &[tr.clone()], &[("__init__", pixellate_init), ("render", pixellate_render)], &[])?;
-    c(vm, "Dissolve", &[tr.clone()], &[("__init__", dissolve_init), ("after_upgrade", after_upgrade_alpha), ("render", dissolve_render)], &[("__version__", Value::Int(1)), ("time_warp", Value::None)])?;
-    c(vm, "ImageDissolve", &[tr.clone()], &[("__init__", imagedissolve_init), ("after_upgrade", after_upgrade_alpha), ("visit", imagedissolve_visit), ("render", imagedissolve_render)], &[("__version__", Value::Int(1)), ("time_warp", Value::None)])?;
-    c(vm, "AlphaDissolve", &[tr.clone()], &[("__init__", alphadissolve_init), ("visit", alphadissolve_visit), ("render", alphadissolve_render)], &[("mipmap", Value::None)])?;
-    c(vm, "CropMove", &[tr.clone()], &[("__init__", cropmove_init), ("render", cropmove_render)], &[])?;
-    c(vm, "PushMove", &[tr.clone()], &[("__init__", pushmove_init), ("render", pushmove_render)], &[])?;
-    c(vm, "Swing", &[tr], &[("__init__", swing_init), ("render", swing_render)], &[])?;
+    let tr = c(
+        vm,
+        "Transition",
+        &[d],
+        &[
+            ("__init__", tr_init),
+            ("event", tr_event),
+            ("visit", tr_visit),
+            ("get_placement", tr_get_placement),
+        ],
+        &[("new_widget", Value::None), ("old_widget", Value::None)],
+    )?;
+    c(
+        vm,
+        "NoTransition",
+        &[tr.clone()],
+        &[("__init__", notrans_init), ("render", notrans_render)],
+        &[],
+    )?;
+    c(
+        vm,
+        "MultipleTransition",
+        &[tr.clone()],
+        &[
+            ("__init__", multiple_init),
+            ("visit", multiple_visit),
+            ("event", multiple_event),
+            ("render", multiple_render),
+        ],
+        &[],
+    )?;
+    c(
+        vm,
+        "Pixellate",
+        &[tr.clone()],
+        &[("__init__", pixellate_init), ("render", pixellate_render)],
+        &[],
+    )?;
+    c(
+        vm,
+        "Dissolve",
+        &[tr.clone()],
+        &[
+            ("__init__", dissolve_init),
+            ("after_upgrade", after_upgrade_alpha),
+            ("render", dissolve_render),
+        ],
+        &[("__version__", Value::Int(1)), ("time_warp", Value::None)],
+    )?;
+    c(
+        vm,
+        "ImageDissolve",
+        &[tr.clone()],
+        &[
+            ("__init__", imagedissolve_init),
+            ("after_upgrade", after_upgrade_alpha),
+            ("visit", imagedissolve_visit),
+            ("render", imagedissolve_render),
+        ],
+        &[("__version__", Value::Int(1)), ("time_warp", Value::None)],
+    )?;
+    c(
+        vm,
+        "AlphaDissolve",
+        &[tr.clone()],
+        &[
+            ("__init__", alphadissolve_init),
+            ("visit", alphadissolve_visit),
+            ("render", alphadissolve_render),
+        ],
+        &[("mipmap", Value::None)],
+    )?;
+    c(
+        vm,
+        "CropMove",
+        &[tr.clone()],
+        &[("__init__", cropmove_init), ("render", cropmove_render)],
+        &[],
+    )?;
+    c(
+        vm,
+        "PushMove",
+        &[tr.clone()],
+        &[("__init__", pushmove_init), ("render", pushmove_render)],
+        &[],
+    )?;
+    c(
+        vm,
+        "Swing",
+        &[tr],
+        &[("__init__", swing_init), ("render", swing_render)],
+        &[],
+    )?;
     Ok(m)
 }
 

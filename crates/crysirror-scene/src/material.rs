@@ -17,6 +17,8 @@ pub enum AlphaMode {
     Additive,
     /// Sorted premultiplied-alpha blending.
     Premultiplied,
+    /// Screen blend using premultiplied source colour, `D + (1 - D) × S × alpha`.
+    SoftAdditive,
 }
 /// How a tangent-space normal texture stores its vector.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,7 +43,7 @@ impl NormalEncoding {
 }
 impl AlphaMode {
     pub fn transparent(self) -> bool {
-        matches!(self, Self::Blend | Self::Additive | Self::Premultiplied)
+        matches!(self, Self::Blend | Self::Additive | Self::Premultiplied | Self::SoftAdditive)
     }
     pub fn code(self) -> f32 {
         match self {
@@ -50,6 +52,7 @@ impl AlphaMode {
             Self::Blend => 2.,
             Self::Additive => 3.,
             Self::Premultiplied => 4.,
+            Self::SoftAdditive => 5.,
         }
     }
 }
@@ -428,6 +431,14 @@ impl<T> Material<T> {
                 crate::effect::ShaderEffect::DirectionalLightmap { .. } => ensure!(
                     !self.unlit && self.occlusion_texture.is_some() && self.metallic_roughness_texture.is_some(),
                     "directional lightmaps require a lit material with radiance and direction textures"
+                ),
+                crate::effect::ShaderEffect::RgbLightmap { .. } => ensure!(
+                    self.emissive_texture.is_some() && !self.alpha_mode.transparent(),
+                    "RGB lightmaps require a lightmap texture and an opaque or masked material"
+                ),
+                crate::effect::ShaderEffect::LayeredBlinn { .. } => ensure!(
+                    !self.unlit && self.alpha_mode == AlphaMode::Opaque,
+                    "layered Blinn requires opaque lit surfaces"
                 ),
                 crate::effect::ShaderEffect::NormalShell { .. } => ensure!(
                     self.unlit && self.double_sided && self.alpha_mode == AlphaMode::Opaque,

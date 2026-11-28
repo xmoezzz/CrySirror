@@ -32,10 +32,12 @@ pub fn render(vm: &mut Vm, d: &Value, w: f64, h: f64, st: f64, at: f64) -> PyRes
 }
 
 pub fn size(r: &Value) -> (f64, f64) {
-    render_data(r).map(|r| {
-        let r = r.borrow();
-        (r.width, r.height)
-    }).unwrap_or((0., 0.))
+    render_data(r)
+        .map(|r| {
+            let r = r.borrow();
+            (r.width, r.height)
+        })
+        .unwrap_or((0., 0.))
 }
 
 pub fn new(vm: &Vm, w: f64, h: f64) -> Value {
@@ -55,9 +57,30 @@ pub fn blit_nofocus(vm: &mut Vm, rv: &Value, src: &Value, x: f64, y: f64) -> PyR
 }
 
 /// `child.place(rv, x, y, w, h, surf, main)`; returns the offset.
-pub fn place(vm: &mut Vm, child: &Value, rv: &Value, x: f64, y: f64, w: f64, h: f64, surf: &Value, main: bool) -> PyResult<Value> {
+pub fn place(
+    vm: &mut Vm,
+    child: &Value,
+    rv: &Value,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    surf: &Value,
+    main: bool,
+) -> PyResult<Value> {
     let f = py::get(vm, child, "place")?;
-    vm.call(&f, vec![rv.clone(), Value::Float(x), Value::Float(y), Value::Float(w), Value::Float(h), surf.clone()], vec![("main".into(), Value::Bool(main))])
+    vm.call(
+        &f,
+        vec![
+            rv.clone(),
+            Value::Float(x),
+            Value::Float(y),
+            Value::Float(w),
+            Value::Float(h),
+            surf.clone(),
+        ],
+        vec![("main".into(), Value::Bool(main))],
+    )
 }
 
 pub fn displayable(vm: &mut Vm, d: &Value) -> PyResult<Value> {
@@ -82,7 +105,11 @@ fn iface_f(vm: &mut Vm, name: &str) -> PyResult<Option<f64>> {
         return Ok(None);
     }
     let v = py::get_or_none(vm, &i, name)?;
-    if py::is_none(&v) { Ok(None) } else { py::f64_of(vm, &v).map(Some) }
+    if py::is_none(&v) {
+        Ok(None)
+    } else {
+        py::f64_of(vm, &v).map(Some)
+    }
 }
 
 fn is_float_type(v: &Value) -> bool {
@@ -93,7 +120,13 @@ fn is_float_type(v: &Value) -> bool {
 pub fn xyminimums(vm: &mut Vm, this: &Value, width: f64, height: f64) -> PyResult<(f64, f64)> {
     let adjust = cfg_b(vm, "adjust_minimums", false);
     let mut out = [0.; 2];
-    for (i, (minn, maxn, room)) in [("xminimum", "xmaximum", width), ("yminimum", "ymaximum", height)].iter().enumerate() {
+    for (i, (minn, maxn, room)) in [
+        ("xminimum", "xmaximum", width),
+        ("yminimum", "ymaximum", height),
+    ]
+    .iter()
+    .enumerate()
+    {
         let mut m = style(vm, this, minn)?;
         if let Value::Float(mf) = m {
             let mx = style(vm, this, maxn)?;
@@ -155,7 +188,18 @@ fn null_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let rv = new(vm, w, h);
     let focusable = py::get_or_none(vm, this, "focusable")?;
     if ops::truthy(vm, &focusable)? {
-        vm.call_method(&rv, "add_focus", vec![this.clone(), Value::None, Value::None, Value::None, Value::None, Value::None])?;
+        vm.call_method(
+            &rv,
+            "add_focus",
+            vec![
+                this.clone(),
+                Value::None,
+                Value::None,
+                Value::None,
+                Value::None,
+                Value::None,
+            ],
+        )?;
     }
     Ok(rv)
 }
@@ -208,7 +252,11 @@ fn container_set_style_prefix(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<V
     let f = py::get(vm, &Value::Obj(d), "set_style_prefix")?;
     vm.call(&f, vec![this.clone(), prefix.clone(), root], Vec::new())?;
     for c in children(vm, this)? {
-        vm.call_method(&c, "set_style_prefix", vec![prefix.clone(), Value::Bool(false)])?;
+        vm.call_method(
+            &c,
+            "set_style_prefix",
+            vec![prefix.clone(), Value::Bool(false)],
+        )?;
     }
     Ok(Value::None)
 }
@@ -302,7 +350,9 @@ fn container_remove(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let d = arg_or(args, kw, 1, "d", Value::None);
     let mut ch = children(vm, this)?;
-    let Some(i) = ch.iter().position(|c| py::same(c, &d)) else { return Ok(Value::None) };
+    let Some(i) = ch.iter().position(|c| py::same(c, &d)) else {
+        return Ok(Value::None);
+    };
     ch.remove(i);
     let last = ch.last().cloned().unwrap_or(Value::None);
     py::set(vm, this, "children", vm.types.new_list(ch))?;
@@ -330,7 +380,9 @@ fn container_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn rargs(vm: &mut Vm, args: &[Value]) -> PyResult<(f64, f64, f64, f64)> {
-    let g = |vm: &mut Vm, i: usize| -> PyResult<f64> { py::f64_of(vm, &args.get(i).cloned().unwrap_or(Value::Int(0))) };
+    let g = |vm: &mut Vm, i: usize| -> PyResult<f64> {
+        py::f64_of(vm, &args.get(i).cloned().unwrap_or(Value::Int(0)))
+    };
     Ok((g(vm, 1)?, g(vm, 2)?, g(vm, 3)?, g(vm, 4)?))
 }
 
@@ -350,7 +402,16 @@ pub fn container_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     for i in (0..ch.len()).rev() {
         let o = py::items(vm, &offs[i])?;
         let (xo, yo) = (py::f64_of(vm, &o[0])?, py::f64_of(vm, &o[1])?);
-        let rv = vm.call_method(&ch[i], "event", vec![ev.clone(), Value::Float(x - xo), Value::Float(y - yo), st.clone()])?;
+        let rv = vm.call_method(
+            &ch[i],
+            "event",
+            vec![
+                ev.clone(),
+                Value::Float(x - xo),
+                Value::Float(y - yo),
+                st.clone(),
+            ],
+        )?;
         if !py::is_none(&rv) {
             return Ok(rv);
         }
@@ -378,7 +439,10 @@ fn container_exit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 // Composite / Position -------------------------------------------------------------
 
 fn f_composite(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let size = args.first().cloned().ok_or_else(|| vm.type_error("Composite() requires a size"))?;
+    let size = args
+        .first()
+        .cloned()
+        .ok_or_else(|| vm.type_error("Composite() requires a size"))?;
     let sz = py::items(vm, &size)?;
     if sz.len() != 2 {
         return Err(vm.type_error("Composite size must be (width, height)"));
@@ -387,7 +451,12 @@ fn f_composite(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !props.iter().any(|(k, _)| &**k == "style") {
         props.push(("style".into(), vm.types.new_str("image_placement")));
     }
-    for (n, v) in [("xmaximum", &sz[0]), ("ymaximum", &sz[1]), ("xminimum", &sz[0]), ("yminimum", &sz[1])] {
+    for (n, v) in [
+        ("xmaximum", &sz[0]),
+        ("ymaximum", &sz[1]),
+        ("xminimum", &sz[0]),
+        ("yminimum", &sz[1]),
+    ] {
         props.push((n.into(), v.clone()));
     }
     props.push(("layout".into(), vm.types.new_str("fixed")));
@@ -395,7 +464,10 @@ fn f_composite(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let rv = vm.call(&mb, Vec::new(), props)?;
     let rest = &args[1..];
     if rest.len() % 2 != 0 {
-        return Err(py::error(vm, "LiveComposite requires an odd number of arguments."));
+        return Err(py::error(
+            vm,
+            "LiveComposite requires an odd number of arguments.",
+        ));
     }
     let position = py::import_attr(vm, MODULE, "Position")?;
     for pair in rest.chunks(2) {
@@ -403,12 +475,16 @@ fn f_composite(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         if p.len() != 2 {
             return Err(vm.type_error("Composite position must be (x, y)"));
         }
-        let pos = vm.call(&position, vec![pair[1].clone()], vec![
-            ("xpos".into(), p[0].clone()),
-            ("xanchor".into(), Value::Int(0)),
-            ("ypos".into(), p[1].clone()),
-            ("yanchor".into(), Value::Int(0)),
-        ])?;
+        let pos = vm.call(
+            &position,
+            vec![pair[1].clone()],
+            vec![
+                ("xpos".into(), p[0].clone()),
+                ("xanchor".into(), Value::Int(0)),
+                ("ypos".into(), p[1].clone()),
+                ("yanchor".into(), Value::Int(0)),
+            ],
+        )?;
         vm.call_method(&rv, "add", vec![pos])?;
     }
     Ok(rv)
@@ -417,9 +493,16 @@ fn f_composite(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn position_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let child = arg_or(args, kw, 1, "child", Value::None);
-    let mut props: Vec<_> = kw.iter().filter(|(k, _)| &**k != "child").cloned().collect();
+    let mut props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| &**k != "child")
+        .cloned()
+        .collect();
     if !props.iter().any(|(k, _)| &**k == "style") {
-        let s = args.get(2).cloned().unwrap_or_else(|| vm.types.new_str("image_placement"));
+        let s = args
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| vm.types.new_str("image_placement"));
         props.push(("style".into(), s));
     }
     container_init(vm, &[this.clone()], &props)?;
@@ -434,7 +517,11 @@ fn single_child_render(vm: &mut Vm, args: &[Value], focus: bool) -> PyResult<Val
     let surf = render(vm, &child, w, h, st, at)?;
     let (sw, sh) = size(&surf);
     let rv = new(vm, sw, sh);
-    if focus { blit(vm, &rv, &surf, 0., 0.)? } else { blit_nofocus(vm, &rv, &surf, 0., 0.)? }
+    if focus {
+        blit(vm, &rv, &surf, 0., 0.)?
+    } else {
+        blit_nofocus(vm, &rv, &surf, 0., 0.)?
+    }
     let o = offset(vm, 0., 0.);
     set_offsets(vm, this, vec![o])?;
     Ok(rv)
@@ -466,7 +553,14 @@ fn position_get_placement(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value>
     for (i, n) in [(4, "xoffset"), (5, "yoffset")] {
         let v = style(vm, this, n)?;
         if !py::is_none(&v) {
-            p[i] = ops::binary_op(vm, &p[i], &v, crysirror_python::ast::BinOp::Add, false, false)?;
+            p[i] = ops::binary_op(
+                vm,
+                &p[i],
+                &v,
+                crysirror_python::ast::BinOp::Add,
+                false,
+                false,
+            )?;
         }
     }
     let sp = style(vm, this, "subpixel")?;
@@ -485,8 +579,22 @@ fn child_get_placement(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn grid_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let mut a = [Value::None, Value::None, Value::None, Value::Bool(false), Value::None, Value::None];
-    let names = ["cols", "rows", "padding", "transpose", "style", "allow_underfull"];
+    let mut a = [
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::Bool(false),
+        Value::None,
+        Value::None,
+    ];
+    let names = [
+        "cols",
+        "rows",
+        "padding",
+        "transpose",
+        "style",
+        "allow_underfull",
+    ];
     for (i, v) in args[1..].iter().enumerate().take(6) {
         a[i] = v.clone();
     }
@@ -500,7 +608,11 @@ fn grid_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !py::is_none(&a[2]) && !props.iter().any(|(k, _)| &**k == "spacing") {
         props.push(("spacing".into(), a[2].clone()));
     }
-    let style_v = if py::is_none(&a[4]) { vm.types.new_str("grid") } else { a[4].clone() };
+    let style_v = if py::is_none(&a[4]) {
+        vm.types.new_str("grid")
+    } else {
+        a[4].clone()
+    };
     props.push(("style".into(), style_v));
     container_init(vm, &[this.clone()], &props)?;
     let cols = py::int(vm, &a[0])?;
@@ -520,7 +632,11 @@ fn spacing(vm: &mut Vm, this: &Value, axis: &str, room: f64) -> PyResult<f64> {
     if cfg_b(vm, "relative_spacing", false) {
         return compute_raw(vm, &s, room);
     }
-    if py::is_none(&s) { Ok(0.) } else { py::f64_of(vm, &s) }
+    if py::is_none(&s) {
+        Ok(0.)
+    } else {
+        py::f64_of(vm, &s)
+    }
 }
 
 fn grid_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -532,9 +648,18 @@ fn grid_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let rm = style_f(vm, this, "right_margin", width)?;
     let tm = style_f(vm, this, "top_margin", height)?;
     let bm = style_f(vm, this, "bottom_margin", height)?;
-    let cols = { let v = py::get(vm, this, "cols")?; py::int(vm, &v)? as usize };
-    let rows = { let v = py::get(vm, this, "rows")?; py::int(vm, &v)? as usize };
-    let transpose = { let v = py::get_or_none(vm, this, "transpose")?; ops::truthy(vm, &v)? };
+    let cols = {
+        let v = py::get(vm, this, "cols")?;
+        py::int(vm, &v)? as usize
+    };
+    let rows = {
+        let v = py::get(vm, this, "rows")?;
+        py::int(vm, &v)? as usize
+    };
+    let transpose = {
+        let v = py::get_or_none(vm, this, "transpose")?;
+        ops::truthy(vm, &v)?
+    };
     let all = children(vm, this)?;
     if all.len() < cols * rows {
         return Err(py::error(vm, "Grid not completely full."));
@@ -585,7 +710,17 @@ fn grid_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             let i = x + y * cols;
             let xpos = x as f64 * (cwidth + xspacing) + lm;
             let ypos = y as f64 * (cheight + yspacing) + tm;
-            offsets.push(place(vm, &ch[i], &rv, xpos, ypos, cwidth, cheight, &renders[i], true)?);
+            offsets.push(place(
+                vm,
+                &ch[i],
+                &rv,
+                xpos,
+                ypos,
+                cwidth,
+                cheight,
+                &renders[i],
+                true,
+            )?);
         }
     }
     if transpose {
@@ -605,8 +740,14 @@ fn grid_add(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     container_add(vm, args, kw)?;
     let this = &args[0];
     let n = children(vm, this)?.len() as i64;
-    let cols = { let v = py::get(vm, this, "cols")?; py::int(vm, &v)? };
-    let rows = { let v = py::get(vm, this, "rows")?; py::int(vm, &v)? };
+    let cols = {
+        let v = py::get(vm, this, "cols")?;
+        py::int(vm, &v)?
+    };
+    let rows = {
+        let v = py::get(vm, this, "rows")?;
+        py::int(vm, &v)?
+    };
     if n > cols * rows {
         return Err(py::error(vm, "Grid overfull."));
     }
@@ -616,8 +757,14 @@ fn grid_add(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn grid_per_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let n = children(vm, this)?.len() as i64;
-    let cols = { let v = py::get(vm, this, "cols")?; py::int(vm, &v)? };
-    let rows = { let v = py::get(vm, this, "rows")?; py::int(vm, &v)? };
+    let cols = {
+        let v = py::get(vm, this, "cols")?;
+        py::int(vm, &v)?
+    };
+    let rows = {
+        let v = py::get(vm, this, "rows")?;
+        py::int(vm, &v)?
+    };
     let delta = cols * rows - n;
     if delta <= 0 {
         return Ok(Value::None);
@@ -658,9 +805,25 @@ fn f_check_modal(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let a = |i: usize| args.get(i).cloned().unwrap_or(Value::None);
     let x = py::f64_of(vm, &a(2)).unwrap_or(0.);
     let y = py::f64_of(vm, &a(3)).unwrap_or(0.);
-    let w = if py::is_none(&a(4)) { None } else { Some(py::f64_of(vm, &a(4))?) };
-    let h = if py::is_none(&a(5)) { None } else { Some(py::f64_of(vm, &a(5))?) };
-    Ok(Value::Bool(super::focus::check_modal(vm, &a(0), &a(1), x, y, w, h)?))
+    let w = if py::is_none(&a(4)) {
+        None
+    } else {
+        Some(py::f64_of(vm, &a(4))?)
+    };
+    let h = if py::is_none(&a(5)) {
+        None
+    } else {
+        Some(py::f64_of(vm, &a(5))?)
+    };
+    Ok(Value::Bool(super::focus::check_modal(
+        vm,
+        &a(0),
+        &a(1),
+        x,
+        y,
+        w,
+        h,
+    )?))
 }
 
 // MultiBox -----------------------------------------------------------------------------
@@ -682,7 +845,10 @@ fn multibox_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !py::is_none(&spacing) {
         props.push(("spacing".into(), spacing));
     }
-    props.push(("style".into(), style_v.unwrap_or_else(|| vm.types.new_str("default"))));
+    props.push((
+        "style".into(),
+        style_v.unwrap_or_else(|| vm.types.new_str("default")),
+    ));
     // Container.__init__ before start_times exist: add() appends to them.
     py::set(vm, this, "start_times", vm.types.new_list(Vec::new()))?;
     py::set(vm, this, "anim_times", vm.types.new_list(Vec::new()))?;
@@ -743,11 +909,16 @@ fn multibox_append_scene_list(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Va
 
 fn multibox_update_times(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let Some(it) = iface_f(vm, "interact_time")? else { return Ok(Value::None) };
+    let Some(it) = iface_f(vm, "interact_time")? else {
+        return Ok(Value::None);
+    };
     for name in ["start_times", "anim_times"] {
         let l = py::get(vm, this, name)?;
         let items = py::items(vm, &l)?;
-        let out: Vec<Value> = items.into_iter().map(|v| if py::is_none(&v) { Value::Float(it) } else { v }).collect();
+        let out: Vec<Value> = items
+            .into_iter()
+            .map(|v| if py::is_none(&v) { Value::Float(it) } else { v })
+            .collect();
         py::set(vm, this, name, vm.types.new_list(out))?;
     }
     py::set(vm, this, "first", Value::Bool(false))?;
@@ -795,7 +966,8 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let layer_name = py::get_or_none(vm, this, "layer_name")?;
     let layers = py::get_or_none(vm, this, "layers")?;
     let adjust_flag = py::get_or_none(vm, this, "adjust_times")?;
-    let adjust_times = ops::truthy(vm, &adjust_flag)? || ops::truthy(vm, &layer_name)? || !py::is_none(&layers);
+    let adjust_times =
+        ops::truthy(vm, &adjust_flag)? || ops::truthy(vm, &layer_name)? || !py::is_none(&layers);
     let minx_v = style(vm, this, "xminimum")?;
     if !py::is_none(&minx_v) {
         width = width.max(compute_raw(vm, &minx_v, width)?);
@@ -887,7 +1059,10 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
                 }
             }
             if w > max_fit {
-                return Err(py::error(vm, format!("Fixed fit width ({w}) is too large.")));
+                return Err(py::error(
+                    vm,
+                    format!("Fixed fit width ({w}) is too large."),
+                ));
             }
             py::set(vm, &rv, "width", Value::Float(w))?;
         }
@@ -901,7 +1076,10 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
                 }
             }
             if h > max_fit {
-                return Err(py::error(vm, format!("Fixed fit height ({h}) is too large.")));
+                return Err(py::error(
+                    vm,
+                    format!("Fixed fit height ({h}) is too large."),
+                ));
             }
             py::set(vm, &rv, "height", Value::Float(h))?;
         }
@@ -912,13 +1090,25 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         return Ok(rv);
     }
     let sp_v = style(vm, this, "spacing")?;
-    let sp = if py::is_none(&sp_v) { 0. } else { py::f64_of(vm, &sp_v)? };
+    let sp = if py::is_none(&sp_v) {
+        0.
+    } else {
+        py::f64_of(vm, &sp_v)?
+    };
     let fs_v = style(vm, this, "first_spacing")?;
-    let fsp = if py::is_none(&fs_v) { sp } else { py::f64_of(vm, &fs_v)? };
+    let fsp = if py::is_none(&fs_v) {
+        sp
+    } else {
+        py::f64_of(vm, &fs_v)?
+    };
     let mut spacings: Vec<f64> = (0..n).map(|i| if i == 0 { fsp } else { sp }).collect();
     let box_wrap = style_b(vm, this, "box_wrap")?;
     let bws_v = style(vm, this, "box_wrap_spacing")?;
-    let box_wrap_spacing = if py::is_none(&bws_v) { 0. } else { py::f64_of(vm, &bws_v)? };
+    let box_wrap_spacing = if py::is_none(&bws_v) {
+        0.
+    } else {
+        py::f64_of(vm, &bws_v)?
+    };
     let xfill = style_b(vm, this, "xfill")?;
     let yfill = style_b(vm, this, "yfill")?;
     let xmin_v = style(vm, this, "xminimum")?;
@@ -927,7 +1117,11 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let yminimum = compute_raw(vm, &ymin_v, height)?;
     let box_justify = style(vm, this, "box_justify")?;
     let ba_v = style(vm, this, "box_align")?;
-    let (mut box_align, use_box_align) = if py::is_none(&ba_v) { (0., false) } else { (py::f64_of(vm, &ba_v)?, true) };
+    let (mut box_align, use_box_align) = if py::is_none(&ba_v) {
+        (0., false)
+    } else {
+        (py::f64_of(vm, &ba_v)?, true)
+    };
     let box_reverse = style_b(vm, this, "box_reverse")?;
     let simple_box_reverse = cfg_b(vm, "simple_box_reverse", false);
     let box_reverse_align = cfg_b(vm, "box_reverse_align", false);
@@ -939,7 +1133,8 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     } else if box_reverse && !box_reverse_align {
         box_align = 1. - box_align;
     }
-    let justify_all = matches!(box_justify, Value::Bool(true)) || box_justify.as_str() == Some("all");
+    let justify_all =
+        matches!(box_justify, Value::Bool(true)) || box_justify.as_str() == Some("all");
     let justify_first = box_justify.as_str() == Some("first");
     let mut line_placements: Vec<Vec<Placement>> = Vec::new();
     let mut line_widths = Vec::new();
@@ -960,8 +1155,18 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     };
     #[allow(clippy::too_many_arguments)]
     fn layout_line(
-        vm: &mut Vm, line: Vec<LineItem>, xfill: f64, yfill: f64, use_justify: bool, use_box_align: bool, box_skip_cfg: bool,
-        line_width: f64, line_height: f64, out: &mut (Vec<Vec<Placement>>, Vec<f64>, Vec<f64>, Vec<bool>), maxx: f64, maxy: f64,
+        vm: &mut Vm,
+        line: Vec<LineItem>,
+        xfill: f64,
+        yfill: f64,
+        use_justify: bool,
+        use_box_align: bool,
+        box_skip_cfg: bool,
+        line_width: f64,
+        line_height: f64,
+        out: &mut (Vec<Vec<Placement>>, Vec<f64>, Vec<f64>, Vec<bool>),
+        maxx: f64,
+        maxy: f64,
     ) -> PyResult<(f64, f64)> {
         let xfill = xfill.max(0.);
         let yfill = yfill.max(0.);
@@ -970,8 +1175,16 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             let b = py::get_or_none(vm, &it.child, "_box_skip")?;
             skips.push(ops::truthy(vm, &b)?);
         }
-        let count = if box_skip_cfg { skips.iter().filter(|s| !**s).count() } else { line.len() };
-        let (xper, yper) = if use_justify || use_box_align || count == 0 { (0., 0.) } else { (xfill / count as f64, yfill / count as f64) };
+        let count = if box_skip_cfg {
+            skips.iter().filter(|s| !**s).count()
+        } else {
+            line.len()
+        };
+        let (xper, yper) = if use_justify || use_box_align || count == 0 {
+            (0., 0.)
+        } else {
+            (xfill / count as f64, yfill / count as f64)
+        };
         let mut placements = Vec::new();
         let (mut lmx, mut lmy) = (0f64, 0f64);
         let mut i = 0f64;
@@ -991,7 +1204,14 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             }
             lmx = x + sw;
             lmy = y + sh;
-            placements.push(Placement { child: it.child, x, y, w: sw, h: sh, surf: it.surf });
+            placements.push(Placement {
+                child: it.child,
+                x,
+                y,
+                w: sw,
+                h: sh,
+                surf: it.surf,
+            });
         }
         out.0.push(placements);
         out.1.push(lmx);
@@ -1011,16 +1231,36 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         for (k, &i) in kids.iter().enumerate() {
             let d = &ch[i];
             use_justify = justify_all || (justify_first && first_line);
-            let skip = { let b = py::get_or_none(vm, d, "_box_skip")?; ops::truthy(vm, &b)? };
+            let skip = {
+                let b = py::get_or_none(vm, d, "_box_skip")?;
+                ops::truthy(vm, &b)?
+            };
             let mut padding = spacings[k];
             if skip && box_skip_cfg {
                 padding = 0.;
             }
-            let rw = if box_wrap { width } else { remwidth - next_padding };
+            let rw = if box_wrap {
+                width
+            } else {
+                remwidth - next_padding
+            };
             let mut surf = render(vm, d, rw, height - y, csts[i], cats[i])?;
             let (mut sw, mut sh) = size(&surf);
             if box_wrap && remwidth - sw - next_padding < 0. && !line.is_empty() {
-                (maxx, maxy) = layout_line(vm, std::mem::take(&mut line), target_width - x, 0., use_justify, use_box_align, box_skip_cfg, line_width, line_height, &mut out, maxx, maxy)?;
+                (maxx, maxy) = layout_line(
+                    vm,
+                    std::mem::take(&mut line),
+                    target_width - x,
+                    0.,
+                    use_justify,
+                    use_box_align,
+                    box_skip_cfg,
+                    line_width,
+                    line_height,
+                    &mut out,
+                    maxx,
+                    maxy,
+                )?;
                 y += line_height + box_wrap_spacing;
                 x = 0.;
                 line_height = 0.;
@@ -1030,14 +1270,33 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
                 surf = render(vm, d, rw, height - y, csts[i], cats[i])?;
                 (sw, sh) = size(&surf);
             }
-            line.push(LineItem { child: d.clone(), pad: (next_padding, 0.), x, y, surf });
+            line.push(LineItem {
+                child: d.clone(),
+                pad: (next_padding, 0.),
+                x,
+                y,
+                surf,
+            });
             line_height = line_height.max(sh);
             x += sw + next_padding;
             remwidth -= sw + next_padding;
             next_padding = padding;
         }
         use_justify = box_justify.as_str() == Some("all");
-        (maxx, maxy) = layout_line(vm, line, target_width - x, 0., use_justify, use_box_align, box_skip_cfg, line_width, line_height, &mut out, maxx, maxy)?;
+        (maxx, maxy) = layout_line(
+            vm,
+            line,
+            target_width - x,
+            0.,
+            use_justify,
+            use_box_align,
+            box_skip_cfg,
+            line_width,
+            line_height,
+            &mut out,
+            maxx,
+            maxy,
+        )?;
     } else {
         minx = if xfill { width } else { xminimum };
         let target_height = if yfill { height } else { yminimum };
@@ -1045,16 +1304,36 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         for (k, &i) in kids.iter().enumerate() {
             let d = &ch[i];
             use_justify = justify_all || (justify_first && first_line);
-            let skip = { let b = py::get_or_none(vm, d, "_box_skip")?; ops::truthy(vm, &b)? };
+            let skip = {
+                let b = py::get_or_none(vm, d, "_box_skip")?;
+                ops::truthy(vm, &b)?
+            };
             let mut padding = spacings[k];
             if skip && box_skip_cfg {
                 padding = 0.;
             }
-            let rh = if box_wrap { height } else { remheight - next_padding };
+            let rh = if box_wrap {
+                height
+            } else {
+                remheight - next_padding
+            };
             let mut surf = render(vm, d, width - x, rh, csts[i], cats[i])?;
             let (mut sw, mut sh) = size(&surf);
             if box_wrap && remheight - sh - next_padding < 0. && !line.is_empty() {
-                (maxx, maxy) = layout_line(vm, std::mem::take(&mut line), 0., target_height - y, use_justify, use_box_align, box_skip_cfg, line_width, line_height, &mut out, maxx, maxy)?;
+                (maxx, maxy) = layout_line(
+                    vm,
+                    std::mem::take(&mut line),
+                    0.,
+                    target_height - y,
+                    use_justify,
+                    use_box_align,
+                    box_skip_cfg,
+                    line_width,
+                    line_height,
+                    &mut out,
+                    maxx,
+                    maxy,
+                )?;
                 x += line_width + box_wrap_spacing;
                 y = 0.;
                 line_width = 0.;
@@ -1064,14 +1343,33 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
                 surf = render(vm, d, width - x, rh, csts[i], cats[i])?;
                 (sw, sh) = size(&surf);
             }
-            line.push(LineItem { child: d.clone(), pad: (0., next_padding), x, y, surf });
+            line.push(LineItem {
+                child: d.clone(),
+                pad: (0., next_padding),
+                x,
+                y,
+                surf,
+            });
             line_width = line_width.max(sw);
             y += sh + next_padding;
             remheight -= sh + next_padding;
             next_padding = padding;
         }
         use_justify = box_justify.as_str() == Some("all");
-        (maxx, maxy) = layout_line(vm, line, 0., target_height - y, use_justify, use_box_align, box_skip_cfg, line_width, line_height, &mut out, maxx, maxy)?;
+        (maxx, maxy) = layout_line(
+            vm,
+            line,
+            0.,
+            target_height - y,
+            use_justify,
+            use_box_align,
+            box_skip_cfg,
+            line_width,
+            line_height,
+            &mut out,
+            maxx,
+            maxy,
+        )?;
     }
     let (line_placements_v, line_widths_v, line_heights_v, line_use_justify_v) = out;
     line_placements.extend(line_placements_v);
@@ -1089,13 +1387,25 @@ fn multibox_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         placements = line_placements.into_iter().flatten().collect();
     } else {
         for (k, line) in line_placements.into_iter().enumerate() {
-            let remaining = if horizontal { width - line_widths[k] } else { height - line_heights[k] };
+            let remaining = if horizontal {
+                width - line_widths[k]
+            } else {
+                height - line_heights[k]
+            };
             let lj = line_use_justify[k];
             let n = line.len();
-            let (jpc, align_offset) = if lj && n > 1 { (remaining / (n as f64 - 1.), 0.) } else { (0., (remaining * box_align).trunc()) };
+            let (jpc, align_offset) = if lj && n > 1 {
+                (remaining / (n as f64 - 1.), 0.)
+            } else {
+                (0., (remaining * box_align).trunc())
+            };
             for (i, mut p) in line.into_iter().enumerate() {
                 let d = align_offset + (i as f64 * jpc).trunc();
-                if horizontal { p.x += d } else { p.y += d }
+                if horizontal {
+                    p.x += d
+                } else {
+                    p.y += d
+                }
                 placements.push(p);
             }
         }
@@ -1158,7 +1468,16 @@ fn multibox_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             Value::Bool(true) => st,
             v => event_time - py::f64_of(vm, &v)?,
         };
-        let r = vm.call_method(&ch[i], "event", vec![ev.clone(), Value::Float(x - xo), Value::Float(y - yo), Value::Float(cst)]);
+        let r = vm.call_method(
+            &ch[i],
+            "event",
+            vec![
+                ev.clone(),
+                Value::Float(x - xo),
+                Value::Float(y - yo),
+                Value::Float(cst),
+            ],
+        );
         match r {
             Ok(v) if !py::is_none(&v) => return Ok(v),
             Ok(_) => {}
@@ -1240,7 +1559,11 @@ fn sizegroup_width(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let members = py::get(vm, this, "members")?;
     let mut maxw = 0f64;
     for m in py::items(vm, &members)? {
-        let old = { let s = render::rs(vm); let mut s = s.borrow_mut(); std::mem::replace(&mut s.sizing, true) };
+        let old = {
+            let s = render::rs(vm);
+            let mut s = s.borrow_mut();
+            std::mem::replace(&mut s.sizing, true)
+        };
         let r = render(vm, &m, w, h, st, at);
         render::rs(vm).borrow_mut().sizing = old;
         maxw = maxw.max(size(&r?).0);
@@ -1253,9 +1576,16 @@ fn sizegroup_width(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn window_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let child = arg_or(args, kw, 1, "child", Value::None);
-    let mut props: Vec<_> = kw.iter().filter(|(k, _)| &**k != "child").cloned().collect();
+    let mut props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| &**k != "child")
+        .cloned()
+        .collect();
     if !props.iter().any(|(k, _)| &**k == "style") {
-        let s = args.get(2).cloned().unwrap_or_else(|| vm.types.new_str("window"));
+        let s = args
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| vm.types.new_str("window"));
         props.push(("style".into(), s));
     }
     container_init(vm, &[this.clone()], &props)?;
@@ -1325,7 +1655,16 @@ fn window_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let groups = size_groups(vm)?;
         let group = vm.call_method(&groups, "get", vec![sg, Value::None])?;
         if !py::is_none(&group) {
-            let w = vm.call_method(&group, "width", vec![Value::Float(width), Value::Float(height), Value::Float(st), Value::Float(at)])?;
+            let w = vm.call_method(
+                &group,
+                "width",
+                vec![
+                    Value::Float(width),
+                    Value::Float(height),
+                    Value::Float(st),
+                    Value::Float(at),
+                ],
+            )?;
             xminimum = xminimum.max(py::f64_of(vm, &w)?);
         }
     }
@@ -1382,7 +1721,17 @@ fn window_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let back = render(vm, &bg, bw, bh, st, at)?;
         place(vm, &bg, &rv, lm, tm, bw, bh, &back, false)?;
     }
-    let off = place(vm, &child, &rv, lm + lp, tm + tp, width - cxm - cxp, height - cym - cyp, &surf, true)?;
+    let off = place(
+        vm,
+        &child,
+        &rv,
+        lm + lp,
+        tm + tp,
+        width - cxm - cxp,
+        height - cym - cyp,
+        &surf,
+        true,
+    )?;
     let fg = style(vm, this, "foreground")?;
     if ops::truthy(vm, &fg)? {
         let fore = render(vm, &fg, bw, bh, st, at)?;
@@ -1392,7 +1741,9 @@ fn window_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if ops::truthy(vm, &own_child)? {
         set_offsets(vm, this, vec![off])?;
     }
-    let ws = vm.types.new_tuple(vec![Value::Float(width), Value::Float(height)]);
+    let ws = vm
+        .types
+        .new_tuple(vec![Value::Float(width), Value::Float(height)]);
     py::set(vm, this, "window_size", ws)?;
     Ok(rv)
 }
@@ -1400,7 +1751,9 @@ fn window_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 /// Carries Transform state across a child replacement (`take_state`).
 pub fn transfer_transform_state(vm: &mut Vm, old: &Value, new: &Value) -> PyResult<()> {
     let tc = py::import_attr(vm, "renpy.display.transform", "Transform")?;
-    let Some(tc) = tc.obj().cloned() else { return Ok(()) };
+    let Some(tc) = tc.obj().cloned() else {
+        return Ok(());
+    };
     let (mut o, mut n) = (old.clone(), new.clone());
     if !ops::isinstance(vm, &o, &tc) && !ops::isinstance(vm, &n, &tc) && ops::eq(vm, &o, &n)? {
         o = vm.call_method(&o, "_target", Vec::new())?;
@@ -1425,7 +1778,11 @@ fn window_event(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let y = py::f64_of(vm, &args.get(3).cloned().unwrap_or(Value::Int(0)))?;
         let ws = py::get_or_none(vm, this, "window_size")?;
         let ws = py::items(vm, &ws).unwrap_or_default();
-        let (w, h) = if ws.len() == 2 { (py::f64_of(vm, &ws[0])?, py::f64_of(vm, &ws[1])?) } else { (0., 0.) };
+        let (w, h) = if ws.len() == 2 {
+            (py::f64_of(vm, &ws[0])?, py::f64_of(vm, &ws[1])?)
+        } else {
+            (0., 0.)
+        };
         let modal = style(vm, this, "modal")?;
         if super::focus::check_modal(vm, &modal, &ev, x, y, Some(w), Some(h))? {
             let ig = py::import_attr(vm, MODULE, "IgnoreLayers")?;
@@ -1452,7 +1809,11 @@ fn dyn_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let mut function = args.get(1).cloned().unwrap_or(Value::None);
     let mut fargs = args.get(2..).map(|a| a.to_vec()).unwrap_or_default();
     let mut fkw: Vec<_> = kw.to_vec();
-    let predict = fkw.iter().position(|(k, _)| &**k == "_predict_function").map(|i| fkw.remove(i).1).unwrap_or(Value::None);
+    let predict = fkw
+        .iter()
+        .position(|(k, _)| &**k == "_predict_function")
+        .map(|i| fkw.remove(i).1)
+        .unwrap_or(Value::None);
     if function.as_str().is_some() {
         fargs = vec![function.clone()];
         fkw.clear();
@@ -1486,7 +1847,11 @@ fn dyn_visit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let at = py::get_or_none(vm, this, "last_at")?;
     vm.call_method(this, "update", vec![st, at])?;
     let c = py::get_or_none(vm, this, "child")?;
-    let items = if ops::truthy(vm, &c)? { vec![c] } else { Vec::new() };
+    let items = if ops::truthy(vm, &c)? {
+        vec![c]
+    } else {
+        Vec::new()
+    };
     Ok(vm.types.new_list(items))
 }
 
@@ -1535,7 +1900,9 @@ fn dyn_update(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
                 }
             }
         }
-        let cb = py::builtin(vm, "per_interact_visitor", |vm, a, _| vm.call_method(&a[0], "per_interact", Vec::new()));
+        let cb = py::builtin(vm, "per_interact_visitor", |vm, a, _| {
+            vm.call_method(&a[0], "per_interact", Vec::new())
+        });
         vm.call_method(&child, "visit_all", vec![cb])?;
         py::set(vm, this, "child", child)?;
     }
@@ -1600,7 +1967,11 @@ fn condition_switch_pick(vm: &mut Vm, switch: &Value) -> PyResult<Value> {
             Some(c) => c,
             None => {
                 let pc = py::import_attr(vm, "renpy.python", "py_compile")?;
-                let c = vm.call(&pc, vec![cond.clone(), vm.types.new_str("eval")], Vec::new())?;
+                let c = vm.call(
+                    &pc,
+                    vec![cond.clone(), vm.types.new_str("eval")],
+                    Vec::new(),
+                )?;
                 ops::setitem(vm, &cache, cond.clone(), c.clone())?;
                 c
             }
@@ -1632,12 +2003,19 @@ fn f_condition_switch_predict(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Va
 
 fn f_condition_switch(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let mut props: Vec<_> = kw.to_vec();
-    let predict_all = props.iter().position(|(k, _)| &**k == "predict_all").map(|i| props.remove(i).1).unwrap_or(Value::None);
+    let predict_all = props
+        .iter()
+        .position(|(k, _)| &**k == "predict_all")
+        .map(|i| props.remove(i).1)
+        .unwrap_or(Value::None);
     if !props.iter().any(|(k, _)| &**k == "style") {
         props.push(("style".into(), vm.types.new_str("default")));
     }
     if args.len() % 2 != 0 {
-        return Err(py::error(vm, "ConditionSwitch takes an even number of arguments"));
+        return Err(py::error(
+            vm,
+            "ConditionSwitch takes an even number of arguments",
+        ));
     }
     let cache = py::import_attr(vm, MODULE, "cond_cache")?;
     let pc = py::import_attr(vm, "renpy.python", "py_compile")?;
@@ -1645,7 +2023,11 @@ fn f_condition_switch(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     for pair in args.chunks(2) {
         let cond = pair[0].clone();
         if !py::is_none(&cond) && !ops::contains(vm, &cache, &cond)? {
-            let c = vm.call(&pc, vec![cond.clone(), vm.types.new_str("eval")], Vec::new())?;
+            let c = vm.call(
+                &pc,
+                vec![cond.clone(), vm.types.new_str("eval")],
+                Vec::new(),
+            )?;
             ops::setitem(vm, &cache, cond.clone(), c)?;
         }
         let d = displayable(vm, &pair[1])?;
@@ -1655,16 +2037,27 @@ fn f_condition_switch(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let pred = py::import_attr(vm, MODULE, "condition_switch_predict")?;
     let dd = py::import_attr(vm, MODULE, "DynamicDisplayable")?;
     let sw = vm.types.new_list(switch);
-    let rv = vm.call(&dd, vec![show, sw, predict_all], vec![("_predict_function".into(), pred)])?;
+    let rv = vm.call(
+        &dd,
+        vec![show, sw, predict_all],
+        vec![("_predict_function".into(), pred)],
+    )?;
     let position = py::import_attr(vm, MODULE, "Position")?;
     vm.call(&position, vec![rv], props)
 }
 
 fn f_showing_switch(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let mut props: Vec<_> = kw.to_vec();
-    let layer = props.iter().position(|(k, _)| &**k == "layer").map(|i| props.remove(i).1).unwrap_or_else(|| vm.types.new_str("master"));
+    let layer = props
+        .iter()
+        .position(|(k, _)| &**k == "layer")
+        .map(|i| props.remove(i).1)
+        .unwrap_or_else(|| vm.types.new_str("master"));
     if args.len() % 2 != 0 {
-        return Err(py::error(vm, "ShowingSwitch takes an even number of positional arguments"));
+        return Err(py::error(
+            vm,
+            "ShowingSwitch takes an even number of positional arguments",
+        ));
     }
     let mut condargs = Vec::new();
     for pair in args.chunks(2) {
@@ -1679,7 +2072,8 @@ fn f_showing_switch(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             let t = vm.types.new_tuple(parts);
             let tr = ops::repr(vm, &t)?;
             let lr = ops::repr(vm, &layer)?;
-            vm.types.new_string(format!("renpy.showing({tr}, layer={lr})"))
+            vm.types
+                .new_string(format!("renpy.showing({tr}, layer={lr})"))
         };
         condargs.push(cond);
         condargs.push(pair[1].clone());
@@ -1692,7 +2086,11 @@ fn f_showing_switch(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn one_child_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let child = arg_or(args, kw, 1, "child", Value::None);
-    let props: Vec<_> = kw.iter().filter(|(k, _)| &**k != "child").cloned().collect();
+    let props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| &**k != "child")
+        .cloned()
+        .collect();
     container_init(vm, &[this.clone()], &props)?;
     vm.call_method(this, "add", vec![child])?;
     Ok(Value::None)
@@ -1710,7 +2108,11 @@ fn f_crop(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let rect = arg_or(args, kw, 0, "rect", Value::None);
     let child = arg_or(args, kw, 1, "child", Value::None);
     let t = py::import_attr(vm, "renpy.display.motion", "Transform")?;
-    let mut props: Vec<_> = kw.iter().filter(|(k, _)| &**k != "rect" && &**k != "child").cloned().collect();
+    let mut props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| &**k != "rect" && &**k != "child")
+        .cloned()
+        .collect();
     props.push(("crop".into(), rect));
     vm.call(&t, vec![child], props)
 }
@@ -1722,26 +2124,44 @@ const SIDE_POSITIONS: [&str; 9] = ["tl", "t", "tr", "r", "br", "b", "bl", "l", "
 fn side_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let positions = arg_or(args, kw, 1, "positions", Value::None);
-    let mut props: Vec<_> = kw.iter().filter(|(k, _)| &**k != "positions").cloned().collect();
+    let mut props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| &**k != "positions")
+        .cloned()
+        .collect();
     if !props.iter().any(|(k, _)| &**k == "style") {
-        let s = args.get(2).cloned().unwrap_or_else(|| vm.types.new_str("side"));
+        let s = args
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| vm.types.new_str("side"));
         props.push(("style".into(), s));
     }
     container_init(vm, &[this.clone()], &props)?;
     let pos: Vec<String> = match positions.as_str() {
         Some(s) => s.split_whitespace().map(str::to_owned).collect(),
-        None => py::items(vm, &positions)?.iter().map(|v| v.as_str().unwrap_or("").to_owned()).collect(),
+        None => py::items(vm, &positions)?
+            .iter()
+            .map(|v| v.as_str().unwrap_or("").to_owned())
+            .collect(),
     };
     let mut seen = std::collections::HashSet::new();
     for p in &pos {
         if !SIDE_POSITIONS.contains(&p.as_str()) {
-            return Err(py::error(vm, format!("Side used with impossible position '{p}'.")));
+            return Err(py::error(
+                vm,
+                format!("Side used with impossible position '{p}'."),
+            ));
         }
         if !seen.insert(p.clone()) {
-            return Err(py::error(vm, format!("Side used with duplicate position '{p}'.")));
+            return Err(py::error(
+                vm,
+                format!("Side used with duplicate position '{p}'."),
+            ));
         }
     }
-    let t = vm.types.new_tuple(pos.iter().map(|p| vm.types.new_str(p)).collect());
+    let t = vm
+        .types
+        .new_tuple(pos.iter().map(|p| vm.types.new_str(p)).collect());
     py::set(vm, this, "positions", t)?;
     py::set(vm, this, "sized", Value::Bool(false))?;
     Ok(Value::None)
@@ -1771,7 +2191,13 @@ fn side_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (width, height, st, at) = rargs(vm, args)?;
     let ch = children(vm, this)?;
-    let positions: Vec<String> = { let p = py::get(vm, this, "positions")?; py::items(vm, &p)?.iter().map(|v| v.as_str().unwrap_or("").to_owned()).collect() };
+    let positions: Vec<String> = {
+        let p = py::get(vm, this, "positions")?;
+        py::items(vm, &p)?
+            .iter()
+            .map(|v| v.as_str().unwrap_or("").to_owned())
+            .collect()
+    };
     if cfg_b(vm, "developer", false) && positions.len() != ch.len() {
         return Err(py::error(vm, "A side has the wrong number of children."));
     }
@@ -1781,30 +2207,62 @@ fn side_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         pos_d.insert(p.as_str(), d.clone());
         pos_i.insert(p.as_str(), i);
     }
-    let sized = { let v = py::get_or_none(vm, this, "sized")?; ops::truthy(vm, &v)? };
-    let fget = |vm: &mut Vm, n: &str| -> PyResult<f64> { let v = py::get_or_none(vm, this, n)?; if py::is_none(&v) { Ok(0.) } else { py::f64_of(vm, &v) } };
+    let sized = {
+        let v = py::get_or_none(vm, this, "sized")?;
+        ops::truthy(vm, &v)?
+    };
+    let fget = |vm: &mut Vm, n: &str| -> PyResult<f64> {
+        let v = py::get_or_none(vm, this, n)?;
+        if py::is_none(&v) {
+            Ok(0.)
+        } else {
+            py::f64_of(vm, &v)
+        }
+    };
     let (cwidth, cheight, top, bottom, left, right);
     if !sized {
         py::set(vm, this, "sized", Value::Bool(true))?;
         let sp_v = style(vm, this, "spacing")?;
-        let sp = if py::is_none(&sp_v) { 0. } else { py::f64_of(vm, &sp_v)? };
-        let spacer = |a: &str, b: &str, c: &str, axis: f64| if pos_d.contains_key(a) || pos_d.contains_key(b) || pos_d.contains_key(c) { (sp, axis - sp) } else { (0., axis) };
+        let sp = if py::is_none(&sp_v) {
+            0.
+        } else {
+            py::f64_of(vm, &sp_v)?
+        };
+        let spacer = |a: &str, b: &str, c: &str, axis: f64| {
+            if pos_d.contains_key(a) || pos_d.contains_key(b) || pos_d.contains_key(c) {
+                (sp, axis - sp)
+            } else {
+                (0., axis)
+            }
+        };
         let (ls, w1) = spacer("tl", "l", "bl", width);
         let (rs, w2) = spacer("tr", "r", "br", w1);
         let (ts, h1) = spacer("tl", "t", "tr", height);
         let (bs, h2) = spacer("bl", "b", "br", h1);
-        for (n, v) in [("left_space", ls), ("right_space", rs), ("top_space", ts), ("bottom_space", bs)] {
+        for (n, v) in [
+            ("left_space", ls),
+            ("right_space", rs),
+            ("top_space", ts),
+            ("bottom_space", bs),
+        ] {
             py::set(vm, this, n, Value::Float(v))?;
         }
         let (w, h) = (w2, h2);
-        let mut sizeit = |vm: &mut Vm, pos: &str, w: f64, h: f64, ow: f64, oh: f64| -> PyResult<(f64, f64)> {
-            let Some(d) = pos_d.get(pos) else { return Ok((ow, oh)) };
-            let old = { let s = render::rs(vm); let mut s = s.borrow_mut(); std::mem::replace(&mut s.sizing, true) };
-            let r = render(vm, d, w, h, st, at);
-            render::rs(vm).borrow_mut().sizing = old;
-            let (rw, rh) = size(&r?);
-            Ok((ow.max(rw), oh.max(rh)))
-        };
+        let mut sizeit =
+            |vm: &mut Vm, pos: &str, w: f64, h: f64, ow: f64, oh: f64| -> PyResult<(f64, f64)> {
+                let Some(d) = pos_d.get(pos) else {
+                    return Ok((ow, oh));
+                };
+                let old = {
+                    let s = render::rs(vm);
+                    let mut s = s.borrow_mut();
+                    std::mem::replace(&mut s.sizing, true)
+                };
+                let r = render(vm, d, w, h, st, at);
+                render::rs(vm).borrow_mut().sizing = old;
+                let (rw, rh) = size(&r?);
+                Ok((ow.max(rw), oh.max(rh)))
+            };
         let (mut cw, mut chh) = sizeit(vm, "c", w, h, 0., 0.)?;
         let (mut l, mut r, mut t, mut b) = (0., 0., 0., 0.);
         (cw, t) = sizeit(vm, "t", cw, h, cw, t)?;
@@ -1815,7 +2273,14 @@ fn side_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         (l, b) = sizeit(vm, "bl", l, b, l, b)?;
         (r, t) = sizeit(vm, "tr", r, t, r, t)?;
         (r, b) = sizeit(vm, "br", r, b, r, b)?;
-        for (n, v) in [("cwidth", cw), ("cheight", chh), ("top", t), ("bottom", b), ("left", l), ("right", r)] {
+        for (n, v) in [
+            ("cwidth", cw),
+            ("cheight", chh),
+            ("top", t),
+            ("bottom", b),
+            ("left", l),
+            ("right", r),
+        ] {
             py::set(vm, this, n, Value::Float(v))?;
         }
         (cwidth, cheight, top, bottom, left, right) = (cw, chh, t, b, l, r);
@@ -1833,8 +2298,16 @@ fn side_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let rights = fget(vm, "right_space")?;
     let tops = fget(vm, "top_space")?;
     let bottoms = fget(vm, "bottom_space")?;
-    let mut cwidth = if style_b(vm, this, "xfill")? { width } else { cwidth };
-    let mut cheight = if style_b(vm, this, "yfill")? { height } else { cheight };
+    let mut cwidth = if style_b(vm, this, "xfill")? {
+        width
+    } else {
+        cwidth
+    };
+    let mut cheight = if style_b(vm, this, "yfill")? {
+        height
+    } else {
+        cheight
+    };
     cwidth = cwidth.min(width - left - lefts - right - rights);
     cheight = cheight.min(height - top - tops - bottom - bottoms);
     let mut c_rend = None;
@@ -1845,20 +2318,39 @@ fn side_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         cheight = cheight.max(h);
         c_rend = Some(r);
     }
-    let rv = new(vm, left + lefts + cwidth + rights + right, top + tops + cheight + bottoms + bottom);
+    let rv = new(
+        vm,
+        left + lefts + cwidth + rights + right,
+        top + tops + cheight + bottoms + bottom,
+    );
     let (col1, col2, col3) = (0., left + lefts, left + lefts + cwidth + rights);
     let (row1, row2, row3) = (0., top + tops, top + tops + cheight + bottoms);
     let mut order = vec![
-        ("c", col2, row2, cwidth, cheight), ("t", col2, row1, cwidth, top), ("r", col3, row2, right, cheight),
-        ("b", col2, row3, cwidth, bottom), ("l", col1, row2, left, cheight), ("tl", col1, row1, left, top),
-        ("tr", col3, row1, right, top), ("br", col3, row3, right, bottom), ("bl", col1, row3, left, bottom),
+        ("c", col2, row2, cwidth, cheight),
+        ("t", col2, row1, cwidth, top),
+        ("r", col3, row2, right, cheight),
+        ("b", col2, row3, cwidth, bottom),
+        ("l", col1, row2, left, cheight),
+        ("tl", col1, row1, left, top),
+        ("tr", col3, row1, right, top),
+        ("br", col3, row3, right, bottom),
+        ("bl", col1, row3, left, bottom),
     ];
     if cfg_b(vm, "keep_side_render_order", true) {
-        order.sort_by_key(|(p, ..)| positions.iter().position(|q| q == p).unwrap_or(positions.len()));
+        order.sort_by_key(|(p, ..)| {
+            positions
+                .iter()
+                .position(|q| q == p)
+                .unwrap_or(positions.len())
+        });
     }
     for (pos, x, y, w, h) in order {
         let Some(d) = pos_d.get(pos) else { continue };
-        let rend = if pos == "c" { c_rend.clone().unwrap() } else { render(vm, d, w, h, st, at)? };
+        let rend = if pos == "c" {
+            c_rend.clone().unwrap()
+        } else {
+            render(vm, d, w, h, st, at)?
+        };
         offsets[pos_i[pos]] = place(vm, d, &rv, x, y, w, h, &rend, true)?;
     }
     set_offsets(vm, this, offsets)?;
@@ -1869,8 +2361,26 @@ fn side_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn alpha_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["start", "end", "time", "child", "repeat", "bounce", "anim_timebase", "time_warp"];
-    let mut vals = vec![Value::None, Value::None, Value::None, Value::None, Value::Bool(false), Value::Bool(false), Value::Bool(false), Value::None];
+    let names = [
+        "start",
+        "end",
+        "time",
+        "child",
+        "repeat",
+        "bounce",
+        "anim_timebase",
+        "time_warp",
+    ];
+    let mut vals = vec![
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::Bool(false),
+        Value::Bool(false),
+        Value::Bool(false),
+        Value::None,
+    ];
     for (i, v) in args[1..].iter().enumerate().take(names.len()) {
         vals[i] = v.clone();
     }
@@ -1884,7 +2394,11 @@ fn alpha_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     super::core::d_init(vm, &[this.clone()], &props)?;
     let child = displayable(vm, &vals[3])?;
     for (i, n) in names.iter().enumerate() {
-        let v = if *n == "child" { child.clone() } else { vals[i].clone() };
+        let v = if *n == "child" {
+            child.clone()
+        } else {
+            vals[i].clone()
+        };
         py::set(vm, this, n, v)?;
     }
     Ok(Value::None)
@@ -1898,12 +2412,27 @@ fn child_visit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn alpha_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (w, h, st, at) = rargs(vm, args)?;
-    let atb = { let v = py::get_or_none(vm, this, "anim_timebase")?; ops::truthy(vm, &v)? };
+    let atb = {
+        let v = py::get_or_none(vm, this, "anim_timebase")?;
+        ops::truthy(vm, &v)?
+    };
     let t = if atb { at } else { st };
-    let time = { let v = py::get_or_none(vm, this, "time")?; if py::is_none(&v) { 0. } else { py::f64_of(vm, &v)? } };
+    let time = {
+        let v = py::get_or_none(vm, this, "time")?;
+        if py::is_none(&v) {
+            0.
+        } else {
+            py::f64_of(vm, &v)?
+        }
+    };
     let mut done = if time != 0. { (t / time).min(1.) } else { 1. };
-    let less = py::import_attr(vm, "renpy.game", "less_updates").map(|v| ops::truthy(vm, &v).unwrap_or(false)).unwrap_or(false);
-    let repeat = { let v = py::get_or_none(vm, this, "repeat")?; ops::truthy(vm, &v)? };
+    let less = py::import_attr(vm, "renpy.game", "less_updates")
+        .map(|v| ops::truthy(vm, &v).unwrap_or(false))
+        .unwrap_or(false);
+    let repeat = {
+        let v = py::get_or_none(vm, this, "repeat")?;
+        ops::truthy(vm, &v)?
+    };
     if less {
         done = 1.;
     } else if repeat {
@@ -1917,8 +2446,14 @@ fn alpha_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let r = vm.call(&warp, vec![Value::Float(done)], Vec::new())?;
         done = py::f64_of(vm, &r)?;
     }
-    let s = { let v = py::get(vm, this, "start")?; py::f64_of(vm, &v)? };
-    let e = { let v = py::get(vm, this, "end")?; py::f64_of(vm, &v)? };
+    let s = {
+        let v = py::get(vm, this, "start")?;
+        py::f64_of(vm, &v)?
+    };
+    let e = {
+        let v = py::get(vm, this, "end")?;
+        py::f64_of(vm, &v)?
+    };
     let alpha = s + done * (e - s);
     let child = py::get(vm, this, "child")?;
     let rend = render(vm, &child, w, h, st, at)?;
@@ -1938,7 +2473,11 @@ fn adjust_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let child = arg_or(args, kw, 1, "child", Value::None);
     let s = arg_or(args, kw, 2, "start_time", Value::None);
     let a = arg_or(args, kw, 3, "anim_time", Value::None);
-    let props: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "child" | "start_time" | "anim_time")).cloned().collect();
+    let props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "child" | "start_time" | "anim_time"))
+        .cloned()
+        .collect();
     container_init(vm, &[this.clone()], &props)?;
     py::set(vm, this, "start_time", s)?;
     py::set(vm, this, "anim_time", a)?;
@@ -1958,7 +2497,11 @@ fn adjusted_times(vm: &mut Vm, this: &Value) -> PyResult<(f64, f64)> {
                 py::set(vm, this, n, v.clone())?;
             }
         }
-        out[i] = if py::is_none(&v) { 0. } else { ft - py::f64_of(vm, &v)? };
+        out[i] = if py::is_none(&v) {
+            0.
+        } else {
+            ft - py::f64_of(vm, &v)?
+        };
     }
     Ok((out[0], out[1]))
 }
@@ -1995,7 +2538,11 @@ fn match_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let child = arg_or(args, kw, 1, "child", Value::None);
     let target = arg_or(args, kw, 2, "target", Value::None);
-    let props: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "child" | "target")).cloned().collect();
+    let props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "child" | "target"))
+        .cloned()
+        .collect();
     container_init(vm, &[this.clone()], &props)?;
     py::set(vm, this, "target", target)?;
     vm.call_method(this, "add", vec![child])?;
@@ -2018,9 +2565,16 @@ fn match_render(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn tile_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let child = arg_or(args, kw, 1, "child", Value::None);
-    let mut props: Vec<_> = kw.iter().filter(|(k, _)| &**k != "child").cloned().collect();
+    let mut props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| &**k != "child")
+        .cloned()
+        .collect();
     if !props.iter().any(|(k, _)| &**k == "style") {
-        let s = args.get(2).cloned().unwrap_or_else(|| vm.types.new_str("tile"));
+        let s = args
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| vm.types.new_str("tile"));
         props.push(("style".into(), s));
     }
     container_init(vm, &[this.clone()], &props)?;
@@ -2035,7 +2589,12 @@ fn tile_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let cr = render(vm, &child, width, height, st, at)?;
     let (cw, ch) = size(&cr);
     let rv = new(vm, width, height);
-    let (w, h, cw, ch) = (width.trunc() as i64, height.trunc() as i64, cw.trunc() as i64, ch.trunc() as i64);
+    let (w, h, cw, ch) = (
+        width.trunc() as i64,
+        height.trunc() as i64,
+        cw.trunc() as i64,
+        ch.trunc() as i64,
+    );
     if cw <= 0 || ch <= 0 {
         return Ok(rv);
     }
@@ -2045,7 +2604,11 @@ fn tile_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         while x < w {
             let ccw = cw.min(w - x);
             let cch = ch.min(h - y);
-            let ccr = if ccw < cw || cch < ch { render::subsurface(vm, &cr, [0., 0., ccw as f64, cch as f64], false, false)? } else { cr.clone() };
+            let ccr = if ccw < cw || cch < ch {
+                render::subsurface(vm, &cr, [0., 0., ccw as f64, cch as f64], false, false)?
+            } else {
+                cr.clone()
+            };
             blit_nofocus(vm, &rv, &ccr, x as f64, y as f64)?;
             x += cw;
         }
@@ -2058,7 +2621,11 @@ fn flatten_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let child = arg_or(args, kw, 1, "child", Value::None);
     let dr = arg_or(args, kw, 2, "drawable_resolution", Value::Bool(true));
-    let props: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "child" | "drawable_resolution")).cloned().collect();
+    let props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "child" | "drawable_resolution"))
+        .cloned()
+        .collect();
     container_init(vm, &[this.clone()], &props)?;
     vm.call_method(this, "add", vec![child])?;
     py::set(vm, this, "drawable_resolution", dr)?;
@@ -2079,7 +2646,11 @@ fn alphamask_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let child = arg_or(args, kw, 1, "child", Value::None);
     let mask = arg_or(args, kw, 2, "mask", Value::None);
     let invert = arg_or(args, kw, 3, "invert", Value::Bool(false));
-    let props: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "child" | "mask" | "invert")).cloned().collect();
+    let props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "child" | "mask" | "invert"))
+        .cloned()
+        .collect();
     container_init(vm, &[this.clone()], &props)?;
     let mask = displayable(vm, &mask)?;
     py::set(vm, this, "mask", mask.clone())?;
@@ -2105,7 +2676,10 @@ fn alphamask_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let cr = render(vm, &child, w, h, st, at)?;
     let (cw, ch) = size(&cr);
     let mr = render(vm, &mask, cw, ch, st, at)?;
-    let invert = { let v = py::get_or_none(vm, this, "invert")?; ops::truthy(vm, &v)? };
+    let invert = {
+        let v = py::get_or_none(vm, this, "invert")?;
+        ops::truthy(vm, &v)?
+    };
     let rv = new(vm, cw, ch);
     blit(vm, &rv, &cr, 0., 0.)?;
     let mask = render::source_of(vm, &mr)?;
@@ -2121,8 +2695,22 @@ fn alphamask_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn nearrect_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["child", "rect", "focus", "preferred_side", "invert_offsets", "replaces"];
-    let mut vals = vec![Value::None, Value::None, Value::None, Value::Bool(false), Value::Bool(false), Value::None];
+    let names = [
+        "child",
+        "rect",
+        "focus",
+        "preferred_side",
+        "invert_offsets",
+        "replaces",
+    ];
+    let mut vals = vec![
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::Bool(false),
+        Value::Bool(false),
+        Value::None,
+    ];
     for (i, v) in args[1..].iter().enumerate().take(names.len()) {
         vals[i] = v.clone();
     }
@@ -2144,21 +2732,35 @@ fn nearrect_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let g = py::import_attr(vm, "renpy.display.focus", "get_focus_rect")?;
         rect = vm.call(&g, vec![vals[2].clone()], Vec::new())?;
     } else if py::is_none(&rect) {
-        return Err(py::error(vm, "A NearRect requires either a focus or a rect parameter."));
+        return Err(py::error(
+            vm,
+            "A NearRect requires either a focus or a rect parameter.",
+        ));
     }
     py::set(vm, this, "parent_rect", rect)?;
     py::set(vm, this, "focus_rect", vals[2].clone())?;
-    let mut side = if ops::truthy(vm, &vals[3])? { vals[3].clone() } else { vm.types.new_str("bottom") };
+    let mut side = if ops::truthy(vm, &vals[3])? {
+        vals[3].clone()
+    } else {
+        vm.types.new_str("bottom")
+    };
     if prefer_top {
         side = vm.types.new_str("top");
     }
     if !matches!(side.as_str(), Some("left" | "top" | "right" | "bottom")) {
         let r = ops::repr(vm, &side)?;
-        return Err(py::error(vm, format!("preferred_side used with impossible position {r}.")));
+        return Err(py::error(
+            vm,
+            format!("preferred_side used with impossible position {r}."),
+        ));
     }
     py::set(vm, this, "preferred_side", side)?;
     py::set(vm, this, "invert_offsets", vals[4].clone())?;
-    let hide = if py::is_none(&vals[5]) { Value::None } else { py::get_or_none(vm, &vals[5], "hide_parent_rect")? };
+    let hide = if py::is_none(&vals[5]) {
+        Value::None
+    } else {
+        py::get_or_none(vm, &vals[5], "hide_parent_rect")?
+    };
     py::set(vm, this, "hide_parent_rect", hide)?;
     if !py::is_none(&vals[0]) {
         vm.call_method(this, "add", vec![vals[0].clone()])?;
@@ -2177,9 +2779,17 @@ fn nearrect_per_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> 
     let parent = py::get_or_none(vm, this, "parent_rect")?;
     let child = py::get_or_none(vm, this, "child")?;
     if !py::is_none(&rect) && py::is_none(&parent) {
-        vm.call_method(&child, "set_transform_event", vec![vm.types.new_str("show")])?;
+        vm.call_method(
+            &child,
+            "set_transform_event",
+            vec![vm.types.new_str("show")],
+        )?;
     } else if py::is_none(&rect) && !py::is_none(&parent) {
-        vm.call_method(&child, "set_transform_event", vec![vm.types.new_str("hide")])?;
+        vm.call_method(
+            &child,
+            "set_transform_event",
+            vec![vm.types.new_str("hide")],
+        )?;
         py::set(vm, this, "hide_parent_rect", parent.clone())?;
     }
     if !ops::eq(vm, &parent, &rect)? {
@@ -2196,7 +2806,11 @@ fn nearrect_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let zero = offset(vm, 0., 0.);
     let pick = |vm: &mut Vm| -> PyResult<Value> {
         let p = py::get_or_none(vm, this, "parent_rect")?;
-        if ops::truthy(vm, &p)? { Ok(p) } else { py::get_or_none(vm, this, "hide_parent_rect") }
+        if ops::truthy(vm, &p)? {
+            Ok(p)
+        } else {
+            py::get_or_none(vm, this, "hide_parent_rect")
+        }
     };
     let rect = pick(vm)?;
     if py::is_none(&rect) {
@@ -2204,15 +2818,27 @@ fn nearrect_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         return Ok(rv);
     }
     let [px, py_, pw, ph] = render::rect4(vm, &rect)?;
-    let side = { let v = py::get(vm, this, "preferred_side")?; py::string(vm, &v)? };
+    let side = {
+        let v = py::get(vm, this, "preferred_side")?;
+        py::string(vm, &v)?
+    };
     let vertical = side == "top" || side == "bottom";
-    let (aw, ah) = if vertical { (width, py_.max(height - py_ - ph)) } else { (px.max(width - px - pw), height) };
+    let (aw, ah) = if vertical {
+        (width, py_.max(height - py_ - ph))
+    } else {
+        (px.max(width - px - pw), height)
+    };
     let child = py::get(vm, this, "child")?;
     let cr = render(vm, &child, aw, ah, st, at)?;
     let (cw, ch) = size(&cr);
     let tc = py::import_attr(vm, "renpy.display.motion", "Transform")?;
     let is_t = tc.obj().is_some_and(|c| ops::isinstance(vm, &child, c));
-    let clear_hide = if is_t { let hr = py::get_or_none(vm, &child, "hide_response")?; ops::truthy(vm, &hr)? } else { true };
+    let clear_hide = if is_t {
+        let hr = py::get_or_none(vm, &child, "hide_response")?;
+        ops::truthy(vm, &hr)?
+    } else {
+        true
+    };
     if clear_hide {
         py::set(vm, this, "hide_parent_rect", Value::None)?;
     }
@@ -2223,7 +2849,13 @@ fn nearrect_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let p = vm.call_method(&child, "get_placement", Vec::new())?;
     let p = py::items(vm, &p)?;
-    let num = |vm: &mut Vm, v: &Value| -> PyResult<f64> { if py::is_none(v) { Ok(0.) } else { py::f64_of(vm, v) } };
+    let num = |vm: &mut Vm, v: &Value| -> PyResult<f64> {
+        if py::is_none(v) {
+            Ok(0.)
+        } else {
+            py::f64_of(vm, v)
+        }
+    };
     let mut xoffset = num(vm, &p[4])?;
     let mut yoffset = num(vm, &p[5])?;
     let (mut lx, mut ly) = (0f64, 0f64);
@@ -2245,16 +2877,51 @@ fn nearrect_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         lx = px - cw;
         on_pref = side == "left";
     }
-    let xpos = compute_raw(vm, &if py::is_none(&p[0]) { Value::Int(0) } else { p[0].clone() }, pw)?;
-    let xanchor = compute_raw(vm, &if py::is_none(&p[2]) { Value::Int(0) } else { p[2].clone() }, cw)?;
-    let ypos = compute_raw(vm, &if py::is_none(&p[1]) { Value::Int(0) } else { p[1].clone() }, ph)?;
-    let yanchor = compute_raw(vm, &if py::is_none(&p[3]) { Value::Int(0) } else { p[3].clone() }, ch)?;
+    let xpos = compute_raw(
+        vm,
+        &if py::is_none(&p[0]) {
+            Value::Int(0)
+        } else {
+            p[0].clone()
+        },
+        pw,
+    )?;
+    let xanchor = compute_raw(
+        vm,
+        &if py::is_none(&p[2]) {
+            Value::Int(0)
+        } else {
+            p[2].clone()
+        },
+        cw,
+    )?;
+    let ypos = compute_raw(
+        vm,
+        &if py::is_none(&p[1]) {
+            Value::Int(0)
+        } else {
+            p[1].clone()
+        },
+        ph,
+    )?;
+    let yanchor = compute_raw(
+        vm,
+        &if py::is_none(&p[3]) {
+            Value::Int(0)
+        } else {
+            p[3].clone()
+        },
+        ch,
+    )?;
     if vertical {
         lx = (px + xpos - xanchor).min(width - cw).max(0.);
     } else {
         ly = (py_ + ypos - yanchor).min(height - ch).max(0.);
     }
-    let inv = { let v = py::get_or_none(vm, this, "invert_offsets")?; ops::truthy(vm, &v)? };
+    let inv = {
+        let v = py::get_or_none(vm, this, "invert_offsets")?;
+        ops::truthy(vm, &v)?
+    };
     if inv && !on_pref {
         xoffset = -xoffset;
         yoffset = -yoffset;
@@ -2288,8 +2955,16 @@ fn nearrect_tts(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn layer_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let layer = arg_or(args, kw, 1, "layer", Value::None);
-    let mut props: Vec<_> = kw.iter().filter(|(k, _)| &**k != "layer").cloned().collect();
-    let clipping = props.iter().position(|(k, _)| &**k == "clipping").map(|i| props.remove(i).1).unwrap_or(Value::Bool(true));
+    let mut props: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| &**k != "layer")
+        .cloned()
+        .collect();
+    let clipping = props
+        .iter()
+        .position(|(k, _)| &**k == "clipping")
+        .map(|i| props.remove(i).1)
+        .unwrap_or(Value::Bool(true));
     py::set(vm, this, "layer", layer)?;
     py::set(vm, this, "_clipping", clipping)?;
     container_init(vm, &[this.clone()], &props)?;
@@ -2336,131 +3011,309 @@ fn layer_per_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("Composite", f_composite),
-        ("LiveComposite", f_composite),
-        ("Fixed", f_fixed),
-        ("default_modal_function", f_default_modal_function),
-        ("check_modal", f_check_modal),
-        ("dynamic_displayable_compat", dyn_compat),
-        ("condition_switch_show", f_condition_switch_show),
-        ("condition_switch_predict", f_condition_switch_predict),
-        ("ConditionSwitch", f_condition_switch),
-        ("ShowingSwitch", f_showing_switch),
-        ("Crop", f_crop),
-        ("LiveCrop", f_crop),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("Composite", f_composite),
+            ("LiveComposite", f_composite),
+            ("Fixed", f_fixed),
+            ("default_modal_function", f_default_modal_function),
+            ("check_modal", f_check_modal),
+            ("dynamic_displayable_compat", dyn_compat),
+            ("condition_switch_show", f_condition_switch_show),
+            ("condition_switch_predict", f_condition_switch_predict),
+            ("ConditionSwitch", f_condition_switch),
+            ("ShowingSwitch", f_showing_switch),
+            ("Crop", f_crop),
+            ("LiveCrop", f_crop),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     let d = Value::Obj(super::core::displayable_class(vm));
-    let c = |vm: &mut Vm, name: &str, bases: &[Value], methods: Methods, attrs: &[(&str, Value)]| -> PyResult<Value> {
+    let c = |vm: &mut Vm,
+             name: &str,
+             bases: &[Value],
+             methods: Methods,
+             attrs: &[(&str, Value)]|
+     -> PyResult<Value> {
         let cls = py::class(vm, MODULE, name, bases, methods, attrs)?;
         let v = Value::Obj(cls);
         crysirror_python::modules::set(vm, &m, name, v.clone());
         Ok(v)
     };
-    c(vm, "Null", &[d.clone()], &[("__init__", null_init), ("render", null_render)], &[])?;
+    c(
+        vm,
+        "Null",
+        &[d.clone()],
+        &[("__init__", null_init), ("render", null_render)],
+        &[],
+    )?;
     let list_t = Value::Obj(vm.types.list.clone());
-    let container = c(vm, "Container", &[d.clone()], &[
-        ("__init__", container_init),
-        ("set_transform_event", container_set_transform_event),
-        ("_handles_event", container_handles_event),
-        ("set_style_prefix", container_set_style_prefix),
-        ("_duplicate", container_duplicate),
-        ("_unique", container_unique),
-        ("_in_current_store", container_in_current_store),
-        ("add", container_add),
-        ("_clear", container_clear),
-        ("remove", container_remove),
-        ("update", container_update),
-        ("render", container_render),
-        ("event", container_event),
-        ("visit", container_visit),
-        ("__enter__", container_enter),
-        ("__exit__", container_exit),
-    ], &[("_list_type", list_t)])?;
-    c(vm, "Position", &[container.clone()], &[("__init__", position_init), ("render", position_render), ("get_placement", position_get_placement)], &[])?;
-    c(vm, "Grid", &[container.clone()], &[("__init__", grid_init), ("render", grid_render), ("add", grid_add), ("per_interact", grid_per_interact)], &[("allow_underfull", Value::None)])?;
+    let container = c(
+        vm,
+        "Container",
+        &[d.clone()],
+        &[
+            ("__init__", container_init),
+            ("set_transform_event", container_set_transform_event),
+            ("_handles_event", container_handles_event),
+            ("set_style_prefix", container_set_style_prefix),
+            ("_duplicate", container_duplicate),
+            ("_unique", container_unique),
+            ("_in_current_store", container_in_current_store),
+            ("add", container_add),
+            ("_clear", container_clear),
+            ("remove", container_remove),
+            ("update", container_update),
+            ("render", container_render),
+            ("event", container_event),
+            ("visit", container_visit),
+            ("__enter__", container_enter),
+            ("__exit__", container_exit),
+        ],
+        &[("_list_type", list_t)],
+    )?;
+    c(
+        vm,
+        "Position",
+        &[container.clone()],
+        &[
+            ("__init__", position_init),
+            ("render", position_render),
+            ("get_placement", position_get_placement),
+        ],
+        &[],
+    )?;
+    c(
+        vm,
+        "Grid",
+        &[container.clone()],
+        &[
+            ("__init__", grid_init),
+            ("render", grid_render),
+            ("add", grid_add),
+            ("per_interact", grid_per_interact),
+        ],
+        &[("allow_underfull", Value::None)],
+    )?;
     let exc = Value::Obj(vm.types.exc("Exception"));
     c(vm, "IgnoreLayers", &[exc], &[], &[])?;
-    c(vm, "MultiBox", &[container.clone()], &[
-        ("__init__", multibox_init),
-        ("_clear", multibox_clear),
-        ("_in_current_store", multibox_in_current_store),
-        ("_classname", multibox_classname),
-        ("add", multibox_add),
-        ("append_scene_list", multibox_append_scene_list),
-        ("update_times", multibox_update_times),
-        ("render", multibox_render),
-        ("event", multibox_event),
-        ("_tts", multibox_tts),
-    ], &[
-        ("layer_name", Value::None), ("first", Value::Bool(true)), ("order_reverse", Value::Bool(false)), ("layout", Value::None),
-        ("_layer_at_list", Value::None), ("_camera_list", Value::None), ("layers", Value::None), ("untransformed_layer", Value::None),
-        ("adjust_times", Value::Bool(false)), ("scene_list", Value::None),
-    ])?;
+    c(
+        vm,
+        "MultiBox",
+        &[container.clone()],
+        &[
+            ("__init__", multibox_init),
+            ("_clear", multibox_clear),
+            ("_in_current_store", multibox_in_current_store),
+            ("_classname", multibox_classname),
+            ("add", multibox_add),
+            ("append_scene_list", multibox_append_scene_list),
+            ("update_times", multibox_update_times),
+            ("render", multibox_render),
+            ("event", multibox_event),
+            ("_tts", multibox_tts),
+        ],
+        &[
+            ("layer_name", Value::None),
+            ("first", Value::Bool(true)),
+            ("order_reverse", Value::Bool(false)),
+            ("layout", Value::None),
+            ("_layer_at_list", Value::None),
+            ("_camera_list", Value::None),
+            ("layers", Value::None),
+            ("untransformed_layer", Value::None),
+            ("adjust_times", Value::Bool(false)),
+            ("scene_list", Value::None),
+        ],
+    )?;
     let object = py::import_attr(vm, "renpy.object", "Object")?;
-    c(vm, "SizeGroup", &[object], &[("__init__", sizegroup_init), ("width", sizegroup_width)], &[])?;
+    c(
+        vm,
+        "SizeGroup",
+        &[object],
+        &[("__init__", sizegroup_init), ("width", sizegroup_width)],
+        &[],
+    )?;
     set(vm, "size_groups", vm.types.new_dict());
     let wsz = vm.types.new_tuple(vec![Value::Int(0), Value::Int(0)]);
-    c(vm, "Window", &[container.clone()], &[
-        ("__init__", window_init),
-        ("visit", window_visit),
-        ("get_child", window_get_child),
-        ("per_interact", window_per_interact),
-        ("render", window_render),
-        ("event", window_event),
-    ], &[("window_size", wsz), ("current_child", Value::None)])?;
+    c(
+        vm,
+        "Window",
+        &[container.clone()],
+        &[
+            ("__init__", window_init),
+            ("visit", window_visit),
+            ("get_child", window_get_child),
+            ("per_interact", window_per_interact),
+            ("render", window_render),
+            ("event", window_event),
+        ],
+        &[("window_size", wsz), ("current_child", Value::None)],
+    )?;
     let nosave = vm.types.new_list(vec![vm.types.new_str("child")]);
-    c(vm, "DynamicDisplayable", &[d.clone()], &[
-        ("__init__", dyn_init),
-        ("after_setstate", dyn_after_setstate),
-        ("_duplicate", dyn_duplicate),
-        ("visit", dyn_visit),
-        ("update", dyn_update),
-        ("per_interact", dyn_per_interact),
-        ("render", dyn_render),
-        ("predict_one", dyn_predict_one),
-        ("get_placement", dyn_get_placement),
-        ("event", dyn_event),
-    ], &[("nosave", nosave), ("_duplicatable", Value::Bool(true)), ("raw_child", Value::None), ("last_st", Value::Int(0)), ("last_at", Value::Int(0))])?;
+    c(
+        vm,
+        "DynamicDisplayable",
+        &[d.clone()],
+        &[
+            ("__init__", dyn_init),
+            ("after_setstate", dyn_after_setstate),
+            ("_duplicate", dyn_duplicate),
+            ("visit", dyn_visit),
+            ("update", dyn_update),
+            ("per_interact", dyn_per_interact),
+            ("render", dyn_render),
+            ("predict_one", dyn_predict_one),
+            ("get_placement", dyn_get_placement),
+            ("event", dyn_event),
+        ],
+        &[
+            ("nosave", nosave),
+            ("_duplicatable", Value::Bool(true)),
+            ("raw_child", Value::None),
+            ("last_st", Value::Int(0)),
+            ("last_at", Value::Int(0)),
+        ],
+    )?;
     set(vm, "cond_cache", vm.types.new_dict());
-    c(vm, "IgnoresEvents", &[container.clone()], &[("__init__", one_child_init), ("render", ignores_render), ("get_placement", child_get_placement), ("event", none_event)], &[])?;
-    let possible = { let l = SIDE_POSITIONS.iter().map(|p| vm.types.new_str(p)).collect(); let l = vm.types.new_list(l); vm.call(&Value::Obj(vm.types.set.clone()), vec![l], Vec::new())? };
-    c(vm, "Side", &[container.clone()], &[
-        ("__init__", side_init),
-        ("after_setstate", side_unsize),
-        ("add", side_add),
-        ("_clear", side_clear),
-        ("per_interact", side_unsize),
-        ("render", side_render),
-    ], &[("possible_positions", possible)])?;
-    c(vm, "Alpha", &[d.clone()], &[("__init__", alpha_init), ("visit", child_visit), ("render", alpha_render)], &[])?;
-    let adjust = c(vm, "AdjustTimes", &[container.clone()], &[
-        ("__init__", adjust_init),
-        ("adjusted_times", f_adjusted_times),
-        ("render", adjust_render),
-        ("event", adjust_event),
-        ("get_placement", child_get_placement),
-    ], &[])?;
-    c(vm, "MatchTimes", &[container.clone()], &[("__init__", match_init), ("render", match_render), ("get_placement", child_get_placement)], &[])?;
-    let tile = c(vm, "Tile", &[container.clone()], &[("__init__", tile_init), ("render", tile_render)], &[])?;
+    c(
+        vm,
+        "IgnoresEvents",
+        &[container.clone()],
+        &[
+            ("__init__", one_child_init),
+            ("render", ignores_render),
+            ("get_placement", child_get_placement),
+            ("event", none_event),
+        ],
+        &[],
+    )?;
+    let possible = {
+        let l = SIDE_POSITIONS.iter().map(|p| vm.types.new_str(p)).collect();
+        let l = vm.types.new_list(l);
+        vm.call(&Value::Obj(vm.types.set.clone()), vec![l], Vec::new())?
+    };
+    c(
+        vm,
+        "Side",
+        &[container.clone()],
+        &[
+            ("__init__", side_init),
+            ("after_setstate", side_unsize),
+            ("add", side_add),
+            ("_clear", side_clear),
+            ("per_interact", side_unsize),
+            ("render", side_render),
+        ],
+        &[("possible_positions", possible)],
+    )?;
+    c(
+        vm,
+        "Alpha",
+        &[d.clone()],
+        &[
+            ("__init__", alpha_init),
+            ("visit", child_visit),
+            ("render", alpha_render),
+        ],
+        &[],
+    )?;
+    let adjust = c(
+        vm,
+        "AdjustTimes",
+        &[container.clone()],
+        &[
+            ("__init__", adjust_init),
+            ("adjusted_times", f_adjusted_times),
+            ("render", adjust_render),
+            ("event", adjust_event),
+            ("get_placement", child_get_placement),
+        ],
+        &[],
+    )?;
+    c(
+        vm,
+        "MatchTimes",
+        &[container.clone()],
+        &[
+            ("__init__", match_init),
+            ("render", match_render),
+            ("get_placement", child_get_placement),
+        ],
+        &[],
+    )?;
+    let tile = c(
+        vm,
+        "Tile",
+        &[container.clone()],
+        &[("__init__", tile_init), ("render", tile_render)],
+        &[],
+    )?;
     set(vm, "LiveTile", tile);
-    c(vm, "Flatten", &[container.clone()], &[("__init__", flatten_init), ("render", flatten_render), ("get_placement", child_get_placement)], &[("drawable_resolution", Value::Bool(true))])?;
-    c(vm, "AlphaMask", &[container.clone()], &[("__init__", alphamask_init), ("visit", alphamask_visit), ("render", alphamask_render)], &[("invert", Value::Bool(false)), ("_duplicatable", Value::Bool(false))])?;
-    let nr_pos = { let l = ["left", "top", "right", "bottom"].iter().map(|p| vm.types.new_str(p)).collect(); let l = vm.types.new_list(l); vm.call(&Value::Obj(vm.types.set.clone()), vec![l], Vec::new())? };
-    c(vm, "NearRect", &[container.clone()], &[
-        ("__init__", nearrect_init),
-        ("per_interact", nearrect_per_interact),
-        ("render", nearrect_render),
-        ("event", nearrect_event),
-        ("_tts", nearrect_tts),
-    ], &[("preferred_side", vm.types.new_str("bottom")), ("invert_offsets", Value::Bool(false)), ("possible_positions", nr_pos)])?;
-    c(vm, "Layer", &[adjust], &[
-        ("__init__", layer_init),
-        ("add", layer_add),
-        ("visit_all", layer_visit_all),
-        ("per_interact", layer_per_interact),
-    ], &[("layers", vm.types.new_dict())])?;
+    c(
+        vm,
+        "Flatten",
+        &[container.clone()],
+        &[
+            ("__init__", flatten_init),
+            ("render", flatten_render),
+            ("get_placement", child_get_placement),
+        ],
+        &[("drawable_resolution", Value::Bool(true))],
+    )?;
+    c(
+        vm,
+        "AlphaMask",
+        &[container.clone()],
+        &[
+            ("__init__", alphamask_init),
+            ("visit", alphamask_visit),
+            ("render", alphamask_render),
+        ],
+        &[
+            ("invert", Value::Bool(false)),
+            ("_duplicatable", Value::Bool(false)),
+        ],
+    )?;
+    let nr_pos = {
+        let l = ["left", "top", "right", "bottom"]
+            .iter()
+            .map(|p| vm.types.new_str(p))
+            .collect();
+        let l = vm.types.new_list(l);
+        vm.call(&Value::Obj(vm.types.set.clone()), vec![l], Vec::new())?
+    };
+    c(
+        vm,
+        "NearRect",
+        &[container.clone()],
+        &[
+            ("__init__", nearrect_init),
+            ("per_interact", nearrect_per_interact),
+            ("render", nearrect_render),
+            ("event", nearrect_event),
+            ("_tts", nearrect_tts),
+        ],
+        &[
+            ("preferred_side", vm.types.new_str("bottom")),
+            ("invert_offsets", Value::Bool(false)),
+            ("possible_positions", nr_pos),
+        ],
+    )?;
+    c(
+        vm,
+        "Layer",
+        &[adjust],
+        &[
+            ("__init__", layer_init),
+            ("add", layer_add),
+            ("visit_all", layer_visit_all),
+            ("per_interact", layer_per_interact),
+        ],
+        &[("layers", vm.types.new_dict())],
+    )?;
     Ok(m)
 }
 

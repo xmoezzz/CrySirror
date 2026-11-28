@@ -6428,6 +6428,17 @@
           "returns": "void"
         },
         {
+          "doc": "Set the presentation screenshot magnification (1, 2 or 4) in client-owned state.",
+          "name": "setCaptureScale",
+          "params": [
+            {
+              "name": "scale",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Request borderless desktop fullscreen. Headless hosts retain client-owned state; the desktop applies it at frame publication.",
           "name": "setFullscreen",
           "params": [
@@ -7787,6 +7798,11 @@
       "system": "ui"
     },
     {
+      "api": "Ui.setCaptureScale",
+      "op": "set_capture_scale",
+      "system": "ui"
+    },
+    {
       "api": "Ui.setCursorVisible",
       "op": "set_cursor_visible",
       "system": "ui"
@@ -8603,6 +8619,12 @@
         },
         {
           "default": null,
+          "doc": "Opaque RGB window resampling with 8.8 coordinates and 255-sum weights.",
+          "name": "rect_resample_byte255",
+          "rust_type": "spec: crate::resample_byte255::RectResampleByte255"
+        },
+        {
+          "default": null,
           "doc": "",
           "name": "cosine_lens",
           "rust_type": "spec: crate::cosine_lens::CosineLensByte128"
@@ -8618,6 +8640,12 @@
           "doc": "",
           "name": "integer_color_modulation",
           "rust_type": "spec: crate::integer_color::IntegerColorModulation"
+        },
+        {
+          "default": null,
+          "doc": "Straight RGBA 4x5 matrix including alpha rows and columns.",
+          "name": "rgba_color_matrix",
+          "rust_type": "spec: crate::integer_color::RgbaColorMatrix"
         },
         {
           "default": null,
@@ -15093,6 +15121,25 @@
       "used_by": "ImageEffect.piecewise_resample; bounded ordered nearest sampling with independent Q8 weights"
     },
     {
+      "doc": "Sample a rectangle using the integer parts of each output coordinate and its successor. The adjacent tap may cross the window edge, within the source image. Both axes use weights summing to 255; output alpha is opaque.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Source x, y, width and height in pixels.",
+          "name": "source",
+          "rust_type": "[u32; 4]"
+        },
+        {
+          "default": null,
+          "doc": "Output width and height in pixels.",
+          "name": "size",
+          "rust_type": "[u32; 2]"
+        }
+      ],
+      "name": "RectResampleByte255",
+      "used_by": "ImageEffect.rect_resample_byte255; opaque RGB source-window sampling with integer 255-sum weights"
+    },
+    {
       "doc": "Integer image coordinates; the source's own draw clip does not constrain sampling. RGB remains unchanged unless `multiply_rgb` is explicitly set. Products use `(p + (p >> 7)) >> 8`, including all endpoint byte pairs.",
       "fields": [
         {
@@ -17503,6 +17550,12 @@
         },
         {
           "default": null,
+          "doc": "Positional playback in the client listener frame, or stereo playback.",
+          "name": "spatial_position",
+          "rust_type": "Option<[f32; 3]>"
+        },
+        {
+          "default": null,
           "doc": "Repeat source input, default false.",
           "name": "looping",
           "rust_type": "bool"
@@ -18596,6 +18649,12 @@
           "doc": "Finish the current own-amplitude ramp at its retained target. A pending gain-stop retires the voice; independent transport deadlines stay intact.",
           "name": "FinishGainFade",
           "rust_type": "channel: u32"
+        },
+        {
+          "default": null,
+          "doc": "Move a live channel into positional playback or restore stereo.",
+          "name": "SetChannelSpatial",
+          "rust_type": "channel: u32, position: Option<[f32; 3]>"
         },
         {
           "default": null,
@@ -22055,6 +22114,12 @@
           "rust_type": "Option<[f32; 3]>"
         },
         {
+          "default": 1.0,
+          "doc": "Scene multiplier for diffuse irradiance carried by baked vertex colours.",
+          "name": "baked_vertex_scale",
+          "rust_type": "f32"
+        },
+        {
           "default": 0.04,
           "doc": "Bloom mix strength (0 disables).",
           "name": "bloom",
@@ -22071,6 +22136,12 @@
           "doc": "Temporal anti-aliasing (jittered projection + reprojection).",
           "name": "temporal_aa",
           "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "raster_quality",
+          "rust_type": "Option<RasterQuality>"
         },
         {
           "default": 60.0,
@@ -23170,6 +23241,12 @@
         },
         {
           "default": null,
+          "doc": "Multiply the base by an RGB lightmap in the emissive slot. Secondary UVs are stored in `_AUX.xy`; the sun's shadow blends toward `shadow_color`.",
+          "name": "rgb_lightmap",
+          "rust_type": "scale: [f32; 2], offset: [f32; 2], shadow_color: [f32; 3]"
+        },
+        {
+          "default": null,
           "doc": "Two-layer blend by the primitive's `_AUX` vertex stream: the base texture weighted by `aux.x`, the emissive-slot texture by `1 − aux.x`; the emissive slot then contributes no emission. Primitives without `_AUX` show the base layer.",
           "name": "vertex_layer_blend",
           "rust_type": ""
@@ -23179,6 +23256,12 @@
           "doc": "Baked diffuse irradiance from the primitive's `_AUX` vertex stream (linear RGB, scaled by `intensity`) replaces the environment and GI-volume irradiance; direct lights still apply. Primitives without `_AUX` receive white irradiance × `intensity`.",
           "name": "baked_vertex_irradiance",
           "rust_type": "intensity: f32, slope_layer: Option<[f32; 3]>, mask_layer: Option<MaskLayer>"
+        },
+        {
+          "default": null,
+          "doc": "Two opaque albedo layers lit by a directional Blinn lobe and a second Blinn lobe from per-vertex irradiance (`_AUX.rgb`). The occlusion texture's green channel and vertex mask (`_AUX.w`) mix the base and emissive-slot albedos, and the green specular masks in the metallic-roughness (base) and opacity (upper layer) slots.",
+          "name": "layered_blinn",
+          "rust_type": "intensity: f32, softness: f32, mask_power: f32, specular_scale: f32, specular_exponent: f32"
         },
         {
           "default": null,
@@ -23302,6 +23385,12 @@
           "default": null,
           "doc": "Sorted premultiplied-alpha blending.",
           "name": "premultiplied",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Screen blend using premultiplied source colour, `D + (1 - D) × S × alpha`.",
+          "name": "soft_additive",
           "rust_type": ""
         }
       ],
@@ -25682,7 +25771,7 @@
           "default": null,
           "doc": "",
           "name": "sprite",
-          "rust_type": "texture: Option<String>, columns: u32, rows: u32, frames: u32, fps: f32, soft_distance: f32, blend: VfxBlendMode, facing: VfxFacingMode"
+          "rust_type": "texture: Option<String>, columns: u32, rows: u32, frames: u32, fps: f32, soft_distance: f32, triplanar_coverage: Option<VfxTriplanarCoverage>, blend: VfxBlendMode, facing: VfxFacingMode"
         },
         {
           "default": null,
@@ -25726,6 +25815,18 @@
           "doc": "",
           "name": "multiply",
           "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Add emitted RGB and coverage independently (ONE, ONE for both). The texture's opacity and the soft-depth fade affect coverage only.",
+          "name": "additive_color",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Accumulate RGB and alpha in a transparent intermediate layer, then composite the whole layer over the opaque world using its coverage.",
+          "name": "additive_coverage_layer",
+          "rust_type": ""
         }
       ],
       "name": "VfxBlendMode",
@@ -25761,6 +25862,31 @@
       ],
       "name": "VfxFacingMode",
       "used_by": "`VfxRenderSpec.sprite.facing`"
+    },
+    {
+      "doc": "Scrolling world-space opacity. The alpha channel is sampled twice on each coordinate plane and weighted by the absolute view direction.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "texture",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "scroll",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "scale",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "VfxTriplanarCoverage",
+      "used_by": "`VfxRenderSpec.sprite.triplanar_coverage`"
     },
     {
       "doc": "Built-in or client-relative static mesh resource for particle rendering. Variants are tagged by `\"kind\"`.",
@@ -29569,6 +29695,12 @@
         },
         {
           "default": null,
+          "doc": "Render presentation captures at a multiple of the logical canvas.",
+          "name": "set_capture_scale",
+          "rust_type": "scale: u32"
+        },
+        {
+          "default": null,
           "doc": "",
           "name": "set_fullscreen",
           "rust_type": "enabled: bool"
@@ -30567,7 +30699,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "2ac32143b330d5a1",
+  "fingerprint": "856a153d826df6b5",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

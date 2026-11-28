@@ -9,11 +9,17 @@ use crysirror_python::{PyErr, PyResult, Value, Vm, builtins::Kw, object::NativeF
 use std::rc::Rc;
 
 fn take(kw: &mut Vec<(Rc<str>, Value)>, n: &str) -> Option<Value> {
-    kw.iter().position(|(k, _)| &**k == n).map(|i| kw.remove(i).1)
+    kw.iter()
+        .position(|(k, _)| &**k == n)
+        .map(|i| kw.remove(i).1)
 }
 
 fn with_none_after(vm: &mut Vm, with_none: Value) -> PyResult<()> {
-    let w = if py::is_none(&with_none) { py::config(vm, "implicit_with_none")? } else { with_none };
+    let w = if py::is_none(&with_none) {
+        py::config(vm, "implicit_with_none")?
+    } else {
+        with_none
+    };
     if py::truthy(vm, &w)? {
         let i = iface(vm)?;
         vm.call_method(&i, "do_with", vec![Value::None, Value::None])?;
@@ -37,7 +43,12 @@ fn imagemap(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let mut k = props;
     k.push(("unselected".into(), unselected));
     k.push(("style".into(), style));
-    ui(vm, "imagemap_compat", vec![ground, selected, hotspots.clone()], k)?;
+    ui(
+        vm,
+        "imagemap_compat",
+        vec![ground, selected, hotspots.clone()],
+        k,
+    )?;
     let mut rf = ex(vm, "roll_forward_info", Vec::new(), Vec::new())?;
     let mut results = Vec::new();
     for h in py::items(vm, &hotspots)? {
@@ -55,7 +66,17 @@ fn imagemap(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         ui(vm, "saybehavior", Vec::new(), Vec::new())?;
     }
     let so = !py::truthy(vm, &overlays)?;
-    let rv = ui(vm, "interact", Vec::new(), vec![("suppress_overlay".into(), Value::Bool(so)), ("type".into(), py::s(vm, "imagemap")), ("mouse".into(), mouse), ("roll_forward".into(), rf)])?;
+    let rv = ui(
+        vm,
+        "interact",
+        Vec::new(),
+        vec![
+            ("suppress_overlay".into(), Value::Bool(so)),
+            ("type".into(), py::s(vm, "imagemap")),
+            ("mouse".into(), mouse),
+            ("roll_forward".into(), rf),
+        ],
+    )?;
     ex(vm, "checkpoint", vec![rv.clone()], Vec::new())?;
     with_none_after(vm, with_none)?;
     Ok(rv)
@@ -88,7 +109,11 @@ fn pause(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if skipping.as_str() == Some("fast") {
         return Ok(Value::Bool(false));
     }
-    let checkpoint = if py::is_none(&checkpoint) { py::is_none(&delay) } else { py::truthy(vm, &checkpoint)? };
+    let checkpoint = if py::is_none(&checkpoint) {
+        py::is_none(&delay)
+    } else {
+        py::truthy(vm, &checkpoint)?
+    };
     let mut rf = ex(vm, "roll_forward_info", Vec::new(), Vec::new())?;
     if !is_bool_or_jump(vm, &rf)? {
         rf = Value::None;
@@ -97,9 +122,21 @@ fn pause(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let after_rollback = py::truthy(vm, &after_rollback)?;
     let par = py::config_bool(vm, "pause_after_rollback")?;
     if !py::is_none(&delay) && after_rollback && !par {
-        let rv = if py::is_none(&rf) { Value::Bool(false) } else { rf };
+        let rv = if py::is_none(&rf) {
+            Value::Bool(false)
+        } else {
+            rf
+        };
         if checkpoint {
-            ex(vm, "checkpoint", vec![rv.clone()], vec![("keep_rollback".into(), Value::Bool(true)), ("hard".into(), Value::Bool(false))])?;
+            ex(
+                vm,
+                "checkpoint",
+                vec![rv.clone()],
+                vec![
+                    ("keep_rollback".into(), Value::Bool(true)),
+                    ("hard".into(), Value::Bool(false)),
+                ],
+            )?;
         }
         return Ok(rv);
     }
@@ -114,9 +151,22 @@ fn pause(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !py::is_none(&delay) && after_rollback && py::is_none(&rf) {
         delay = Value::Int(0);
     }
-    let afm = if py::is_none(&delay) { py::s(vm, " ") } else { Value::None };
+    let afm = if py::is_none(&delay) {
+        py::s(vm, " ")
+    } else {
+        Value::None
+    };
     if hard || !store_true(vm, "_dismiss_pause")? {
-        ui(vm, "saybehavior", Vec::new(), vec![("afm".into(), afm), ("dismiss".into(), py::s(vm, "dismiss_hard_pause")), ("dismiss_unfocused".into(), vm.types.new_list(Vec::new()))])?;
+        ui(
+            vm,
+            "saybehavior",
+            Vec::new(),
+            vec![
+                ("afm".into(), afm),
+                ("dismiss".into(), py::s(vm, "dismiss_hard_pause")),
+                ("dismiss_unfocused".into(), vm.types.new_list(Vec::new())),
+            ],
+        )?;
     } else {
         ui(vm, "saybehavior", Vec::new(), vec![("afm".into(), afm)])?;
     }
@@ -127,7 +177,18 @@ fn pause(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let b = vm.call(&ppb, Vec::new(), Vec::new())?;
         ui(vm, "add", vec![b], Vec::new())?;
     }
-    let r = ui(vm, "interact", Vec::new(), vec![("mouse".into(), py::s(vm, "pause")), ("type".into(), py::s(vm, "pause")), ("roll_forward".into(), rf), ("pause".into(), delay.clone()), ("pause_modal".into(), modal)]);
+    let r = ui(
+        vm,
+        "interact",
+        Vec::new(),
+        vec![
+            ("mouse".into(), py::s(vm, "pause")),
+            ("type".into(), py::s(vm, "pause")),
+            ("roll_forward".into(), rf),
+            ("pause".into(), delay.clone()),
+            ("pause_modal".into(), modal),
+        ],
+    );
     let rv = match r {
         Ok(v) => v,
         Err(e) if is_jump_or_call(vm, &e) => exc_value(&e).unwrap(),
@@ -135,10 +196,20 @@ fn pause(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     };
     if checkpoint {
         let hard = par || py::is_none(&delay);
-        ex(vm, "checkpoint", vec![rv.clone()], vec![("keep_rollback".into(), Value::Bool(true)), ("hard".into(), Value::Bool(hard))])?;
+        ex(
+            vm,
+            "checkpoint",
+            vec![rv.clone()],
+            vec![
+                ("keep_rollback".into(), Value::Bool(true)),
+                ("hard".into(), Value::Bool(hard)),
+            ],
+        )?;
     }
     with_none_after(vm, with_none)?;
-    if isinst(vm, &rv, "renpy.game", "JumpException")? || isinst(vm, &rv, "renpy.game", "CallException")? {
+    if isinst(vm, &rv, "renpy.game", "JumpException")?
+        || isinst(vm, &rv, "renpy.game", "CallException")?
+    {
         return Err(PyErr::Exc(rv.obj().cloned().unwrap()));
     }
     Ok(rv)
@@ -152,7 +223,10 @@ fn with_statement(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let c = ctx(vm)?;
     let ip = py::get_or_none(vm, &c, "init_phase")?;
     if py::truthy(vm, &ip)? {
-        return Err(py::error(vm, "With statements may not run while in init phase."));
+        return Err(py::error(
+            vm,
+            "With statements may not run while in init phase.",
+        ));
     }
     let skipping = py::config(vm, "skipping")?;
     if py::truthy(vm, &skipping)? {
@@ -178,11 +252,22 @@ fn with_statement(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         trans = ops::getitem(vm, &trans, Value::None)?;
     }
     let i = iface(vm)?;
-    py::method_kw(vm, &i, "do_with", vec![trans, paired], vec![("clear".into(), clear)])
+    py::method_kw(
+        vm,
+        &i,
+        "do_with",
+        vec![trans, paired],
+        vec![("clear".into(), clear)],
+    )
 }
 
 fn jump(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    Err(raise(vm, "renpy.game", "JumpException", vec![args[0].clone()]))
+    Err(raise(
+        vm,
+        "renpy.game",
+        "JumpException",
+        vec![args[0].clone()],
+    ))
 }
 
 fn call(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -191,14 +276,23 @@ fn call(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let a = vm.types.new_tuple(args[1..].to_vec());
     let k = py::kwargs_dict(vm, &kw)?;
     let c = py::import_attr(vm, "renpy.game", "CallException")?;
-    let e = vm.call(&c, vec![args[0].clone(), a, k], vec![("from_current".into(), from_current)])?;
+    let e = vm.call(
+        &c,
+        vec![args[0].clone(), a, k],
+        vec![("from_current".into(), from_current)],
+    )?;
     Err(PyErr::Exc(e.obj().cloned().unwrap()))
 }
 
 fn return_statement(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let v = arg_or(args, kw, 0, "value", Value::None);
     store_set(vm, "_return", v)?;
-    Err(raise(vm, "renpy.game", "JumpException", vec![py::s(vm, "_renpy_return")]))
+    Err(raise(
+        vm,
+        "renpy.game",
+        "JumpException",
+        vec![py::s(vm, "_renpy_return")],
+    ))
 }
 
 fn call_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -222,7 +316,16 @@ fn call_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !py::truthy(vm, &can)? {
         rf = Value::None;
     }
-    let r = ui(vm, "interact", Vec::new(), vec![("mouse".into(), py::s(vm, "screen")), ("type".into(), py::s(vm, "screen")), ("roll_forward".into(), rf)]);
+    let r = ui(
+        vm,
+        "interact",
+        Vec::new(),
+        vec![
+            ("mouse".into(), py::s(vm, "screen")),
+            ("type".into(), py::s(vm, "screen")),
+            ("roll_forward".into(), rf),
+        ],
+    );
     let rv = match r {
         Ok(v) => v,
         Err(e) if is_jump_or_call(vm, &e) => exc_value(&e).unwrap(),
@@ -233,7 +336,9 @@ fn call_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let i = iface(vm)?;
         vm.call_method(&i, "do_with", vec![Value::None, Value::None])?;
     }
-    if isinst(vm, &rv, "renpy.game", "JumpException")? || isinst(vm, &rv, "renpy.game", "CallException")? {
+    if isinst(vm, &rv, "renpy.game", "JumpException")?
+        || isinst(vm, &rv, "renpy.game", "CallException")?
+    {
         return Err(PyErr::Exc(rv.obj().cloned().unwrap()));
     }
     Ok(rv)
@@ -253,6 +358,18 @@ fn execute_default_statement(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Va
     let cbs = py::config(vm, "after_default_callbacks")?;
     for cb in py::items(vm, &cbs)? {
         vm.call(&cb, Vec::new(), Vec::new())?;
+    }
+    // 8.6 runs config.after_init_callbacks once, after the first defaults.
+    if super::super::state::rt(vm).profile.at_least(8, 6) {
+        let exports = py::import(vm, "renpy.exports")?;
+        let ran = py::get(vm, &exports, "_ran_after_init_callbacks")?;
+        if !py::truthy(vm, &ran)? {
+            let aic = py::config(vm, "after_init_callbacks")?;
+            for cb in py::items(vm, &aic)? {
+                vm.call(&cb, Vec::new(), Vec::new())?;
+            }
+        }
+        py::set(vm, &exports, "_ran_after_init_callbacks", Value::Bool(true))?;
     }
     Ok(Value::None)
 }

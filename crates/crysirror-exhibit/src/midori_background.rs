@@ -308,6 +308,22 @@ pub(super) struct Background {
 }
 
 impl Background {
+    pub fn checkpoint_draw(&self) -> Option<[i32; 19]> {
+        if self.pending.is_some() {
+            return None;
+        }
+        Some(self.live.as_ref().map_or_else(|| {
+            // The native GraphicInfo constructor (0x575d0/0x50670)
+            // starts with an empty source and the 16x16 DIB sentinel.
+            let mut data = [0; 19];
+            data[0] = -1;
+            data[8] = -1;
+            data[9] = -1;
+            data[11] = 800 | (600 << 16);
+            data
+        }, |live| live.draw.checkpoint()))
+    }
+
     pub fn capture(&self) -> Option<(u32, [i32; 19])> {
         self.live.as_ref().map(|live| (10, live.draw.checkpoint()))
     }

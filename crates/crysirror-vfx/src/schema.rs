@@ -459,6 +459,12 @@ pub enum BlendMode {
     Additive,
     Premultiplied,
     Multiply,
+    /// Add emitted RGB and coverage independently (ONE, ONE for both).
+    /// The texture's opacity and the soft-depth fade affect coverage only.
+    AdditiveColor,
+    /// Accumulate RGB and alpha in a transparent intermediate layer, then
+    /// composite the whole layer over the opaque world using its coverage.
+    AdditiveCoverageLayer,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -484,6 +490,15 @@ pub enum MeshShape {
         path: String,
     },
 }
+/// Scrolling world-space opacity. The alpha channel is sampled twice on
+/// each coordinate plane and weighted by the absolute view direction.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TriplanarCoverage {
+    pub texture: String,
+    pub scroll: [f32; 3],
+    pub scale: f32,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 /// Device-independent renderer configuration. Ribbon width is explicit full width.
@@ -501,6 +516,8 @@ pub enum RenderSpec {
         fps: f32,
         #[serde(default)]
         soft_distance: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        triplanar_coverage: Option<TriplanarCoverage>,
         #[serde(default)]
         blend: BlendMode,
         #[serde(default)]
@@ -535,6 +552,7 @@ impl Default for RenderSpec {
             frames: 1,
             fps: 0.,
             soft_distance: 0.,
+            triplanar_coverage: None,
             blend: BlendMode::Additive,
             facing: FacingMode::Camera,
         }
@@ -715,6 +733,7 @@ impl RenderSpec {
                 frames,
                 fps,
                 soft_distance,
+                triplanar_coverage,
                 facing,
                 ..
             } => {
@@ -735,6 +754,11 @@ impl RenderSpec {
                         && (0.0..=10000.).contains(soft_distance),
                     "VFX sprite parameters"
                 );
+                if let Some(coverage) = triplanar_coverage {
+                    logical_asset(&coverage.texture)?;
+                    finite(&coverage.scroll)?;
+                    ensure!(coverage.scale.is_finite() && coverage.scale > 0., "VFX triplanar coverage scale");
+                }
                 if let FacingMode::Axis { axis } = facing {
                     finite(axis)?;
                     ensure!(
@@ -1027,6 +1051,7 @@ impl EmitterSpec {
                     RenderSpec::Sprite {
                         texture: Some(_),
                         facing: FacingMode::Camera,
+                        triplanar_coverage: None,
                         blend: BlendMode::Alpha | BlendMode::Additive | BlendMode::Multiply,
                         ..
                     }

@@ -32,7 +32,9 @@ const SAVELOCATION: &str = "renpy.savelocation";
 const MAX_PERSISTENT: u64 = 64 * 1024 * 1024;
 
 fn at_least(vm: &Vm, major: u32, minor: u32) -> bool {
-    super::state::try_rt(vm).map(|r| r.profile.at_least(major, minor)).unwrap_or(true)
+    super::state::try_rt(vm)
+        .map(|r| r.profile.at_least(major, minor))
+        .unwrap_or(true)
 }
 
 fn store(vm: &Vm) -> Rc<SaveStore> {
@@ -65,20 +67,59 @@ fn log_exception(vm: &mut Vm, what: &str, e: &crysirror_python::PyErr) {
 
 /// The 6.x preference fields (name, default) in `__init__` order.
 const PREFS_6_99: &[(&str, &str)] = &[
-    ("fullscreen", "False"), ("skip_unseen", "False"), ("text_cps", "0"), ("afm_time", "0"), ("afm_enable", "True"), ("using_afm_enable", "False"),
-    ("voice_sustain", "False"), ("mouse_move", "False"), ("show_empty_window", "True"), ("wait_voice", "True"), ("afm_after_click", "False"),
-    ("transitions", "2"), ("video_image_fallback", "False"), ("skip_after_choices", "False"), ("volumes", "{}"), ("mute", "{}"), ("joymap", "dict()"),
-    ("physical_size", "None"), ("virtual_size", "None"), ("renderer", "'auto'"), ("performance_test", "True"), ("language", "None"),
-    ("self_voicing", "False"), ("emphasize_audio", "False"), ("pad_enabled", "True"), ("mobile_rollback_side", "'disable'"),
+    ("fullscreen", "False"),
+    ("skip_unseen", "False"),
+    ("text_cps", "0"),
+    ("afm_time", "0"),
+    ("afm_enable", "True"),
+    ("using_afm_enable", "False"),
+    ("voice_sustain", "False"),
+    ("mouse_move", "False"),
+    ("show_empty_window", "True"),
+    ("wait_voice", "True"),
+    ("afm_after_click", "False"),
+    ("transitions", "2"),
+    ("video_image_fallback", "False"),
+    ("skip_after_choices", "False"),
+    ("volumes", "{}"),
+    ("mute", "{}"),
+    ("joymap", "dict()"),
+    ("physical_size", "None"),
+    ("virtual_size", "None"),
+    ("renderer", "'auto'"),
+    ("performance_test", "True"),
+    ("language", "None"),
+    ("self_voicing", "False"),
+    ("emphasize_audio", "False"),
+    ("pad_enabled", "True"),
+    ("mobile_rollback_side", "'disable'"),
     ("desktop_rollback_side", "'disable'"),
 ];
 
 const PREFS_6_18: &[(&str, &str)] = &[
-    ("fullscreen", "False"), ("skip_unseen", "False"), ("text_cps", "0"), ("afm_time", "0"), ("afm_enable", "True"), ("voice_sustain", "False"),
-    ("mouse_move", "False"), ("show_empty_window", "True"), ("wait_voice", "True"), ("afm_after_click", "False"), ("transitions", "2"),
-    ("skip_after_choices", "False"), ("volumes", "{}"), ("mute", "{}"),
-    ("joymap", "dict(joy_left='Axis 0.0 Negative', joy_right='Axis 0.0 Positive', joy_up='Axis 0.1 Negative', joy_down='Axis 0.1 Positive', joy_dismiss='Button 0.0')"),
-    ("physical_size", "None"), ("renderer", "'auto'"), ("performance_test", "True"), ("language", "None"), ("self_voicing", "False"),
+    ("fullscreen", "False"),
+    ("skip_unseen", "False"),
+    ("text_cps", "0"),
+    ("afm_time", "0"),
+    ("afm_enable", "True"),
+    ("voice_sustain", "False"),
+    ("mouse_move", "False"),
+    ("show_empty_window", "True"),
+    ("wait_voice", "True"),
+    ("afm_after_click", "False"),
+    ("transitions", "2"),
+    ("skip_after_choices", "False"),
+    ("volumes", "{}"),
+    ("mute", "{}"),
+    (
+        "joymap",
+        "dict(joy_left='Axis 0.0 Negative', joy_right='Axis 0.0 Positive', joy_up='Axis 0.1 Negative', joy_down='Axis 0.1 Positive', joy_dismiss='Button 0.0')",
+    ),
+    ("physical_size", "None"),
+    ("renderer", "'auto'"),
+    ("performance_test", "True"),
+    ("language", "None"),
+    ("self_voicing", "False"),
     ("emphasize_audio", "False"),
 ];
 
@@ -97,8 +138,17 @@ const UPGRADE_6: &[(i64, &[(&str, &str)])] = &[
     (13, &[("self_voicing", "False")]),
     (14, &[("emphasize_audio", "False")]),
     (15, &[("pad_enabled", "True")]),
-    (17, &[("mobile_rollback_side", "'disable'"), ("desktop_rollback_side", "'disable'")]),
-    (18, &[("virtual_size", "None"), ("video_image_fallback", "False")]),
+    (
+        17,
+        &[
+            ("mobile_rollback_side", "'disable'"),
+            ("desktop_rollback_side", "'disable'"),
+        ],
+    ),
+    (
+        18,
+        &[("virtual_size", "None"), ("video_image_fallback", "False")],
+    ),
 ];
 
 struct PrefTable {
@@ -109,14 +159,32 @@ struct PrefTable {
 }
 
 fn pref_table(vm: &Vm) -> PrefTable {
-    let v = super::state::try_rt(vm).map(|r| r.profile.version).unwrap_or([8, 3, 0, 0]);
+    let v = super::state::try_rt(vm)
+        .map(|r| r.profile.version)
+        .unwrap_or([8, 3, 0, 0]);
     if v[0] < 7 {
-        let (fields, version) = if (v[0], v[1]) < (6, 99) { (PREFS_6_18, 14) } else { (PREFS_6_99, 18) };
-        return PrefTable { version, fields: fields.iter().map(|(n, d)| (*n, *d, "")).collect(), table: false };
+        let (fields, version) = if (v[0], v[1]) < (6, 99) {
+            (PREFS_6_18, 14)
+        } else {
+            (PREFS_6_99, 18)
+        };
+        return PrefTable {
+            version,
+            fields: fields.iter().map(|(n, d)| (*n, *d, "")).collect(),
+            table: false,
+        };
     }
     let t = super::preference_tables::TABLES;
-    let e = t.iter().rev().find(|(a, b, ..)| (*a, *b) <= (v[0], v[1])).unwrap_or(&t[0]);
-    PrefTable { version: e.4.len() as i64 + e.3, fields: e.4.to_vec(), table: true }
+    let e = t
+        .iter()
+        .rev()
+        .find(|(a, b, ..)| (*a, *b) <= (v[0], v[1]))
+        .unwrap_or(&t[0]);
+    PrefTable {
+        version: e.4.len() as i64 + e.3,
+        fields: e.4.to_vec(),
+        table: true,
+    }
 }
 
 fn eval_literal(vm: &mut Vm, src: &str) -> PyResult<Value> {
@@ -206,7 +274,9 @@ fn p_check(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let ok = vm.call(&isinstance, vec![v.clone(), ty.clone()], Vec::new())?;
         if !py::truthy(vm, &ok)? {
             let (r, tr) = (ops::repr(vm, &v)?, ops::repr(vm, &ty)?);
-            error = vm.types.new_str(&format!("Preference {n} has wrong type. {r} is not of type {tr}."));
+            error = vm.types.new_str(&format!(
+                "Preference {n} has wrong type. {r} is not of type {tr}."
+            ));
             let dv = eval_literal(vm, d)?;
             py::set(vm, this, n, dv)?;
         }
@@ -260,7 +330,11 @@ fn p_set_mixer(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let r = db_range(vm);
         volume = 10f64.powf((r * volume - r) / 20.0);
     }
-    p_set_volume(vm, &[args[0].clone(), args[1].clone(), Value::Float(volume)], &[])
+    p_set_volume(
+        vm,
+        &[args[0].clone(), args[1].clone(), Value::Float(volume)],
+        &[],
+    )
 }
 
 fn p_get_mixer(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -368,7 +442,14 @@ fn preferences_module(vm: &mut Vm) -> PyResult<ObjRef> {
         ("__eq__", p_eq),
         ("__ne__", p_ne),
     ];
-    let c = py::class(vm, PREFERENCES, "Preferences", &[base], methods, &[("__version__", Value::Int(t.version))])?;
+    let c = py::class(
+        vm,
+        PREFERENCES,
+        "Preferences",
+        &[base],
+        methods,
+        &[("__version__", Value::Int(t.version))],
+    )?;
     let f = vm.types.new_builtin("after_upgrade", p_after_upgrade);
     vm.types.set_attr(&c, "after_upgrade", f);
     // `Preferences` defines `__eq__`; instances are not hashed upstream.
@@ -477,12 +558,23 @@ fn pe_update(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let st = get(vm, "_seen_translates")?;
     if !py::truthy(vm, &st)? {
-        py::set(vm, this, "_seen_translates", vm.types.new_set(Default::default()))?;
+        py::set(
+            vm,
+            this,
+            "_seen_translates",
+            vm.types.new_set(Default::default()),
+        )?;
     }
     if py::is_none(&get(vm, "_changed")?) {
         let d = py::dict(vm);
         if at_least(vm, 6, 99) {
-            for n in ["_preferences", "_seen_ever", "_chosen", "_seen_audio", "_seen_translates"] {
+            for n in [
+                "_preferences",
+                "_seen_ever",
+                "_chosen",
+                "_seen_audio",
+                "_seen_translates",
+            ] {
                 py::dict_set(vm, &d, n, Value::Int(0))?;
             }
         }
@@ -501,7 +593,10 @@ fn safe_deepcopy(vm: &mut Vm, o: &Value) -> PyResult<Value> {
     if !ops::eq(vm, o, &rv)? {
         if py::config_bool(vm, "developer").unwrap_or(false) {
             let r = ops::repr(vm, o)?;
-            return Err(py::error(vm, format!("To be persisted, {r} must support equality comparison.")));
+            return Err(py::error(
+                vm,
+                format!("To be persisted, {r} must support equality comparison."),
+            ));
         }
         return Ok(o.clone());
     }
@@ -513,7 +608,10 @@ fn backup(vm: &mut Vm) -> PyResult<Value> {
 }
 
 fn now() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
 }
 
 /// `find_changes()`: whether persistent data changed since the backup.
@@ -579,7 +677,9 @@ fn decode(vm: &mut Vm, bytes: &[u8]) -> PyResult<Option<Value>> {
 
 /// `load(filename)` for a Save-mount name.
 fn load_file(vm: &mut Vm, name: &str) -> PyResult<Option<Value>> {
-    let Some(bytes) = store(vm).read(name) else { return Ok(None) };
+    let Some(bytes) = store(vm).read(name) else {
+        return Ok(None);
+    };
     decode(vm, &bytes)
 }
 
@@ -652,7 +752,11 @@ fn merge(vm: &mut Vm, other: &Value) -> PyResult<()> {
         let ot = vm.call_method(&oc, "get", vec![f.clone(), Value::Int(0)])?;
         let pt = py::f64_of(vm, &pt)?;
         let ot = py::f64_of(vm, &ot)?.min(t);
-        let (new, old, tt) = if pt >= ot { (pval.clone(), oval, pt) } else { (oval, pval.clone(), ot) };
+        let (new, old, tt) = if pt >= ot {
+            (pval.clone(), oval, pt)
+        } else {
+            (oval, pval.clone(), ot)
+        };
         let mf = vm.call_method(&registry, "get", vec![f.clone(), default.clone()])?;
         let val = vm.call(&mf, vec![old, new, pval], Vec::new())?;
         ops::setitem(vm, &pvars, f.clone(), val.clone())?;
@@ -748,7 +852,8 @@ pub fn save(vm: &mut Vm) -> PyResult<()> {
         let data = pickle(vm, "dumps", vec![p])?;
         let data = bytes_of(vm, &data)?;
         let mut e = ZlibEncoder::new(Vec::new(), Compression::new(3));
-        e.write_all(&data).map_err(|err| py::error(vm, err.to_string()))?;
+        e.write_all(&data)
+            .map_err(|err| py::error(vm, err.to_string()))?;
         let mut compressed = e.finish().map_err(|err| py::error(vm, err.to_string()))?;
         if at_least(vm, 8, 1) {
             compressed.extend(super::savetoken::sign_data(vm, &data).into_bytes());
@@ -829,7 +934,10 @@ fn f_multi_persistent(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let ctx = super::exports::util::ctx(vm)?;
     let ip = py::get(vm, &ctx, "init_phase")?;
     if !py::truthy(vm, &ip)? {
-        return Err(py::error(vm, "MultiPersistent objects must be created during the init phase."));
+        return Err(py::error(
+            vm,
+            "MultiPersistent objects must be created during the init phase.",
+        ));
     }
     let inst = mp_instances(vm)?;
     for i in py::items(vm, &inst)? {
@@ -916,11 +1024,35 @@ fn persistent_module(vm: &mut Vm) -> PyResult<ObjRef> {
         PERSISTENT,
         "Persistent",
         &[],
-        &[("__init__", pe_init), ("__setstate__", pe_setstate), ("__getstate__", pe_getstate), ("__getattr__", pe_getattr), ("_hasattr", pe_hasattr), ("_clear", pe_clear), ("_update", pe_update)],
+        &[
+            ("__init__", pe_init),
+            ("__setstate__", pe_setstate),
+            ("__getstate__", pe_getstate),
+            ("__getattr__", pe_getattr),
+            ("_hasattr", pe_hasattr),
+            ("_clear", pe_clear),
+            ("_update", pe_update),
+        ],
         &[],
     )?;
     set(vm, "Persistent", Value::Obj(pc.clone()));
-    let mp = py::class(vm, PERSISTENT, "_MultiPersistent", &[], &[("__getstate__", mp_getstate), ("__setstate__", pe_setstate), ("__getattr__", mp_getattr), ("save", mp_save)], &[("_filename", py::s(vm, "")), ("_name", py::s(vm, "")), ("_save_on_quit", Value::Bool(false))])?;
+    let mp = py::class(
+        vm,
+        PERSISTENT,
+        "_MultiPersistent",
+        &[],
+        &[
+            ("__getstate__", mp_getstate),
+            ("__setstate__", pe_setstate),
+            ("__getattr__", mp_getattr),
+            ("save", mp_save),
+        ],
+        &[
+            ("_filename", py::s(vm, "")),
+            ("_name", py::s(vm, "")),
+            ("_save_on_quit", Value::Bool(false)),
+        ],
+    )?;
     set(vm, "_MultiPersistent", Value::Obj(mp.clone()));
     set(vm, "backup", py::dict(vm));
     let reg = py::dict(vm);
@@ -995,7 +1127,9 @@ fn fl_scan(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let old = py::get(vm, this, "mtimes")?;
     let new = py::dict(vm);
     for f in st.list("") {
-        let Some(slot) = f.strip_suffix(&sfx) else { continue };
+        let Some(slot) = f.strip_suffix(&sfx) else {
+            continue;
+        };
         if let Some(t) = st.mtime(&f) {
             py::dict_set(vm, &new, slot, Value::Float(t))?;
         }
@@ -1059,7 +1193,9 @@ fn fl_mtime(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn fl_path(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let f = py::string(vm, &args[1])?;
     match store(vm).mtime(&f) {
-        Some(t) => Ok(vm.types.new_tuple(vec![Value::Float(t), vm.types.new_str(&f)])),
+        Some(t) => Ok(vm
+            .types
+            .new_tuple(vec![Value::Float(t), vm.types.new_str(&f)])),
         None => Ok(vm.types.new_tuple(vec![Value::Int(0), Value::None])),
     }
 }
@@ -1070,8 +1206,12 @@ fn slot_bytes(vm: &mut Vm, slot: &Value) -> PyResult<Option<Vec<u8>>> {
 }
 
 fn fl_json(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let Some(b) = slot_bytes(vm, &args[1])? else { return Ok(Value::None) };
-    let Ok(entries) = savestore::zip_read(&b) else { return Ok(Value::None) };
+    let Some(b) = slot_bytes(vm, &args[1])? else {
+        return Ok(Value::None);
+    };
+    let Ok(entries) = savestore::zip_read(&b) else {
+        return Ok(Value::None);
+    };
     if let Some(j) = entries.iter().find(|e| e.name == "json") {
         let loads = py::import_attr(vm, "json", "loads")?;
         let s = vm.types.new_str(&String::from_utf8_lossy(&j.data));
@@ -1081,7 +1221,12 @@ fn fl_json(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let d = py::dict(vm);
     if let Some(e) = entries.iter().find(|e| e.name == "extra_info") {
-        py::dict_set(vm, &d, "_save_name", vm.types.new_str(&String::from_utf8_lossy(&e.data)))?;
+        py::dict_set(
+            vm,
+            &d,
+            "_save_name",
+            vm.types.new_str(&String::from_utf8_lossy(&e.data)),
+        )?;
     }
     Ok(d)
 }
@@ -1091,8 +1236,12 @@ fn fl_screenshot(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if py::is_none(&mtime) {
         return Ok(Value::None);
     }
-    let Some(b) = slot_bytes(vm, &args[1])? else { return Ok(Value::None) };
-    let Ok(entries) = savestore::zip_read(&b) else { return Ok(Value::None) };
+    let Some(b) = slot_bytes(vm, &args[1])? else {
+        return Ok(Value::None);
+    };
+    let Ok(entries) = savestore::zip_read(&b) else {
+        return Ok(Value::None);
+    };
     let member = if entries.iter().any(|e| e.name == "screenshot.tga") {
         "screenshot.tga"
     } else if entries.iter().any(|e| e.name == "screenshot.png") {
@@ -1108,10 +1257,19 @@ fn fl_screenshot(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn fl_load(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let f = slot_file(vm, &args[1])?;
-    let Some(b) = store(vm).read(&f) else { return Err(vm.exc_msg("IOError", format!("Couldn't load {f}."))) };
+    let Some(b) = store(vm).read(&f) else {
+        return Err(vm.exc_msg("IOError", format!("Couldn't load {f}.")));
+    };
     let entries = savestore::zip_read(&b).map_err(|e| vm.exc_msg("BadZipfile", e))?;
-    let log = entries.iter().find(|e| e.name == "log").ok_or_else(|| vm.exc_msg("KeyError", "There is no item named 'log' in the archive"))?;
-    let token = entries.iter().find(|e| e.name == "signatures").map(|e| String::from_utf8_lossy(&e.data).into_owned()).unwrap_or_default();
+    let log = entries
+        .iter()
+        .find(|e| e.name == "log")
+        .ok_or_else(|| vm.exc_msg("KeyError", "There is no item named 'log' in the archive"))?;
+    let token = entries
+        .iter()
+        .find(|e| e.name == "signatures")
+        .map(|e| String::from_utf8_lossy(&e.data).into_owned())
+        .unwrap_or_default();
     let l = vm.types.new_bytes(log.data.clone());
     if at_least(vm, 8, 1) {
         let t = vm.types.new_str(&token);
@@ -1129,7 +1287,9 @@ fn fl_unlink(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn fl_rename(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (old, new) = (slot_file(vm, &args[1])?, slot_file(vm, &args[2])?);
     let st = store(vm);
-    let Some(b) = st.read(&old) else { return Ok(Value::None) };
+    let Some(b) = st.read(&old) else {
+        return Ok(Value::None);
+    };
     st.write(&new, &b).map_err(|e| vm.exc_msg("OSError", e))?;
     st.remove(&old).map_err(|e| vm.exc_msg("OSError", e))?;
     fl_scan(vm, &args[..1], &[])
@@ -1138,7 +1298,9 @@ fn fl_rename(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn fl_copy(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (old, new) = (slot_file(vm, &args[1])?, slot_file(vm, &args[2])?);
     let st = store(vm);
-    let Some(b) = st.read(&old) else { return Ok(Value::None) };
+    let Some(b) = st.read(&old) else {
+        return Ok(Value::None);
+    };
     st.write(&new, &b).map_err(|e| vm.exc_msg("OSError", e))?;
     fl_scan(vm, &args[..1], &[])
 }
@@ -1159,7 +1321,8 @@ fn fl_save_persistent(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let data = bytes_of(vm, &args[1])?;
     let st = store(vm);
-    st.write("persistent", &data).map_err(|e| vm.exc_msg("OSError", e))?;
+    st.write("persistent", &data)
+        .map_err(|e| vm.exc_msg("OSError", e))?;
     let _ = st.remove("persistent.new");
     let t = st.mtime("persistent").unwrap_or(0.0);
     py::set(vm, &args[0], "persistent_mtime", Value::Float(t))?;
@@ -1178,7 +1341,10 @@ fn fl_eq(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if !c.obj().is_some_and(|c| ops::isinstance(vm, &args[1], c)) {
         return Ok(Value::Bool(false));
     }
-    let (a, b) = (py::get(vm, &args[0], "directory")?, py::get(vm, &args[1], "directory")?);
+    let (a, b) = (
+        py::get(vm, &args[0], "directory")?,
+        py::get(vm, &args[1], "directory")?,
+    );
     Ok(Value::Bool(ops::eq(vm, &a, &b)?))
 }
 
@@ -1296,7 +1462,9 @@ fn ml_path(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             best = Some((t, r));
         }
     }
-    Ok(best.map(|b| b.1).unwrap_or_else(|| vm.types.new_tuple(vec![Value::Int(0), Value::None])))
+    Ok(best
+        .map(|b| b.1)
+        .unwrap_or_else(|| vm.types.new_tuple(vec![Value::Int(0), Value::None])))
 }
 
 fn ml_slot_call(vm: &mut Vm, args: &[Value], method: &str) -> PyResult<Value> {
@@ -1372,7 +1540,10 @@ fn ml_eq(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if !c.obj().is_some_and(|c| ops::isinstance(vm, &args[1], c)) {
         return Ok(Value::Bool(false));
     }
-    let (a, b) = (py::get(vm, &args[0], "locations")?, py::get(vm, &args[1], "locations")?);
+    let (a, b) = (
+        py::get(vm, &args[0], "locations")?,
+        py::get(vm, &args[1], "locations")?,
+    );
     Ok(Value::Bool(ops::eq(vm, &a, &b)?))
 }
 
@@ -1421,7 +1592,15 @@ fn savelocation_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let m = crysirror_python::modules::module_with(
         vm,
         SAVELOCATION,
-        &[("init", sl_init), ("quit", noop), ("pause_syncfs", noop), ("resume_syncfs", noop), ("syncfs", noop), ("zip_saves", ret_true), ("unzip_saves", ret_true)],
+        &[
+            ("init", sl_init),
+            ("quit", noop),
+            ("pause_syncfs", noop),
+            ("resume_syncfs", noop),
+            ("syncfs", noop),
+            ("zip_saves", ret_true),
+            ("unzip_saves", ret_true),
+        ],
     );
     let set = |vm: &Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     let fl = py::class(
@@ -1483,7 +1662,14 @@ fn savelocation_module(vm: &mut Vm) -> PyResult<ObjRef> {
         &[],
     )?;
     set(vm, "MultiLocation", Value::Obj(ml));
-    let sfl = py::class(vm, SAVELOCATION, "SyncfsLock", &[], &[("__enter__", sfl_enter), ("__exit__", sfl_exit)], &[])?;
+    let sfl = py::class(
+        vm,
+        SAVELOCATION,
+        "SyncfsLock",
+        &[],
+        &[("__enter__", sfl_enter), ("__exit__", sfl_exit)],
+        &[],
+    )?;
     set(vm, "SyncfsLock", Value::Obj(sfl));
     set(vm, "scan_thread", Value::None);
     Ok(m)

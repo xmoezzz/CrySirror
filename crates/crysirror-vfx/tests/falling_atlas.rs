@@ -53,6 +53,7 @@ fn emitter(name: &str, layer: u32) -> EmitterSpec {
         frames: 1,
         fps: 0.,
         soft_distance: 0.,
+        triplanar_coverage: None,
         blend: BlendMode::Alpha,
         facing: FacingMode::Camera,
     };

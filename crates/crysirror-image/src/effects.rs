@@ -129,6 +129,10 @@ pub enum ImageEffect {
     RectResampleByte256 {
         spec: crate::resample_byte256::RectResampleByte256,
     },
+    /// Opaque RGB window resampling with 8.8 coordinates and 255-sum weights.
+    RectResampleByte255 {
+        spec: crate::resample_byte255::RectResampleByte255,
+    },
     CosineLens {
         spec: crate::cosine_lens::CosineLensByte128,
     },
@@ -429,6 +433,7 @@ impl ImageEffect {
             Self::ShapeMask { spec } => spec.validate()?,
             Self::RectResample { spec } => spec.validate()?,
             Self::RectResampleByte256 { spec } => spec.validate()?,
+            Self::RectResampleByte255 { spec } => spec.validate()?,
             Self::CosineLens { spec } => spec.validate()?,
             Self::IntegerColorMatrix { spec } => spec.validate()?,
             Self::RgbaColorMatrix { spec } => spec.validate()?,
@@ -632,6 +637,9 @@ impl ImageSurface {
             return spec.apply(self, check);
         }
         if let ImageEffect::RectResampleByte256 { spec } = effect {
+            return spec.apply(self, check);
+        }
+        if let ImageEffect::RectResampleByte255 { spec } = effect {
             return spec.apply(self, check);
         }
         if matches!(

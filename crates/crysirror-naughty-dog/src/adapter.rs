@@ -43,7 +43,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub const ENGINE_ID: &str = "naughty-dog";
-const MAIN: &str = "PS3_GAME/USRDIR/build/main";
+pub(crate) const MAIN: &str = "PS3_GAME/USRDIR/build/main";
 /// Largest decoded package and base-colour image edge for the viewer.
 const PACKAGE_LIMIT: u64 = 256 << 20;
 const MAX_TEXTURE: u32 = 512;
@@ -55,6 +55,7 @@ const MOVIE_LAYER: u32 = 0x4e44_0002;
 /// Black behind boot screens and level loads (under the movie and UI).
 const BACKDROP_LAYER: u32 = 0x4e44_0003;
 /// Message dialog and main-menu text layers.
+const MENU_EDGE_LAYER: u32 = 0x4e44_000f;
 const UI_LAYER: u32 = 0x4e44_0010;
 const MENU_LEVEL: &str = "menu-temple";
 /// Front-end layers: logo, title and up to ten buttons.
@@ -215,13 +216,52 @@ struct Player {
     grip: Option<Grip>,
     /// A jump between edges in progress: the root it started from, the
     /// target grip and the seconds elapsed.
-    leap: Option<(glam::Vec3, Grip, f32)>,
+    leap: Option<EdgeLeap>,
     /// Seconds before an airborne player may grab again (after a drop).
     regrab: f32,
     /// The free rope held.
     rope: Option<RopeHold>,
     /// The wall rope held.
     wall_rope: Option<WallRopeHold>,
+    /// Start root of the two-clip transfer, retained across the auto transition.
+    transfer_from: Option<glam::Vec3>,
+    /// Wall-rope jump or drop, retained until the destination grip or ground takes over.
+    wall_flight: Option<WallFlight>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WallFlight {
+    velocity: glam::Vec3,
+    wall_yaw: f32,
+    left: bool,
+    arc: Option<WallJumpArc>,
+}
+
+/// Native wall-rope jump to a selected parallel edge (sub_705634).
+#[derive(Clone, Copy, Debug)]
+struct WallJumpArc {
+    grip: Grip,
+    start: glam::Vec3,
+    aim: glam::Vec3,
+    seconds: f32,
+    elapsed: f32,
+}
+
+impl WallJumpArc {
+    fn new(grip: Grip, start: glam::Vec3, aim: glam::Vec3) -> Self {
+        let delta = aim - start;
+        let distance = glam::Vec2::new(delta.x, delta.z).length();
+        let speed = 4.5 + ((distance - 1.) / 5.).clamp(0., 1.);
+        let lift = 2.5 + 4.25 * (delta.y / 3.).clamp(0., 1.);
+        let disc = lift * lift - 20. * delta.y;
+        let vertical = if disc >= 0. { (lift + disc.sqrt()) / 10. } else { 0. };
+        Self { grip, start, aim, seconds: (distance / speed).max(0.5).max(vertical), elapsed: 0. }
+    }
+
+    fn position(self) -> glam::Vec3 {
+        let t = self.elapsed.min(self.seconds);
+        self.start.lerp(self.aim, t / self.seconds) + glam::Vec3::Y * (5. * t * (self.seconds - t))
+    }
 }
 
 /// A wall rope held: its top, length, the hands' distance below the top
@@ -236,6 +276,50 @@ struct WallRopeHold {
     /// right) and rate.
     swing: f32,
     rate: f32,
+    turned: bool,
+    left: bool,
+}
+
+impl WallRopeHold {
+    fn facing(self) -> glam::Vec3 {
+        glam::Vec3::new(self.yaw.sin(), 0., self.yaw.cos())
+    }
+
+    fn root(self) -> glam::Vec3 {
+        let side = self.facing().cross(glam::Vec3::Y);
+        self.top + side * (self.below * self.swing.sin())
+            - glam::Vec3::Y * (self.below * self.swing.cos() + ROPE_HANDS)
+            - self.facing() * WALL_ROPE_OFFSET
+    }
+
+    fn velocity(self) -> glam::Vec3 {
+        let tangent = self.facing().cross(glam::Vec3::Y) * self.swing.cos() + glam::Vec3::Y * self.swing.sin();
+        tangent * (self.below * self.rate)
+    }
+
+    fn swing_speed(self) -> f32 {
+        // Equivalent angular speed at the bottom. The character remains in
+        // the swing state through either apex, where the instantaneous rate is zero.
+        (self.rate * self.rate + 2. * 9.8 / self.below.max(0.5) * (1. - self.swing.cos())).sqrt()
+    }
+
+    fn advance(&mut self, stick: f32, dt: f32) {
+        let input = stick.signum() * ((stick.abs() - 0.45) / 0.55).clamp(0., 1.);
+        let accel = -9.8 / self.below.max(0.5) * self.swing.sin() + input * WALL_ROPE_PUMP - self.rate * 0.6;
+        let previous = self.rate;
+        self.rate += accel * dt;
+        let angle = self.swing + self.rate * dt;
+        self.swing = angle.clamp(-0.9, 0.9);
+        if angle != self.swing {
+            self.rate = 0.;
+        }
+        self.turned = previous * self.swing > 0. && previous * self.rate <= 0.;
+        if self.turned {
+            self.left = previous > 0.;
+        } else if self.rate.abs() > 0.01 {
+            self.left = self.rate < 0.;
+        }
+    }
 }
 
 /// A `Hint` spawner's progress: since when its condition holds, how
@@ -502,6 +586,7 @@ struct ScriptAnimation {
     start: f64,
     /// Seconds, once the clip is loaded.
     duration: Option<f32>,
+    looping: bool,
     /// Library asset and clip name, once loaded.
     source: Option<(String, String)>,
     /// Clip-space root motion (`align` per frame at `fps`) and the world
@@ -516,6 +601,15 @@ struct ScriptAnimation {
 }
 
 impl ScriptAnimation {
+    /// A loop includes its closing key only once at the seam.
+    fn sample_time(&self, elapsed: f32, duration: f32) -> Option<f32> {
+        if self.looping && duration > 0. {
+            Some(elapsed.rem_euclid(duration))
+        } else {
+            (duration > 0. && elapsed < duration).then_some(elapsed.max(0.))
+        }
+    }
+
     /// Clip seconds played at `now`.
     fn elapsed(&self, now: f64) -> f32 {
         self.base + (now - self.start) as f32 * self.speed
@@ -1465,8 +1559,15 @@ impl World for Stage {
             return false;
         }
         self.held.remove(&object);
-        self.animations.insert(object, ScriptAnimation { clip, options: options.clone(), start: self.now, duration: None, source: None, root: None, failed: false, speed: self.animation_speeds.get(&object).copied().unwrap_or(1.), base: 0. });
+        self.animations.insert(object, ScriptAnimation { clip, options: options.clone(), start: self.now, duration: None, looping: false, source: None, root: None, failed: false, speed: self.animation_speeds.get(&object).copied().unwrap_or(1.), base: 0. });
         true
+    }
+    fn animation_wait_complete(&self, object: u32) -> bool {
+        // SimpleAnimator::Update signals waiters on the first crossing even
+        // when the clip continues looping (sub_162640 -> sub_7BF338).
+        self.animations.get(&object).is_none_or(|a| {
+            a.failed || a.duration.is_some_and(|d| a.elapsed(self.now) >= d)
+        })
     }
     fn animation_phase(&self, object: u32) -> Option<f32> {
         let a = self.animations.get(&object)?;
@@ -1477,7 +1578,7 @@ impl World for Stage {
             None => Some(0.),
             Some(d) => {
                 let t = a.elapsed(self.now);
-                (t < d).then(|| if d > 0. { t / d } else { 1. })
+                a.sample_time(t, d).map(|phase| phase / d)
             }
         }
     }
@@ -1545,9 +1646,11 @@ struct Session {
     /// End time (stage seconds) of the playing task movie, and whether a
     /// world video and its layer present it.
     movie: Option<f64>,
+    soundtrack: crate::soundtrack::Soundtrack,
     movie_video: bool,
     /// A movie started at its task change, over the level load.
     movie_early: Option<String>,
+    movie_waiting_for_sound: Option<String>,
     /// Whether the black backdrop is up.
     backdrop: bool,
     ui: Option<Ui>,
@@ -1559,10 +1662,14 @@ struct Session {
     camera_clips: HashMap<u32, Option<CameraClip>>,
     /// The level's sky (`sky-…` package) as an uploaded environment image.
     sky: Option<VfsPath>,
+    /// Probe radiance used for lighting when the level has no visible sky.
+    probe_environment: Option<VfsPath>,
     /// Front-end pages of `menu.bin` and the title logo (`menu.pak`
     /// `logo2` with its `logo2-alpha` mask) as an uploaded image.
     menu_pages: Vec<crate::menu::Page>,
+    menu_font: crate::menu_font::MenuFont,
     logo: Option<(VfsPath, u32, u32)>,
+    menu_edge: Option<VfsPath>,
     /// The player rig (`actor27.psarc/proto.pak` skeleton and the clips the
     /// player uses), loaded with the first skinned model that has no
     /// skeleton of its own; `Some(None)` when unavailable.
@@ -1616,6 +1723,12 @@ struct Session {
     has_save: bool,
     /// The Scream banks of `sound1/banks.psarc`.
     banks: crate::sound::Banks,
+    motion_tracks: crate::motion_sound::Tracks,
+    motion_profiles: HashMap<u32, crate::motion_sound::MeshAudio>,
+    motion_mesh: Option<u32>,
+    motion_clock: crate::motion_sound::Clock,
+    motion_cue_count: u64,
+    last_motion_cue: Option<(String, f32, u32)>,
     /// Sound preparations in flight (host tickets).
     sound_pending: Vec<u64>,
     /// Speech preparations in flight: speaker, channel, host ticket.
@@ -1643,6 +1756,7 @@ struct Session {
     particle_materials: Option<HashMap<u32, crate::particle::ParticleMaterial>>,
     /// Uploaded particle textures by texture ID: path and atlas columns.
     particle_textures: HashMap<u32, Option<(String, u32)>>,
+    particle_coverage: HashMap<u32, crysirror_vfx::TriplanarCoverage>,
     /// Particle effects of the presented level; the nearest to the camera
     /// are live entities.
     effects: Vec<Effect>,
@@ -1669,6 +1783,7 @@ struct LibraryClip {
     name: String,
     seconds: f32,
     fps: f32,
+    looping: bool,
     align: Vec<(glam::Vec3, glam::Quat)>,
     ap_reference: Vec<(glam::Vec3, glam::Quat)>,
 }
@@ -1749,12 +1864,11 @@ fn npc_state(agent: &crate::npc::Agent) -> String {
     format!("s_{mood}{gun}-{motion}")
 }
 
-/// Packages holding the player rig's clips: `proto.pak` and the hurt
-/// movement types of `anim-proto-hurt.pak`.
 /// Follow-camera distance behind the player's head, metres.
 const FOLLOW_DISTANCE: f32 = 4.;
 
-const PLAYER_CLIP_PACKAGES: &[&str] = &["proto.pak", "anim-proto-hurt.pak"];
+/// Base movement, injured movement, wall ropes and hit reactions on the player rig.
+const PLAYER_CLIP_PACKAGES: &[&str] = &["proto.pak", "anim-proto-hurt.pak", "anim-proto-ropes.pak", "anim-sla-base.pak"];
 
 /// The world environment: the level's directional light and ambient term
 /// when known. Native intensities (0.9–19 on the installed levels) are
@@ -1950,16 +2064,21 @@ impl NaughtyDogVm {
             light: None,
             script_error: None,
             movie: None,
+            soundtrack: Default::default(),
             movie_video: false,
             movie_early: None,
+            movie_waiting_for_sound: None,
             backdrop: false,
             ui: None,
             catalog: None,
             free: false,
             camera_clips: HashMap::new(),
             sky: None,
+            probe_environment: None,
             menu_pages: Vec::new(),
+            menu_font: Default::default(),
             logo: None,
+            menu_edge: None,
             player_rig: None,
             anim_table: None,
             anim_graph: None,
@@ -1989,6 +2108,12 @@ impl NaughtyDogVm {
             death: None,
             combat_rng: 0x1234_5678,
             banks: Default::default(),
+            motion_tracks: Default::default(),
+            motion_profiles: Default::default(),
+            motion_mesh: None,
+            motion_clock: Default::default(),
+            motion_cue_count: 0,
+            last_motion_cue: None,
             sound_pending: Vec::new(),
             speech_pending: Vec::new(),
             speech_channels: HashMap::new(),
@@ -2004,6 +2129,7 @@ impl NaughtyDogVm {
             particle_roles: HashMap::new(),
             particle_materials: None,
             particle_textures: HashMap::new(),
+            particle_coverage: HashMap::new(),
             effects: Vec::new(),
             entity_rigs: HashMap::new(),
             own_rigs: HashMap::new(),
@@ -2054,6 +2180,13 @@ impl NaughtyDogVm {
                 Ok(t) => session.stage.sounds = Some(Arc::new(t)),
                 Err(e) => session.stage.log(format!("audio.bin: {e:#}")),
             }
+            let mesh_audio = crate::game::ModuleSource::read(&modules, "mesh-audio-config")?;
+            session.motion_profiles = crate::motion_sound::mesh_profiles(&mesh_audio)?;
+            if session.actors.exists("proto-eff.pak") {
+                let source = session.actors.open("proto-eff.pak")?;
+                let package = crate::mesh::Loaded::read(source.as_ref(), PACKAGE_LIMIT)?;
+                session.motion_tracks = crate::motion_sound::Tracks::read(&package)?;
+            }
             match open(BANKS).and_then(|r| Ok(registry.open(r, Some("sony/psarc"), &context)?)).and_then(|(_, a)| ArchiveMount::new(a, context.clone())) {
                 Ok(mount) => {
                     for name in mount.list().unwrap_or_default().into_iter().filter(|n| n.ends_with(".bnk")) {
@@ -2095,13 +2228,14 @@ impl NaughtyDogVm {
                 session.stage.log(format!("menu.bin: {e:#}"));
                 Vec::new()
             });
-            session.logo = match Self::menu_logo(host, self.client, &session.mount) {
-                Ok(logo) => logo,
-                Err(e) => {
-                    session.stage.log(format!("menu logo: {e:#}"));
-                    None
-                }
-            };
+            session.menu_font = crate::menu_font::MenuFont::load(host, self.client, storage.as_ref(), self.config.language.unwrap_or(2))
+                .unwrap_or_else(|e| {
+                    session.stage.log(format!("menu font: {e:#}"));
+                    Default::default()
+                });
+            if let Err(e) = Self::load_menu_art(host, self.client, &mut session) {
+                session.stage.log(format!("menu.pak artwork: {e:#}"));
+            }
             let g = &game.rt.inner.tasks;
             session.tasks = g.order.iter().filter_map(|id| g.node(*id)).flat_map(|n| n.order.iter().filter_map(|s| n.subnodes.iter().find(|x| x.id == *s)).map(|s| s.name.clone())).collect();
             let task = self.config.task.clone().or_else(|| game.default_task()).context("the task graph has no story task")?;
@@ -2168,10 +2302,12 @@ impl NaughtyDogVm {
         session.started = false;
         session.probes = Default::default();
         session.light = None;
-        if let Some(sky) = session.sky.take() {
-            host.release_model(self.client, &sky)?;
+        for image in [session.sky.take(), session.probe_environment.take()].into_iter().flatten() {
+            host.release_model(self.client, &image)?;
         }
         session.script_error = None;
+        self.leave_soundtrack(host, session)?;
+        session.movie_early = None;
         session.movie = None;
         // A task left during its movie stops the video and its layer.
         let mut layers = vec![json!({"op": "put", "layer": {"id": FADE_LAYER, "rect": [0, 0, SCREEN[0], SCREEN[1]], "paint": {"kind": "solid", "color": [0, 0, 0, 0]}}})];
@@ -2404,6 +2540,13 @@ impl NaughtyDogVm {
             let (center, size): ([f32; 3], f32) = (std::array::from_fn(|k| (lo[k] + hi[k]) * 0.5), (0..3).map(|k| hi[k] - lo[k]).fold(0., f32::max));
             session.camera.speed = (size * 0.05).clamp(2., 50.);
             if session.game.is_some() {
+                if session.sky.is_none() && session.probe_environment.is_none() {
+                    let fixed_eye = session.plan.as_ref().filter(|p| p.menu).and(session.start.as_ref()).map(|c| c.position);
+                    if let Some(image) = session.probes.reflection_environment(fixed_eye) {
+                        session.next_model += 1;
+                        session.probe_environment = Some(host.upload_hdr(self.client, 0x4e44_0000 + session.next_model, image.width, image.height, &image.rgb)?);
+                    }
+                }
                 self.start_task(session, &mut world)?;
                 host.submit_engine(self.client, 1, &serde_json::to_vec(&json!({"layers": [], "world": std::mem::take(&mut world)}))?)?;
                 self.enter_task(host, session)?;
@@ -2490,10 +2633,15 @@ impl NaughtyDogVm {
         let settings = Self::render_settings(session);
         let e = session.probes.mean_irradiance();
         let lum = 0.2126 * e[0] + 0.7152 * e[1] + 0.0722 * e[2];
-        let scale = settings.map_or(1., |s| s.light_scale.iter().sum::<f32>() / 3.);
-        let sun = session.light.as_ref().map_or(json!(null), |l| json!({"direction": l.direction, "color": l.color.map(|c| c.clamp(0., 4.)), "intensity": (l.intensity * scale).clamp(0.05, 4.0), "shadow_strength": 1.0}));
+        let scale = settings.map_or([1.; 3], |s| s.light_scale);
+        let area_sun = settings.and_then(|s| glam::Vec3::from_array(s.sun_direction).try_normalize().map(|dir| (dir.to_array(), s.sun_colour, s.sun_intensity)));
+        let package_sun = session.light.as_ref().map(|l| (l.direction, l.color, l.intensity));
+        let sun = area_sun.or(package_sun).map_or(json!(null), |(direction, colour, intensity)| {
+            let color: [f32; 3] = std::array::from_fn(|i| (colour[i] * scale[i]).clamp(0., 16.));
+            json!({"direction": direction, "color": color, "intensity": intensity, "shadows": settings.is_none_or(|s| s.sun_shadow_distance > 0.), "shadow_strength": 1.0})
+        });
         let ambient_scale = settings.map_or(1., |s| s.ambient_scale) * UNBAKED_AMBIENT;
-        let mut env = json!({"op": "set_environment", "environment": {"show_sky": session.sky.is_some(), "intensity": if session.sky.is_some() { 1. } else { (lum * 4.).clamp(0.02, 1.) }, "ambient": e.map(|v| (v * ambient_scale).clamp(0., 16.)), "sun": sun, "tonemap": "filmic"}});
+        let mut env = json!({"op": "set_environment", "environment": {"show_sky": session.sky.is_some(), "intensity": if session.sky.is_some() || session.probe_environment.is_some() { 1. } else { (lum * 4.).clamp(0.02, 1.) }, "ambient": e.map(|v| (v * ambient_scale).clamp(0., 16.)), "sun": sun, "tonemap": "filmic"}});
         match settings {
             // The area's tonemap: Hable's curve with its constants and
             // bias; the camera adapts (`tonemap-adaption-time`, light range
@@ -2503,6 +2651,10 @@ impl NaughtyDogVm {
             // caller) are not applied.
             Some(s) => {
                 let t = s.tonemap;
+                if s.sun_shadow_distance > 0. {
+                    env["environment"]["shadow_distance"] = json!(s.sun_shadow_distance.max(0.1));
+                }
+                env["environment"]["baked_vertex_scale"] = json!(s.baked_vertex_scale.max(0.));
                 env["environment"]["filmic_curve"] = json!({"shoulder": t.shoulder, "linear": t.linear, "angle": t.angle, "toe": t.toe, "toe_numerator": t.toe_numerator, "toe_denominator": t.toe_denominator, "white": t.white, "exposure_bias": t.exposure_bias});
                 env["environment"]["auto_exposure"] = json!({"min_log2": -8.0, "max_log2": 8.0, "speed_up": 3.0, "speed_down": 1.0, "compensation": EXPOSURE_CALIBRATION});
                 env["environment"]["grading"] = json!({"color_filter": s.tint.map(|v| v.clamp(0., 4.))});
@@ -2525,8 +2677,8 @@ impl NaughtyDogVm {
                 env["environment"]["auto_exposure"] = json!({"min_log2": -6.0, "max_log2": 2.0, "speed_up": 3.0, "speed_down": 1.0, "compensation": 0.5});
             }
         }
-        if let Some(sky) = &session.sky {
-            env["environment"]["hdr"] = json!(sky.relative());
+        if let Some(image) = session.sky.as_ref().or(session.probe_environment.as_ref()) {
+            env["environment"]["hdr"] = json!(image.relative());
         }
         Some(env)
     }
@@ -2702,10 +2854,12 @@ impl NaughtyDogVm {
             }
         }
         let camera = plan.continue_camera.as_deref().and_then(|n| session.stage.spawners.get(&sid(n))).map(|c| c.position);
+        session.motion_clock = Default::default();
+        session.motion_mesh = spawner.as_ref().and_then(|s| s.art_group.as_deref()).map(sid);
         let anim = session.anim_table.as_ref().filter(|_| entity.is_some()).map(|t| crate::player::Controller::new(t, yaw));
         // The camera starts behind the player (eye offset `(-sin, cos)` of
         // the view yaw opposite the facing `(sin, cos)` of the yaw).
-        let mut player = Player { entity, position, yaw, fall: 0., view_yaw: std::f32::consts::PI - yaw, view_pitch: -0.25, controls: true, anim, air_top: None, view_distance: FOLLOW_DISTANCE, aiming: None, aim_blend: 0., platform: None, grip: None, leap: None, regrab: 0., rope: None, wall_rope: None };
+        let mut player = Player { entity, position, yaw, fall: 0., view_yaw: std::f32::consts::PI - yaw, view_pitch: -0.25, controls: true, anim, air_top: None, view_distance: FOLLOW_DISTANCE, aiming: None, aim_blend: 0., platform: None, grip: None, leap: None, regrab: 0., rope: None, wall_rope: None, transfer_from: None, wall_flight: None };
         // The continue camera spawner sets the starting view direction
         // (eye offset `(-sin y · cos p, -sin p, cos y · cos p)` from the head).
         if let Some(c) = camera {
@@ -2759,19 +2913,26 @@ impl NaughtyDogVm {
     fn start_movie(&self, host: &mut dyn HostServices, session: &mut Session, name: &str) -> Result<Option<(serde_json::Value, serde_json::Value)>> {
         let path = format!("{MAIN}/movie1/{name}.m2v");
         let storage = host.storage(self.client)?;
-        let Ok(reader) = storage.open_asset(&VfsPath::new(Mount::Asset, &path)?) else { return Ok(None) };
+        let Ok(reader) = storage.open_asset(&VfsPath::new(Mount::Asset, &path)?) else {
+            session.soundtrack.stop_movie(host, self.client)?;
+            return Ok(None);
+        };
         // World videos are read whole, within the runtime's per-file limit;
         // a longer movie is skipped and its task completes.
         if reader.len()? > MAX_WORLD_VIDEO {
+            session.soundtrack.stop_movie(host, self.client)?;
             session.movie = Some(session.stage.now);
             session.stage.log(format!("movie {name}.m2v exceeds the {} MiB world-video read limit; skipped", MAX_WORLD_VIDEO >> 20));
             return Ok(None);
         }
         let seconds = movie_seconds(reader.as_ref())?;
-        session.movie = Some(session.stage.now + seconds);
+        session.soundtrack.start_movie(host, self.client, name)?;
+        let picture_ms = session.soundtrack.picture_time(host, self.client)?;
+        session.movie = Some(session.stage.now + seconds - picture_ms as f64 / 1000.);
+        session.movie_waiting_for_sound = (picture_ms < 0).then(|| path.clone());
         session.movie_video = true;
         session.stage.log(format!("movie {name}.m2v {seconds:.1} s"));
-        let video = json!({"op": "set_video", "name": "movie", "video": {"asset": path, "playing": true}});
+        let video = json!({"op": "set_video", "name": "movie", "video": {"asset": path, "playing": picture_ms >= 0, "time_ms": picture_ms.max(0)}});
         let layer = json!({"op": "put", "layer": {"id": MOVIE_LAYER, "rect": [0, 0, SCREEN[0], SCREEN[1]], "paint": {"kind": "image", "asset": MOVIE_SURFACE}}});
         Ok(Some((video, layer)))
     }
@@ -2809,6 +2970,7 @@ impl NaughtyDogVm {
                 session.ui = Some(Ui::Message(text));
             }
             Manager::MainMenu => {
+                session.soundtrack.start_menu(&game.rt.dc, sub.address)?;
                 let root = session.menu_pages.iter().position(|p| p.name == "PAGE_ROOT_MAIN");
                 session.ui = Some(Ui::Menu { stack: root.into_iter().collect(), selected: 0 });
             }
@@ -2841,23 +3003,41 @@ impl NaughtyDogVm {
         };
         // A fixed set of layers always exists; unused ones are transparent.
         let mut out: Vec<serde_json::Value> = (0..UI_LAYERS).map(|i| json!({"op": "put", "layer": {"id": UI_LAYER + i, "rect": [0, 0, 1, 1], "paint": {"kind": "solid", "color": [0, 0, 0, 0]}}})).collect();
+        // sub_431E18 draws slot 1 underneath the page widgets when flag 2 is clear.
+        let edge = match &session.ui {
+            Some(Ui::Menu { stack, .. }) if stack.last().and_then(|i| session.menu_pages.get(*i)).is_some_and(|page| page.flags & 2 == 0) => session.menu_edge.as_ref(),
+            _ => None,
+        };
+        out.push(match edge {
+            Some(path) => json!({"op": "put", "layer": {"id": MENU_EDGE_LAYER, "rect": [0, 0, SCREEN[0], SCREEN[1]], "paint": {"kind": "image", "asset": path.relative()}}}),
+            None => json!({"op": "put", "layer": {"id": MENU_EDGE_LAYER, "rect": [0, 0, 1, 1], "paint": {"kind": "solid", "color": [0, 0, 0, 0]}}}),
+        });
         match session.ui.as_ref() {
             None => {}
             Some(Ui::Message(t)) => out[0] = text(UI_LAYER, [160, 260, SCREEN[0] as i32 - 320, 200], t, [255, 255, 255, 255], 28),
             Some(Ui::Menu { stack, selected }) => {
                 let Some(page) = stack.last().and_then(|i| session.menu_pages.get(*i)) else { return out };
-                if let Some((asset, w, h)) = &session.logo {
-                    // Title logo, upper left, at half its texture width.
-                    let (w, h) = (*w as i32 / 2, *h as i32 / 2);
-                    out[0] = json!({"op": "put", "layer": {"id": UI_LAYER, "rect": [96, 64, w, h], "paint": {"kind": "image", "asset": asset.relative()}}});
-                }
+                use crate::menu_font::LabelStyle;
                 let root = page.name == "PAGE_ROOT_MAIN";
+                if let Some((asset, w, h)) = &session.logo {
+                    let (w, h) = (*w as i32, *h as i32);
+                    let rect = if root {
+                        [(SCREEN[0] as i32 - w) / 2, 80, w, h]
+                    } else {
+                        [96, 64, w / 2, h / 2]
+                    };
+                    out[0] = json!({"op": "put", "layer": {"id": UI_LAYER, "rect": rect, "paint": {"kind": "image", "asset": asset.relative()}}});
+                }
+                let make_label = |id, rect, label: &str, color, style: LabelStyle, centered| {
+                    session.menu_font.layer(id, rect, label, color, style, centered)
+                        .unwrap_or_else(|| text(id, rect, label, color, style.height()))
+                };
                 if let Some(t) = page.title.as_deref().filter(|_| !root) {
-                    out[1] = text(UI_LAYER + 1, [128, 340, 900, 60], &session.text(t), [235, 225, 200, 255], 30);
+                    out[1] = make_label(UI_LAYER + 1, [128, 340, 900, 60], &session.text(t), [235, 225, 200, 255], LabelStyle::Menu(30), false);
                 }
                 if root {
                     if let Some(t) = page.title.as_deref() {
-                        out[1] = text(UI_LAYER + 1, [128, 650, 1100, 40], &session.text(t), [200, 200, 200, 255], 14);
+                        out[1] = make_label(UI_LAYER + 1, [0, 598, SCREEN[0] as i32, 48], &session.text(t), [168, 168, 160, 232], LabelStyle::Legal, true);
                     }
                 }
                 let visible: Vec<&crate::menu::Button> = page.buttons.iter().filter(|b| b.condition == 0 || (session.has_save && matches!(b.name.as_str(), "BUTTON_CONTINUE" | "BUTTON_LOADGAME"))).collect();
@@ -2870,9 +3050,10 @@ impl NaughtyDogVm {
                         (false, true) => [225, 225, 225, 255],
                         (false, false) => [130, 130, 130, 255],
                     };
-                    let y = if root { 520 } else { 400 + 46 * i as i32 };
-                    let x = if root { 520 } else { 128 };
-                    out[2 + i] = text(UI_LAYER + 2 + i as u32, [x, y, 700, 50], &format!("{}{}", if on && !root { "> " } else { "" }, session.text(&button.text)), color, if root { 30 } else { 32 });
+                    let y = if root { 470 } else { 400 + 46 * i as i32 };
+                    let rect = if root { [0, y, SCREEN[0] as i32, 50] } else { [128, y, 700, 50] };
+                    let (style, color) = if root { (LabelStyle::PressStart, [200, 200, 195, 255]) } else { (LabelStyle::Menu(32), color) };
+                    out[2 + i] = make_label(UI_LAYER + 2 + i as u32, rect, &format!("{}{}", if on && !root { "> " } else { "" }, session.text(&button.text)), color, style, root);
                 }
             }
         }
@@ -2938,6 +3119,16 @@ impl NaughtyDogVm {
                             (f.contains("-trans") || f.contains("-mask")) && !f.contains("normal") && !f.contains("height")
                         });
                         let colour = found.iter().copied().find(|d| file(d).contains("-color")).or_else(|| if opacity.is_none() { found.first().copied() } else { None });
+                        let world_mask = m.fog_scroll.filter(|_| key == sid("general/particles/godrays-fog/default"));
+                        if let (Some(d), Some([x,y,z,scale])) = (opacity, world_mask) {
+                            let mut image = d.decode(&reader, directory.texture_base)?;
+                            for p in image.rgba.chunks_exact_mut(4) {
+                                p[3] = p[1];
+                            }
+                            session.next_model += 1;
+                            let path = host.upload_rgba(self.client, 0x4e50_0000 + session.next_model, image.width, image.height, &image.rgba)?;
+                            session.particle_coverage.insert(key, crysirror_vfx::TriplanarCoverage { texture: path.relative().into(), scroll: [x,y,z], scale });
+                        }
                         session.particle_roles.insert(key, format!("{} blend {:?} soft {:?} colour {} opacity {}", m.name, m.blend, m.depth_blend, colour.map_or("-".into(), file), opacity.map_or("-".into(), file)));
                         if colour.is_none() && opacity.is_none() {
                             m.samplers.clear();
@@ -3064,9 +3255,24 @@ impl NaughtyDogVm {
                 }
                 continue;
             }
-            let blend = material.map_or(crysirror_vfx::BlendMode::Additive, |m| crate::particle::blend(m.blend));
+            let blend = material.map_or(crysirror_vfx::BlendMode::Additive, |m| {
+                if effect.material == sid("general/particles/godrays-fog/default") && m.blend == (1, 1) {
+                    // Shader 0x1e accumulates the shaft's colour separately
+                    // from its scrolling fog coverage and depth fade.
+                    // The downsampled pass also sets hardware write masks
+                    // and target state. Until its per-material coverage
+                    // contribution is established, preserve the verified
+                    // emitted RGB without attenuating the opaque world.
+                    crysirror_vfx::BlendMode::AdditiveColor
+                } else {
+                    crate::particle::blend(m.blend)
+                }
+            });
             let soft = material.and_then(|m| m.depth_blend).unwrap_or(0.);
-            let (spec, frame) = crate::particle::emitter(effect, &effect.name, placement, texture, blend, soft, owner ^ k as u32);
+            let (mut spec, frame) = crate::particle::emitter(effect, &effect.name, placement, texture, blend, soft, owner ^ k as u32);
+            if let crysirror_vfx::RenderSpec::Sprite { triplanar_coverage, .. } = &mut spec.render {
+                *triplanar_coverage = session.particle_coverage.get(&effect.material).cloned();
+            }
             let system = crysirror_vfx::SystemSpec { emitters: vec![spec], ..Default::default() };
             let (scale, rotation, translation) = frame.to_scale_rotation_translation();
             let (x, y, z) = rotation.to_euler(glam::EulerRot::XYZ);
@@ -3677,6 +3883,7 @@ impl NaughtyDogVm {
             match loaded {
                 Ok(lib) => {
                     a.duration = Some(lib.seconds);
+                    a.looping = lib.seconds > 0. && (lib.looping || a.options.force_loop);
                     a.source = Some((lib.asset.clone(), lib.name.clone()));
                     a.start = session.stage.now;
                     a.base = 0.;
@@ -3712,8 +3919,8 @@ impl NaughtyDogVm {
                 }
                 continue;
             };
-            let t = a.elapsed(now);
-            if t >= d {
+            let elapsed = a.elapsed(now);
+            let Some(t) = a.sample_time(elapsed, d) else {
                 finished.push(*object);
                 let entities = Self::animation_entities(session, *object);
                 let controlled = entities.iter().any(|e| session.player.as_ref().is_some_and(|p| p.entity == Some(*e)) || session.npcs.iter().any(|n| n.entity == *e));
@@ -3721,12 +3928,12 @@ impl NaughtyDogVm {
                     held.push((*object, (asset.clone(), name.clone(), d)));
                 }
                 continue;
-            }
+            };
             let (bin, bout) = (a.options.blend_in.unwrap_or(SCRIPT_BLEND), a.options.blend_out.unwrap_or(SCRIPT_BLEND));
-            let w_in = if bin > 0. { t / bin } else { 1. };
-            let w_out = if bout > 0. { (d - t) / bout } else { 1. };
+            let w_in = if bin > 0. { elapsed / bin } else { 1. };
+            let w_out = if !a.looping && bout > 0. { (d - t) / bout } else { 1. };
             let w = w_in.min(w_out).clamp(0., 1.);
-            let layer = json!({"clip": name, "source": asset, "time": t, "speed": 0.0, "weight": w.max(1e-3), "target_weight": w.max(1e-3), "looping": false});
+            let layer = json!({"clip": name, "source": asset, "time": t, "speed": 0.0, "weight": w.max(1e-3), "target_weight": w.max(1e-3), "looping": a.looping});
             if let Some((align, fps, base)) = &a.root {
                 let x = (t * fps).clamp(0., (align.len() - 1) as f32);
                 let (i, f) = (x.floor() as usize, x.fract());
@@ -3843,12 +4050,12 @@ impl NaughtyDogVm {
         };
         let ap = |r: Option<&crate::player::Root>| r.and_then(|r| r.ap).map_or(glam::Mat4::from_translation(HANG_REACH), |(t, q)| glam::Mat4::from_rotation_translation(q, t));
         match mode {
-            crate::player::Mode::Rope | crate::player::Mode::WallRope => {}
+            crate::player::Mode::Rope | crate::player::Mode::RopeTransfer | crate::player::Mode::WallRope => return,
             crate::player::Mode::Hang => {
                 grip.climb = None;
                 if let Some(r) = root {
                     let delta = r.align.0 - r.before.0;
-                    if delta.length() < 0.2 {
+                    if !r.clip.starts_with("wall-vine-jump-right^ledge-grab") && delta.length() < 0.2 {
                         let frame = edge_frame(&edge, grip.s);
                         grip.s += frame.transform_vector3(glam::Vec3::new(delta.x, 0., 0.)).dot((edge.p1 - edge.p0).normalize_or_zero());
                     }
@@ -3864,7 +4071,10 @@ impl NaughtyDogVm {
                     grip.s = if grip.s < 0. { (next.1.p1 - next.1.p0).length() + grip.s } else { grip.s - len };
                     (grip.edge, edge) = next;
                 }
-                let m = edge_frame(&edge, grip.s) * ap(root).inverse();
+                let mut m = edge_frame(&edge, grip.s) * ap(root).inverse();
+                if let Some(r) = root.filter(|r| r.clip.starts_with("wall-vine-jump-right^ledge-grab")) {
+                    m *= glam::Mat4::from_rotation_translation(r.align.1, r.align.0);
+                }
                 let (_, _, t) = m.to_scale_rotation_translation();
                 p.position = t.to_array();
             }
@@ -4015,11 +4225,12 @@ impl NaughtyDogVm {
             let decoded = crate::anim::decode(&loaded, at, name, skeleton.animated)?;
             let channels = decoded.joints.iter().take(skeleton.names.len()).filter(|j| j.rotation.is_some() || j.translation.is_some() || j.scale.is_some()).count();
             anyhow::ensure!(channels > 0, "clip {name} animates none of the {} joints (unsupported {:?})", skeleton.names.len(), decoded.unsupported);
-            let seconds = if decoded.frames > 1 { decoded.frames as f32 / decoded.fps.max(1.) } else { 0. };
+            let seconds = crate::anim::duration(&loaded, at)?;
+            let looping = crate::anim::looping(&loaded, at)?;
             let glb = scene::animation_library(&scene::Rig { skeleton, clips: std::slice::from_ref(&decoded) }).to_glb()?;
             session.next_model += 1;
             let asset = host.upload_model(self.client, 0x4e44_0000 + session.next_model, &glb)?;
-            result = Some(LibraryClip { asset: asset.relative().to_string(), name: decoded.name.clone(), seconds, fps: decoded.fps.max(1.), align: decoded.align.clone(), ap_reference: decoded.ap_reference.clone() });
+            result = Some(LibraryClip { asset: asset.relative().to_string(), name: decoded.name.clone(), seconds, fps: decoded.fps.max(1.), looping, align: decoded.align.clone(), ap_reference: decoded.ap_reference.clone() });
             break;
         }
         session.libraries.insert(key, result.clone());
@@ -4059,35 +4270,55 @@ impl NaughtyDogVm {
         Ok(Some((skeleton, clips)))
     }
 
-    /// The English title logo of `menu.pak` (`logo2`, alpha from
-    /// `logo2-alpha`), uploaded once.
-    fn menu_logo(host: &mut dyn HostServices, client: ClientId, mount: &ArchiveMount) -> Result<Option<(VfsPath, u32, u32)>> {
-        let Some(path) = package_path(mount, "menu") else { return Ok(None) };
-        let package = crysirror_core::service::MemoryAssetReader(read_all(mount.open(&path)?.as_ref(), PACKAGE_LIMIT)?.into());
+    /// sub_428558 loads two menu boards, the logo and the full-viewport edge shadow.
+    fn load_menu_art(host: &mut dyn HostServices, client: ClientId, session: &mut Session) -> Result<()> {
+        let Some(path) = package_path(&session.mount, "menu") else { return Ok(()) };
+        let package = crysirror_core::service::MemoryAssetReader(read_all(session.mount.open(&path)?.as_ref(), PACKAGE_LIMIT)?.into());
         let directory = Directory::read(&package)?;
-        let mut colour = None;
-        let mut alpha = None;
-        for item in directory.items.iter().filter(|i| i.kind == "VRAM_DESC") {
-            let d = crate::texture::VramDesc::read(&package, item.payload_offset)?;
-            if d.name.contains("/menu/logo2.tga") {
-                colour = Some(d.decode(&package, directory.texture_base)?);
-            } else if d.name.contains("/menu/logo2-alpha.tga") {
-                alpha = Some(d.decode(&package, directory.texture_base)?);
+        let descriptors = directory.items.iter().filter(|i| i.kind == "VRAM_DESC")
+            .map(|item| crate::texture::VramDesc::read(&package, item.payload_offset)).collect::<Result<Vec<_>>>()?;
+        let mut upload = |stem: &str, id: u32| -> Result<Option<(VfsPath, u32, u32)>> {
+            let Some(image) = Self::menu_board(&package, directory.texture_base, &descriptors, stem)? else { return Ok(None) };
+            let path = host.upload_rgba(client, id, image.width, image.height, &image.rgba)?;
+            Ok(Some((path, image.width, image.height)))
+        };
+        session.logo = upload("logo2", 0x4e44_4c00)?;
+        session.menu_edge = upload("edge-shadow", 0x4e44_4c01)?.map(|(path, _, _)| path);
+        Ok(())
+    }
+
+    fn menu_board(package: &dyn crysirror_core::service::AssetReader, texture_base: u64, descriptors: &[crate::texture::VramDesc], stem: &str) -> Result<Option<crysirror_image::ImageSurface>> {
+        let find = |suffix: &str| {
+            let name = format!("/menu/{stem}{suffix}.tga");
+            descriptors.iter().find(|d| d.name.contains(&name))
+        };
+        let Some(rgb) = find("") else { return Ok(None) };
+        let mask = find("-alpha").with_context(|| format!("missing {stem} menu mask"))?.decode(package, texture_base)?;
+        let mut image = rgb.decode(package, texture_base)?;
+        ensure!((image.width, image.height) == (mask.width, mask.height), "{stem} menu mask size");
+        // Material shader 1 samples the red channel of tex1 for coverage.
+        for (pixel, coverage) in image.rgba.chunks_exact_mut(4).zip(mask.rgba.chunks_exact(4)) {
+            pixel[3] = coverage[0];
+        }
+        // The board's screen-space texture coordinates read the bottom row first.
+        image.rgba = image.rgba.chunks_exact(image.width as usize * 4).rev().flatten().copied().collect();
+        Ok(Some(image))
+    }
+
+    fn leave_soundtrack(&self, host: &mut dyn HostServices, session: &mut Session) -> Result<()> {
+        session.soundtrack.stop_menu(host, self.client)?;
+        let next_movie = session.game.as_ref().and_then(|g| {
+            let (n, s) = g.rt.inner.tasks.find(sid(session.tasks.get(session.current)?))?;
+            match &g.rt.inner.tasks.nodes[n].subnodes[s].manager {
+                Manager::PlayMovie(name) => Some(name),
+                _ => None,
             }
-        }
-        let (Some(mut c), Some(a)) = (colour, alpha) else { return Ok(None) };
-        ensure!(c.width == a.width && c.height == a.height, "logo mask size");
-        for (px, m) in c.rgba.chunks_exact_mut(4).zip(a.rgba.chunks_exact(4)) {
-            px[3] = m[0];
-        }
-        // The logo is stored bottom row first (the menu board's texture
-        // coordinates flip it): "AMONG THIEVES" sits above the title
-        // otherwise.
-        let row = c.width as usize * 4;
-        let flipped: Vec<u8> = c.rgba.chunks_exact(row).rev().flatten().copied().collect();
-        c.rgba = flipped;
-        let asset = host.upload_rgba(client, 0x4e44_4c00, c.width, c.height, &c.rgba)?;
-        Ok(Some((asset, c.width, c.height)))
+        });
+        // A script can start a film's sound while the previous task is still
+        // running. The matching video adopts that voice on entry.
+        session.movie_waiting_for_sound = None;
+        session.soundtrack.keep_movie(host, self.client, next_movie.map(String::as_str))?;
+        Ok(())
     }
 
     fn change_task(&self, host: &mut dyn HostServices, session: &mut Session, at: (usize, usize)) -> Result<()> {
@@ -4098,6 +4329,7 @@ impl NaughtyDogVm {
         session.current = index;
         let plan = Self::plan(session)?;
         if session.plan.as_ref().is_some_and(|p| p.levels == plan.levels) {
+            self.leave_soundtrack(host, session)?;
             session.plan = Some(plan);
             session.ui = None;
             return self.enter_task(host, session);
@@ -4307,7 +4539,9 @@ impl NaughtyDogVm {
             }
             let movement = session.game.as_ref().map_or([0; 2], |g| g.rt.inner.movement);
             let below = session.ground.height(p.position[0], p.position[2], p.position[1] + 0.6);
-            let grounded = p.fall >= 0. && below.is_some_and(|h| h >= p.position[1] - p.fall.max(0.) * seconds - 0.05);
+            let in_arc = p.wall_flight.and_then(|w| w.arc);
+            let arc_grip = in_arc.filter(|a| a.elapsed >= a.seconds && session.ground.edge(a.grip.body, a.grip.edge).is_some()).map(|a| a.grip);
+            let grounded = in_arc.is_none() && p.fall >= 0. && below.is_some_and(|h| h >= p.position[1] - p.fall.max(0.) * seconds - 0.05);
             let dropped = p.air_top.map_or(0., |top| top - p.position[1]);
             let ahead = |d: f32| session.ground.height(p.position[0] + p.yaw.sin() * d, p.position[2] + p.yaw.cos() * d, p.position[1] + 0.6);
             let slope = match (below, ahead(0.5)) {
@@ -4324,6 +4558,7 @@ impl NaughtyDogVm {
             let (mut lateral, mut climb, mut release) = (0., false, false);
             let mut leap_to = None;
             let mut step = 0i8;
+            let mut corner = None;
             p.regrab = (p.regrab - seconds).max(0.);
             if mode == crate::player::Mode::Hang {
                 if let Some(edge) = p.grip.and_then(|g| session.ground.edge(g.body, g.edge).map(|e| (g, e))).map(|(g, e)| edge_frame(&e, g.s)) {
@@ -4336,7 +4571,18 @@ impl NaughtyDogVm {
                     if pad.hit(pb::CROSS) {
                         let toward = if lateral.abs() > 0.5 { right * lateral.signum() } else { glam::Vec3::Y };
                         leap_to = p.grip.and_then(|g| Self::leap_target(&session.ground, g, toward));
-                    } else if !climb && stick.dot(facing).abs() > 0.7 {
+                    } else if lateral.abs() > 0.5 && !climb {
+                        if let Some((target, request)) = p.grip.and_then(|g| corner_target(&session.ground, g, lateral)) {
+                            leap_to = Some(target);
+                            corner = Some(request);
+                        }
+                    } else if stick.dot(facing).abs() > 0.7 {
+                        // A handhold on a climbing wall can have walkable collision
+                        // immediately behind it. Climb to the next hold ahead of
+                        // mantling across that collision unless the authored edge
+                        // explicitly offers a standing surface.
+                        let stand_edge = p.grip.and_then(|g| session.ground.edge(g.body, g.edge))
+                            .is_some_and(|e| e.flags & crate::collision::EDGE_CAN_STAND != 0);
                         // Wall and ladder climbing: the hold above or below
                         // within a hand's reach (1 m).
                         let toward = if stick.dot(facing) > 0. { glam::Vec3::Y } else { -glam::Vec3::Y };
@@ -4345,7 +4591,8 @@ impl NaughtyDogVm {
                             let there = session.ground.edge(g.body, g.edge).map(|e| edge_frame(&e, g.s).transform_point3(glam::Vec3::ZERO));
                             here.zip(there).is_some_and(|(a, b)| (b.y - a.y).abs() <= 1.)
                         });
-                        if target.is_some() {
+                        if target.is_some() && !(climb && stand_edge) {
+                            climb = false;
                             step = toward.y.signum() as i8;
                             leap_to = target;
                         }
@@ -4362,6 +4609,7 @@ impl NaughtyDogVm {
                 climb = false;
                 step = 0;
                 leap_to = None;
+                corner = None;
                 if stick.dot(facing) > 0.7 {
                     let here = p.grip.and_then(|g| session.ground.edge(g.body, g.edge).map(|e| edge_frame(&e, g.s).transform_point3(glam::Vec3::ZERO)));
                     leap_to = p.grip.and_then(|g| Self::leap_target(&session.ground, g, facing)).filter(|g| {
@@ -4370,13 +4618,17 @@ impl NaughtyDogVm {
                     });
                 }
             }
-            let reach = glam::Vec3::from_array(p.position) + glam::Quat::from_rotation_y(p.yaw) * HANG_REACH;
-            let candidate = if mode == crate::player::Mode::Ground && p.regrab <= 0. && p.fall > -1. && (p.air_top.is_some() || p.fall > 0.) {
+            // On a lateral wall-rope release the hands still reach toward the
+            // wall, even while the character moves parallel to it.
+            let grab_yaw = p.wall_flight.map_or(p.yaw, |w| w.wall_yaw);
+            let grab_facing = glam::Quat::from_rotation_y(grab_yaw) * glam::Vec3::Z;
+            let reach = glam::Vec3::from_array(p.position) + glam::Quat::from_rotation_y(grab_yaw) * HANG_REACH;
+            let candidate = if in_arc.is_none() && mode == crate::player::Mode::Ground && p.regrab <= 0. && p.fall > -1. && (p.air_top.is_some() || p.fall > 0.) {
                 session
                     .ground
                     .edges_near(reach, 0.45)
                     .into_iter()
-                    .filter(|(_, e, _)| glam::Vec3::new(-e.n1.x, 0., -e.n1.z).normalize_or_zero().dot(facing) > 0.3)
+                    .filter(|(_, e, _)| glam::Vec3::new(-e.n1.x, 0., -e.n1.z).normalize_or_zero().dot(grab_facing) > 0.3)
                     .filter(|(_, e, _)| e.flags == 0 || e.flags & (crate::collision::EDGE_CAN_HANG | crate::collision::EDGE_LADDER) != 0)
                     .min_by(|a, b| crate::ground::segment_distance(reach, a.1.p0, a.1.p1).total_cmp(&crate::ground::segment_distance(reach, b.1.p0, b.1.p1)))
             } else {
@@ -4454,7 +4706,7 @@ impl NaughtyDogVm {
                             p.yaw = d.x.atan2(d.z);
                         }
                         let rotation = glam::Quat::from_rotation_y(p.yaw).to_array();
-                        let options = crate::ss::Animate { blend_in: Some(0.1), blend_out: Some(0.2), locator: Some((p.position, rotation)) };
+                        let options = crate::ss::Animate { blend_in: Some(0.1), blend_out: Some(0.2), locator: Some((p.position, rotation)), ..Default::default() };
                         World::animate(&mut session.stage, sid("player"), strike.hero, &options);
                         if strike.npc != 0 {
                             World::animate(&mut session.stage, target, strike.npc, &options);
@@ -4471,7 +4723,7 @@ impl NaughtyDogVm {
             let death = session.death_state.take();
             // A free rope within reach of the hands while airborne.
             let hands = glam::Vec3::from_array(p.position) + glam::Vec3::Y * ROPE_HANDS;
-            let rope_found = if p.rope.is_none() && p.regrab <= 0. && (p.air_top.is_some() || p.fall != 0.) {
+            let rope_found = if p.rope.is_none() && p.wall_rope.is_none() && p.wall_flight.is_none() && p.regrab <= 0. && (p.air_top.is_some() || p.fall != 0.) {
                 session.stage.spawners.iter().filter(|(n, s)| s.process_type == TYPE_FREE_ROPE && session.stage.visible.contains(n)).find_map(|(_, s)| {
                     let anchor = glam::Vec3::from_array(s.position);
                     let length = s.art_group.as_deref().and_then(|a| a.strip_prefix("rope")).and_then(|a| a.strip_suffix('m')).and_then(|m| m.parse::<f32>().ok()).unwrap_or(5.);
@@ -4484,33 +4736,50 @@ impl NaughtyDogVm {
             // A wall rope: grabbed from the air within reach of the hands,
             // or from the ground walking into its foot.
             let grounded_now = p.air_top.is_none() && p.fall == 0.;
-            let wall_found = if p.wall_rope.is_none() && p.rope.is_none() && p.regrab <= 0. {
-                session.stage.spawners.iter().filter(|(n, s)| s.process_type == TYPE_WALL_ROPE && session.stage.visible.contains(n)).find_map(|(_, s)| {
-                    let top = glam::Vec3::from_array(s.position);
+            if mode == crate::player::Mode::WallRope || mode == crate::player::Mode::Rope {
+                release = pad.hit(pb::CIRCLE) && p.controls;
+            }
+            let side_input = len.min(1.) * stick.dot(p.wall_rope.map_or(right, |w| w.facing().cross(glam::Vec3::Y)));
+            let from_edge = mode == crate::player::Mode::Hang && side_input.abs() > 0.5;
+            let wall_found = if (mode == crate::player::Mode::Ground || from_edge) && p.wall_flight.is_none() && p.wall_rope.is_none() && p.rope.is_none() && p.regrab <= 0. {
+                let grip_point = p.grip.and_then(|g| session.ground.edge(g.body, g.edge).map(|e| edge_frame(&e, g.s).w_axis.truncate()));
+                session.stage.spawners.iter().filter(|(n, s)| s.process_type == TYPE_WALL_ROPE && session.stage.visible.contains(n)).filter_map(|(id, s)| {
+                    let top = session.stage.poses.get(id).map_or_else(|| glam::Vec3::from_array(s.position), |m| m.w_axis.truncate());
                     let length = s.properties.iter().find(|(k, _)| *k == TAG_ROPE_LENGTH).and_then(|(_, v)| match v {
                         crate::ss::Property::Float(f) => Some(*f),
                         _ => None,
                     }).unwrap_or(8.);
-                    let d = hands - top;
+                    if !length.is_finite() || length < 0.2 {
+                        return None;
+                    }
+                    let d = top - hands;
                     let flat = glam::Vec2::new(d.x, d.z).length();
-                    let along = -d.y;
-                    let air = !grounded_now && flat < ROPE_REACH && along > 0. && along < length;
-                    let ground = grounded_now && heading.is_some() && flat < 0.8 && along > 0. && along <= length + 0.3;
-                    (air || ground).then(|| {
-                        let yaw = (top.x - hands.x).atan2(top.z - hands.z);
-                        (WallRopeHold { top, length, below: along.min(length), yaw: if flat > 0.05 { yaw } else { p.yaw }, swing: 0., rate: 0. }, air)
+                    let side = grip_point.map_or(0., |at| (top - at).dot(right));
+                    let transfer = from_edge && side * side_input.signum() > 0.1 && flat < 1.05 && d.y > 0. && d.y < length;
+                    let air = mode == crate::player::Mode::Ground && !grounded_now && flat < ROPE_REACH && d.y > 0. && d.y < length;
+                    let foot = mode == crate::player::Mode::Ground && grounded_now && heading.is_some() && flat < 0.8 && d.y > 0. && d.y <= length + 0.3;
+                    (transfer || air || foot).then(|| {
+                        let yaw = if transfer || flat <= 0.05 { p.yaw } else { d.x.atan2(d.z) };
+                        // The transfer's ending align is 0.47 m above its start.
+                        let below = if transfer { d.y - 0.47 } else { d.y };
+                        let hold = WallRopeHold { top, length, below: below.clamp(0.2, length), yaw, swing: 0., rate: 0., turned: false, left: false };
+                        (flat, *id, hold, air)
                     })
-                })
+                }).min_by(|a,b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)))
             } else {
                 None
             };
-            let wall_rope_grab = wall_found.map(|(_, air)| air);
-            if let Some((hold, _)) = wall_found {
-                p.wall_rope = Some(hold);
-            }
-            // Climbing only while the rope hangs still.
-            let wall_rope_climb = if p.wall_rope.is_some_and(|w| w.swing.abs() < 0.15) { pad.left[1].signum() as i8 } else { 0 };
-            let wall_rope_swing = p.wall_rope.map_or(0., |w| w.rate);
+            let wall_rope_grab = wall_found.filter(|_| !from_edge).map(|(_, _, _, air)| air);
+            let to_edge = p.wall_rope.filter(|w| mode == crate::player::Mode::WallRope && w.swing_speed() < 0.6 && side_input.abs() > 0.5)
+                .and_then(|w| wall_rope_edge(&session.ground, w, side_input));
+            let rope_transfer = if from_edge && wall_found.is_some() {
+                Some(crate::player::RopeTransfer::ToRope { right: side_input > 0. })
+            } else {
+                to_edge.map(|_| crate::player::RopeTransfer::ToEdge { right: side_input > 0. })
+            };
+            let wall_rope_climb = if p.controls && p.wall_rope.is_some_and(|w| w.swing.abs() < 0.15) && pad.left[1].abs() > 0.45 { pad.left[1].signum() as i8 } else { 0 };
+            let wall_rope_swing = p.wall_rope.map_or(0., |w| w.swing_speed() * if w.left { -1. } else { 1. });
+            let wall_rope_turn = p.wall_rope.is_some_and(|w| w.turned);
             let wall_rope_top = p.wall_rope.is_some_and(|w| w.below <= 0.35);
             let wall_rope_bottom = p.wall_rope.is_some_and(|w| w.below >= w.length - 0.2 || session.ground.height(p.position[0], p.position[2], p.position[1] + 0.1).is_some_and(|h| p.position[1] - h < 0.3));
             let rope_grab = rope_found.is_some();
@@ -4518,6 +4787,8 @@ impl NaughtyDogVm {
                 p.rope = Some(hold);
             }
             let rope_swing = p.rope.map_or(0., |r| r.rate);
+            let wall_jump = p.wall_rope.filter(|_| mode == crate::player::Mode::WallRope && pad.hit(pb::CROSS) && p.controls && !no_jump)
+                .and_then(|w| wall_jump_target(&session.ground, &session.player_clips, w));
             let bar = p.grip.is_some_and(|g| is_bar(&session.ground, &g));
             // A wall 0.6 m ahead at chest height.
             let wall_ahead = {
@@ -4553,12 +4824,13 @@ impl NaughtyDogVm {
                     slope,
                     movement: graph.movement_index(wanted).or_else(|| graph.movement_index(sid("run"))).unwrap_or(0),
                     weapon: graph.weapon_index(sid(weapon_set)).or_else(|| graph.weapon_index(sid("no-weapon"))).unwrap_or(1),
-                    grab: candidate.is_some(),
+                    grab: arc_grip.is_some() || candidate.is_some(),
                     lateral,
                     climb,
                     drop: release,
                     leap: leap_to.is_some() && step == 0,
                     step,
+                    corner,
                     seconds,
                     cover: take_cover,
                     uncover: leave_cover,
@@ -4577,6 +4849,11 @@ impl NaughtyDogVm {
                     wall_rope_top,
                     wall_rope_bottom,
                     wall_rope_swing,
+                    wall_rope_turn,
+                    wall_rope_target: wall_jump.is_some(),
+                    wall_rope_linear_speed: p.wall_rope.map_or(0., |w| w.below * w.rate),
+                    wall_rope_left: p.wall_rope.map_or_else(|| p.wall_flight.is_some_and(|w| w.left), |w| w.left),
+                    rope_transfer,
                     bar,
                     wall_ahead,
                 };
@@ -4590,6 +4867,41 @@ impl NaughtyDogVm {
                         if let Some(lift) = step.lift {
                             p.fall = -lift;
                         }
+                        if let Some(root) = &step.root {
+                            let clip = session.player_clips.get(&sid(&root.clip));
+                            let layer = step.layers.iter().rev().find(|l| l.clip == root.clip);
+                            if let (Some(clip), Some(layer)) = (clip, layer) {
+                                let profile = session.motion_mesh.and_then(|k| session.motion_profiles.get(&k));
+                                let pos = glam::Vec3::from_array(p.position);
+                                session.motion_clock.advance(&session.motion_tracks, anim.anim.machine.state,
+                                    &root.clip, layer.time, clip.duration, seconds, depth > 0., |cue| {
+                                    let anchor = p.grip.and_then(|g| session.ground.edge(g.body, g.edge).map(|e| {
+                                        let at = edge_frame(&e, g.s).w_axis.truncate();
+                                        (at, e.n1.normalize_or_zero())
+                                    }));
+                                    let hit = cue.needs_contact().then(|| {
+                                        if let Some((at, normal)) = anchor {
+                                            let below = at - glam::Vec3::Y * 0.05;
+                                            if let Some(hit) = session.ground.raycast_hit((below + normal * 0.3).to_array(), (below - normal * 0.3).to_array()) {
+                                                return Some(hit);
+                                            }
+                                        }
+                                        session.ground.raycast_hit((pos + glam::Vec3::Y * 0.4).to_array(), (pos - glam::Vec3::Y * 0.5).to_array())
+                                    }).flatten();
+                                    let Some(sound) = cue.sound(profile, hit.map(|h| h.pat)) else { return };
+                                    let at = if cue.hand() && let Some((edge, _)) = anchor {
+                                        crate::ss::sound_natives::SoundAt::Point(edge.to_array())
+                                    } else if cue.joint != 0 {
+                                        crate::ss::sound_natives::SoundAt::Joint { object: sid("player"), joint: cue.joint }
+                                    } else { crate::ss::sound_natives::SoundAt::Point(p.position) };
+                                    let handle = World::play_sound(&mut session.stage, sound, at, cue.gain, cue.pitch);
+                                    if handle != 0 {
+                                        session.motion_cue_count += 1;
+                                        session.last_motion_cue = Some((root.clip.clone(), layer.time, sound));
+                                    }
+                                });
+                            }
+                        }
                         ground_speed = Some(step.speed);
                         p.yaw = anim.yaw;
                         let source = session.rig_libraries.get(&format!("{:?}", RigRef::Player));
@@ -4599,29 +4911,60 @@ impl NaughtyDogVm {
                     Err(e) => session.stage.log(format!("player animation: {e:#}")),
                 }
             }
+            if mode != crate::player::Mode::RopeTransfer && step_mode == crate::player::Mode::RopeTransfer {
+                p.transfer_from = Some(glam::Vec3::from_array(p.position));
+                if let Some(grip) = to_edge {
+                    p.grip = Some(grip);
+                }
+            }
+            if matches!(step_mode, crate::player::Mode::WallRope | crate::player::Mode::RopeTransfer) {
+                if let Some((_, _, hold, _)) = wall_found {
+                    p.wall_rope = Some(hold);
+                }
+            }
+            if mode == crate::player::Mode::RopeTransfer && step_mode != mode {
+                p.transfer_from = None;
+                if step_mode == crate::player::Mode::Hang {
+                    p.wall_rope = None;
+                } else {
+                    p.grip = None;
+                }
+            }
             // A jump between edges eases the root from where it started
             // to the target edge's hang (over `LEAP_SECONDS`).
             if step_mode == crate::player::Mode::Leap {
                 if p.leap.is_none() {
-                    p.leap = leap_to.map(|g| (glam::Vec3::from_array(p.position), g, 0.));
+                    p.leap = leap_to.map(|target| EdgeLeap { from: glam::Vec3::from_array(p.position), target, elapsed: 0., corner_yaw: corner.map(|_| p.yaw) });
                 }
-                if let Some((from, to, t)) = p.leap.as_mut() {
-                    *t += seconds;
-                    if let Some(edge) = session.ground.edge(to.body, to.edge) {
-                        let target = edge_frame(&edge, to.s) * glam::Mat4::from_translation(HANG_REACH).inverse();
-                        let x = (*t / LEAP_SECONDS).clamp(0., 1.);
-                        let ease = x * x * (3. - 2. * x);
-                        p.position = from.lerp(target.to_scale_rotation_translation().2, ease).to_array();
+                if let Some(leap) = p.leap.as_mut() {
+                    leap.elapsed += seconds;
+                    if let Some(edge) = session.ground.edge(leap.target.body, leap.target.edge) {
+                        let target = edge_frame(&edge, leap.target.s).transform_point3(-HANG_REACH);
+                        let pose = leap.corner_yaw.zip(step_root.as_ref()).and_then(|(yaw, root)| {
+                            corner_pose(&session.player_clips, root, yaw, leap.from, target)
+                        });
+                        if let Some((position, yaw)) = pose {
+                            p.position = position.to_array();
+                            p.yaw = yaw;
+                            if let Some(anim) = p.anim.as_mut() { anim.yaw = yaw; }
+                        } else {
+                            let x = (leap.elapsed / LEAP_SECONDS).clamp(0., 1.);
+                            p.position = leap.from.lerp(target, x * x * (3. - 2. * x)).to_array();
+                        }
                     }
                 }
-            } else if let Some((_, to, _)) = p.leap.take() {
-                p.grip = Some(to);
+            } else if let Some(leap) = p.leap.take() {
+                p.grip = Some(leap.target);
             }
             if step_mode == crate::player::Mode::Ground && p.grip.is_some() && mode == crate::player::Mode::Hang {
                 p.regrab = 0.4;
             }
+            if let Some(grip) = arc_grip.filter(|_| step_mode == crate::player::Mode::Hang) {
+                p.grip = Some(grip);
+                if let Some(flight) = &mut p.wall_flight { flight.arc = None; }
+            }
             // On an edge the root follows the grip, not the ground.
-            if step_mode != crate::player::Mode::Ground && step_mode != crate::player::Mode::Leap {
+            if matches!(step_mode, crate::player::Mode::Hang | crate::player::Mode::Climb) {
                 if p.grip.is_none() {
                     // A grab (or a hang without a grip): the nearest edge
                     // in reach.
@@ -4629,8 +4972,8 @@ impl NaughtyDogVm {
                     p.grip = found.map(|(edge, e, body)| Grip { body, edge, s: (reach - e.p0).dot((e.p1 - e.p0).normalize_or_zero()).clamp(0., (e.p1 - e.p0).length()), climb: None });
                 }
                 Self::follow_grip(p, &session.ground, step_mode, step_root.as_ref());
-            } else if p.grip.take().is_some() {
-                p.air_top = None;
+            } else if step_mode != crate::player::Mode::RopeTransfer && p.grip.take().is_some() {
+                p.air_top = (step_mode == crate::player::Mode::Ground && mode == crate::player::Mode::Hang).then_some(p.position[1]);
             }
             let on_edge = step_mode != crate::player::Mode::Ground && (p.grip.is_some() || p.leap.is_some());
             let speed = match ground_speed {
@@ -4645,9 +4988,15 @@ impl NaughtyDogVm {
                 }
                 None => 0.,
             };
-            if speed > 0.01 {
-                let step = speed * seconds;
-                let (dx, dz) = (p.yaw.sin() * step, p.yaw.cos() * step);
+            let catching = step_mode == crate::player::Mode::Hang && p.anim.as_ref().is_some_and(|a| a.anim.machine.state == sid("wall-rope-jump-ledge-end"));
+            if !catching && (step_mode != crate::player::Mode::Ground || swim || (grounded && p.fall >= 0.)) {
+                p.wall_flight = None;
+            }
+            let carried = p.wall_flight.filter(|_| step_mode == crate::player::Mode::Ground);
+            let in_flight = step_mode == crate::player::Mode::Ground && !swim && (p.air_top.is_some() || p.fall != 0. || carried.is_some());
+            let travel = (glam::Vec3::new(p.yaw.sin(), 0., p.yaw.cos()) * speed + carried.map_or(glam::Vec3::ZERO, |w| w.velocity)) * seconds;
+            if in_arc.is_none() && travel.length_squared() > 0. {
+                let (dx, dz) = (travel.x, travel.z);
                 // Walls stop the player (rays at knee and chest height,
                 // 0.3 m ahead); blocked moves slide along one axis. Step up
                 // at most 0.6 m; a missing surface ahead blocks.
@@ -4663,14 +5012,14 @@ impl NaughtyDogVm {
                         session.ground.raycast(from, [from[0] + mx * reach, from[1], from[2] + mz * reach]).is_some()
                     });
                     let floor = session.ground.height(next[0], next[1], p.position[1] + 0.6);
-                    if !wall && (floor.is_some_and(|h| h > p.position[1] - 3. || !grounded) || session.ground.is_empty()) {
+                    if !wall && (floor.is_some_and(|h| h > p.position[1] - 3. || !grounded) || session.ground.is_empty() || in_flight) {
                         p.position[0] = next[0];
                         p.position[2] = next[1];
                         break;
                     }
                 }
             }
-            let support = if on_edge { None } else { session.ground.support(p.position[0], p.position[2], p.position[1] + 0.6) };
+            let support = if on_edge || in_arc.is_some() { None } else { session.ground.support(p.position[0], p.position[2], p.position[1] + 0.6) };
             // Swimming holds the body 1.3 m under the surface, no fall.
             if let (true, Some(h)) = (swim, surface) {
                 p.position[1] = h - 1.3;
@@ -4694,13 +5043,15 @@ impl NaughtyDogVm {
                 // above a drop of more than 8 m (the hanging car at the
                 // start of `train-wreck-climb`) holds the player in place.
                 Some(h) if p.fall == 0. && p.air_top.is_none() && p.position[1] - h > 8. => {}
-                Some(_) => {
+                // A leap may spend its entire ascent over empty collision
+                // space. Integrate it until the next support or grip.
+                floor if floor.is_some() || (in_flight && in_arc.is_none()) => {
                     let top = p.air_top.get_or_insert(p.position[1]);
                     *top = top.max(p.position[1]);
                     p.fall = (p.fall + 9.8 * seconds).min(30.);
                     p.position[1] -= p.fall * seconds;
                 }
-                None => {}
+                _ => {}
             }
             // On a free rope: a pendulum about the anchor pushed by the
             // forward/back stick; leaving the rope states lets go.
@@ -4725,26 +5076,34 @@ impl NaughtyDogVm {
                     let dt = seconds.clamp(0., 0.1);
                     let climb = f32::from(wall_rope_climb);
                     w.below = (w.below - climb * WALL_ROPE_CLIMB * dt).clamp(0.2, w.length);
-                    // A pendulum of the held length pumped by the stick
-                    // sideways, damped (not native).
-                    let accel = -9.8 / w.below.max(0.5) * w.swing.sin() + pad.left[0] * WALL_ROPE_PUMP - w.rate * 0.6;
-                    w.rate += accel * dt;
-                    w.swing = (w.swing + w.rate * dt).clamp(-0.9, 0.9);
-                    if w.swing.abs() >= 0.9 {
-                        w.rate = 0.;
-                    }
-                    let facing = glam::Vec3::new(w.yaw.sin(), 0., w.yaw.cos());
-                    let side = facing.cross(glam::Vec3::Y);
-                    let hands = w.top - glam::Vec3::Y * (w.below * w.swing.cos()) + side * (w.below * w.swing.sin()) - facing * WALL_ROPE_OFFSET;
-                    p.position = (hands - glam::Vec3::Y * ROPE_HANDS).to_array();
+                    w.advance(if p.controls { side_input } else { 0. }, dt);
+                    p.position = w.root().to_array();
                     p.yaw = w.yaw;
                     p.fall = 0.;
                     p.air_top = None;
                 }
+            } else if step_mode == crate::player::Mode::RopeTransfer {
+                if let (Some(root), Some(from), Some(hold)) = (&step_root, p.transfer_from, p.wall_rope) {
+                    let target = if root.clip.starts_with("ledge-grab^wall-rope") {
+                        Some(hold.root())
+                    } else {
+                        p.grip.and_then(|g| session.ground.edge(g.body, g.edge).map(|e| edge_frame(&e, g.s).transform_point3(-HANG_REACH)))
+                    };
+                    if let Some(target) = target {
+                        if let Some(position) = transfer_root(&session.player_clips, root, from, target, hold.yaw) {
+                            p.position = position.to_array();
+                        }
+                    }
+                }
             } else if let Some(w) = p.wall_rope.take() {
-                // Off the rope: over its top onto the surface beyond when the
-                // climb ended there, otherwise as the jump or drop left it.
-                if w.below <= 0.35 && wall_rope_climb > 0 {
+                let jumped = p.anim.as_ref().is_some_and(|a| [sid("wall-rope-jump"), sid("wall-rope-jump-miss")].contains(&a.anim.machine.state));
+                if jumped || release {
+                    let velocity = w.velocity();
+                    p.wall_flight = Some(WallFlight { velocity: glam::Vec3::new(velocity.x, 0., velocity.z), wall_yaw: w.yaw, left: w.left, arc: wall_jump });
+                    p.fall -= velocity.y;
+                    p.air_top = Some(p.position[1]);
+                }
+                if !jumped && !release && w.below <= 0.35 && wall_rope_climb > 0 {
                     let facing = glam::Vec3::new(w.yaw.sin(), 0., w.yaw.cos());
                     let onto = w.top + facing * 0.6;
                     let h = session.ground.height(onto.x, onto.z, onto.y + 1.).unwrap_or(w.top.y);
@@ -4752,15 +5111,41 @@ impl NaughtyDogVm {
                     p.fall = 0.;
                     p.air_top = None;
                 }
-                p.regrab = 0.6;
+                // A rope jump may catch an edge immediately. Rope acquisition
+                // is gated separately until the character has moved clear.
+                p.regrab = if jumped { 0. } else { 0.6 };
             } else if let Some(r) = p.rope.take() {
                 // Released: the swing's tangential speed carries upward.
                 p.fall = -(r.rate * r.reach * r.angle.cos()).abs().min(6.);
                 p.air_top = Some(p.position[1]);
                 p.regrab = 0.6;
             }
+            if let Some(flight) = p.wall_flight.as_mut() {
+                if let Some(arc) = flight.arc.as_mut() {
+                    if step_mode != crate::player::Mode::Ground || session.ground.edge(arc.grip.body, arc.grip.edge).is_none() {
+                        flight.arc = None;
+                    } else {
+                        arc.elapsed = (arc.elapsed + seconds).min(arc.seconds);
+                        p.position = arc.position().to_array();
+                        p.fall = 10. * arc.elapsed - ((arc.aim.y - arc.start.y) / arc.seconds + 5. * arc.seconds);
+                        p.air_top = Some(p.air_top.unwrap_or(p.position[1]).max(p.position[1]));
+                    }
+                }
+            }
+            let mut model_yaw = p.yaw;
+            if let (Some(hold), Some(root)) = (p.wall_rope, &step_root) {
+                if root.clip.starts_with("wall-vine-run-") || root.clip.starts_with("wall-vine-walk-") {
+                    // The run clip advances on clip +Z; the turn's align track
+                    // rotates it through 180 degrees before the reverse run.
+                    let direction = if hold.left { -1. } else { 1. };
+                    let side = if root.clip.contains("turn-180") { -direction } else { direction };
+                    let rotation = glam::Quat::from_rotation_y(hold.yaw - side * std::f32::consts::FRAC_PI_2) * root.align.1;
+                    let direction = rotation * glam::Vec3::Z;
+                    model_yaw = direction.x.atan2(direction.z);
+                }
+            }
             if let Some(id) = p.entity {
-                world.push(json!({"op": "set_transform", "id": id, "transform": {"translation": p.position, "rotation_degrees": [0.0, p.yaw.to_degrees(), 0.0], "scale": [1.0, 1.0, 1.0]}}));
+                world.push(json!({"op": "set_transform", "id": id, "transform": {"translation": p.position, "rotation_degrees": [0.0, model_yaw.to_degrees(), 0.0], "scale": [1.0, 1.0, 1.0]}}));
             }
             // The camera drifts behind a player moving away from it unless
             // the view keys turn it.
@@ -4829,6 +5214,7 @@ impl NaughtyDogVm {
                 crate::player::Mode::Swim => "Swimming",
                 crate::player::Mode::Rope => "Rope",
                 crate::player::Mode::WallRope => "WallRope",
+                crate::player::Mode::RopeTransfer => "RopeTransfer",
             };
             sid(class)
         });
@@ -4956,6 +5342,16 @@ impl NaughtyDogVm {
         }
         self.script_animations(host, session, &mut world);
         self.serve_speech(host, session);
+        if let Some(game) = &mut session.game {
+            if let Some((name, offset)) = game.rt.inner.game.movie_sound.take() {
+                session.soundtrack.preroll(host, self.client, &name, offset)?;
+            }
+            for id in std::mem::take(&mut game.rt.inner.game.stingers) {
+                if let Err(e) = session.soundtrack.stinger(host, self.client, &game.rt.dc, id) {
+                    session.stage.log(format!("music stinger {id:#010x}: {e:#}"));
+                }
+            }
+        }
         self.serve_sounds(host, session);
         session.stage.player_locator = session.player.as_ref().map(|p| (p.position, glam::Quat::from_rotation_y(p.yaw).to_array()));
         session.stage.publish_lights();
@@ -5048,6 +5444,8 @@ impl NaughtyDogVm {
         if let Some(end) = session.movie {
             if skip || session.stage.now >= end {
                 session.movie = None;
+                session.movie_waiting_for_sound = None;
+                session.soundtrack.stop_movie(host, self.client)?;
                 if std::mem::take(&mut session.movie_video) {
                     world.push(json!({"op": "set_video", "name": "movie", "video": null}));
                     layers.push(json!({"op": "remove", "id": MOVIE_LAYER}));
@@ -5242,7 +5640,7 @@ impl NaughtyDogVm {
                 for state in crate::player::STATES {
                     if let Some(s) = table.get(sid(state)) {
                         wanted.extend(graph.clips(s.tree));
-                        if graph.mirrored(s.mirror) {
+                        if graph.mirrored(s.mirror) || matches!(*state, "wall-rope-swing" | "wall-rope-jump" | "wall-rope-jump-miss" | "wall-rope-swing-180" | "wall-rope-jump-ledge-end") {
                             mirrored.extend(graph.clips(s.tree));
                         }
                     }
@@ -5295,12 +5693,25 @@ impl NaughtyDogVm {
             (None, Some(_)) if skinned => Some(RigRef::Own(art.to_owned())),
             _ => None,
         };
+        // SimpleActor birth (sub_160428) requests "idle" on the base layer.
+        // Read it from the same art group's hierarchy before a spawn script
+        // can replace it, e.g. with a level-authored bird flight.
+        let own_idle = if skinned && spawners.iter().any(|s| s.process_type == sid("SimpleActor")) {
+            match (own.as_ref(), crate::anim::items(&loaded).find(|(name, _)| *name == "idle")) {
+                (Some(skeleton), Some((name, at))) if crate::anim::hierarchy(&loaded, at)? == skeleton.hash => {
+                    Some((crate::anim::decode(&loaded, at, name, skeleton.animated)?, crate::anim::looping(&loaded, at)?))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
         let rig = match (&binding, &session.player_rig) {
             (Some((None, _)), Some(Some((skeleton, clips)))) => Some(scene::Rig { skeleton, clips }),
             (Some((Some(_), _)), _) => npc_key.as_ref().and_then(|k| session.npc_rigs.get(k)).and_then(|r| r.as_ref()).map(|(skeleton, clips)| scene::Rig { skeleton, clips }),
             // Skinned art groups with their own skeleton (doors, props)
             // get its joints for script animations.
-            _ => own.as_ref().filter(|_| skinned).map(|skeleton| scene::Rig { skeleton, clips: &[] }),
+            _ => own.as_ref().filter(|_| skinned).map(|skeleton| scene::Rig { skeleton, clips: own_idle.as_ref().map_or(&[], |(clip, _)| std::slice::from_ref(clip)) }),
         };
         let idle = rig.as_ref().and_then(|r| r.clips.iter().find(|c| c.name == "idle")).map(|c| c.name.clone());
         // The rig's clips go to a shared library once; the model gets the
@@ -5362,8 +5773,11 @@ impl NaughtyDogVm {
                 let machine = crate::anim_state::Machine { state: sid(NPC_STATES[0]), time: 0., previous: None, fade: 0. };
                 session.npcs.push(Npc { entity: id, name: sid(&s.name), animator: crate::player::Animator::new(machine), sets: npc_sets.clone(), rig: key.clone() });
                 session.stage.npc_spawners.insert(sid(&s.name));
-            } else if let (Some(clip), Some(source)) = (&idle, &library) {
-                world.push(json!({"op": "set_animation", "id": id, "animation": {"layers": [{"clip": clip, "source": source, "looping": true}]}}));
+            } else if let (Some(clip), Some(source)) = (&idle, &library)
+                && (own_idle.is_none() || s.process_type == sid("SimpleActor"))
+            {
+                let looping = own_idle.as_ref().is_none_or(|(_, looping)| *looping);
+                world.push(json!({"op": "set_animation", "id": id, "animation": {"layers": [{"clip": clip, "source": source, "looping": looping}]}}));
             }
             session.entities.push((id, asset.clone()));
             if let Some(r) = &rig_ref {
@@ -5408,6 +5822,15 @@ impl VmAdapter for NaughtyDogVm {
             self.state = Some(session);
             begun.map_err(fail)?;
             return Ok(VmYield::WaitUntil(host.now_ms() + FRAME_MS));
+        }
+        session.soundtrack.update(host, self.client).map_err(fail)?;
+        if session.movie_waiting_for_sound.is_some() {
+            let time_ms = session.soundtrack.picture_time(host, self.client).map_err(fail)?;
+            if time_ms >= 0 {
+                let asset = session.movie_waiting_for_sound.take().expect("waiting movie");
+                let play = json!({"world":[{"op":"set_video","name":"movie","video":{"asset":asset,"playing":true,"time_ms":time_ms}}]});
+                host.submit_engine(self.client, 1, &serde_json::to_vec(&play).map_err(|e| fail(e.into()))?)?;
+            }
         }
         let backdrop = Self::needs_backdrop(&session);
         if backdrop != session.backdrop {
@@ -5525,6 +5948,8 @@ impl VmAdapter for NaughtyDogVm {
                         }));
                         v["ground_triangles"] = json!(s.ground.len());
                         v["movie"] = json!(s.movie);
+                        v["soundtrack"] = s.soundtrack.diagnostics();
+                        v["player_motion_audio"] = json!({"requests": s.motion_cue_count, "last": s.last_motion_cue});
                         v["ui"] = json!(format!("{:?}", s.ui));
                         v["has_save"] = json!(s.has_save);
                         v["hud"] = json!({"active": s.stage.hud_active.iter().map(|(k, t)| format!("{k:08x}@{t:.1}")).collect::<Vec<_>>(), "now": s.stage.now, "hidden": s.game.as_ref().is_some_and(|g| g.rt.inner.game.hud_hidden), "known": s.hud_defs.len(), "shown": s.hud_shown});
@@ -5635,6 +6060,160 @@ struct Grip {
     climb: Option<glam::Mat4>,
 }
 
+struct EdgeLeap {
+    from: glam::Vec3,
+    target: Grip,
+    elapsed: f32,
+    corner_yaw: Option<f32>,
+}
+
+/// The begin and settle clips share a continuous root track. Preserve its
+/// height and turn, correcting the total displacement for the rail spacing.
+fn corner_pose(clips: &HashMap<u32, crate::player::ClipInfo>, root: &crate::player::Root, yaw: f32, from: glam::Vec3, to: glam::Vec3) -> Option<(glam::Vec3, f32)> {
+    let (name, mirror) = root.clip.strip_suffix(crate::anim::MIRROR_SUFFIX).map_or((root.clip.as_str(), ""), |c| (c, crate::anim::MIRROR_SUFFIX));
+    let base = name.strip_suffix("-begin").or_else(|| name.strip_suffix("^idle"))?;
+    let start = clips.get(&sid(&format!("{base}-begin{mirror}")))?.align.first()?.0;
+    let end = clips.get(&sid(&format!("{base}^idle{mirror}")))?.align.last()?.0;
+    let total = end - start;
+    let offset = root.align.0 - start;
+    let progress = (offset.dot(total) / total.length_squared().max(1e-8)).clamp(0., 1.);
+    let turn = glam::Quat::from_rotation_y(yaw);
+    let heading = turn * root.align.1 * glam::Vec3::Z;
+    Some((from + turn * offset + (to - from - turn * total) * progress, heading.x.atan2(heading.z)))
+}
+
+/// Cross the small seam between two rails on adjacent faces of the same
+/// object. Native `anim-player` has separate requests for each handedness
+/// and for convex/concave corners. The prologue railing uses disconnected
+/// endpoints about 0.12 m apart. Reject parallel/opposite faces, rails in
+/// the middle of their span, and near rails on unrelated moving bodies.
+fn corner_target(ground: &Ground, grip: Grip, lateral: f32) -> Option<(Grip, u32)> {
+    let edge = ground.edge(grip.body, grip.edge)?;
+    let frame = edge_frame(&edge, grip.s);
+    let right = frame.transform_vector3(glam::Vec3::NEG_X);
+    let travel = right * lateral.signum();
+    let segment = edge.p1 - edge.p0;
+    let forward = travel.dot(segment) > 0.;
+    let end = if forward { edge.p1 } else { edge.p0 };
+    if end.distance(frame.transform_point3(glam::Vec3::ZERO)) > 0.12 {
+        return None;
+    }
+    let out = -frame.transform_vector3(glam::Vec3::Z);
+    ground.edges_near(end, 0.22).into_iter().filter_map(|(index, other, body)| {
+        if body != grip.body || index == grip.edge || other.flags & crate::collision::EDGE_CAN_HANG == 0 {
+            return None;
+        }
+        let n = glam::Vec3::new(other.n1.x, 0., other.n1.z).normalize_or_zero();
+        if n.dot(out).abs() > 0.5 || n.dot(travel).abs() < 0.8 {
+            return None;
+        }
+        let (near, far) = if end.distance_squared(other.p0) < end.distance_squared(other.p1) { (other.p0, other.p1) } else { (other.p1, other.p0) };
+        let distance = near.distance(end);
+        if distance > 0.22 || (near.y - end.y).abs() > 0.18 || (near - end).dot(travel) < -0.08 {
+            return None;
+        }
+        let convex = n.dot(travel) > 0.;
+        let outgoing = (far - near).normalize_or_zero().dot(out);
+        if (convex && outgoing > -0.5) || (!convex && outgoing < 0.5) {
+            return None;
+        }
+        let request = match (convex, lateral > 0.) {
+            (true, false) => 0x4a90_1f95,
+            (true, true) => 0x355f_7872,
+            (false, false) => 0x021d_142b,
+            (false, true) => 0x7dd2_73cc,
+        };
+        let length = near.distance(far);
+        // Complete the turn one hand into the receiving rail.
+        let inset = (length * 0.5).min(0.22);
+        let s = if near == other.p0 { inset } else { length - inset };
+        Some((distance, Grip { body, edge: index, s, climb: None }, request))
+    }).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, target, request)| (target, request))
+}
+
+/// Candidates for WallRopeToParallelEdgeJump (sub_7058CC). The actor
+/// travels along the wall and catches an edge facing back towards it.
+fn wall_jump_target(ground: &Ground, clips: &HashMap<u32, crate::player::ClipInfo>, rope: WallRopeHold) -> Option<WallJumpArc> {
+    let forward = rope.facing();
+    let direction = forward.cross(glam::Vec3::Y) * if rope.left { -1. } else { 1. };
+    let hand = rope.root() + glam::Vec3::Y * ROPE_HANDS + forward * WALL_ROPE_OFFSET;
+    let probe = hand + direction * 2.5;
+    let name = if rope.left { "wall-vine-jump-right^ledge-grab@mirror" } else { "wall-vine-jump-right^ledge-grab" };
+    let clip = clips.get(&sid(name))?;
+    let (reference, orientation) = clip.ap?;
+    let (start, rotation) = *clip.align.first()?;
+    let offset = glam::Mat4::from_rotation_translation(orientation, reference).inverse() * glam::Mat4::from_rotation_translation(rotation, start);
+    ground.edges_near(probe, 5.).into_iter().filter_map(|(index, edge, body)| {
+        if edge.flags != 0 && edge.flags & crate::collision::EDGE_CAN_HANG == 0 { return None; }
+        let axis = edge.p1 - edge.p0;
+        let s = (probe - edge.p0).dot(axis.normalize_or_zero()).clamp(0., axis.length());
+        let frame = edge_frame(&edge, s);
+        let point = frame.w_axis.truncate();
+        let delta = point - hand;
+        let flat = glam::Vec3::new(delta.x, 0., delta.z);
+        let distance = flat.length();
+        if flat.dot(direction) <= 0. || forward.dot(frame.z_axis.truncate()) < 0.7
+            || flat.normalize().dot(edge.n1).abs() > 0.3 || delta.y > 1. - 3. * ((distance - 2.5) * 0.25).powi(2) {
+            return None;
+        }
+        let grip = Grip { body, edge: index, s, climb: None };
+        // sub_4F6BD8 measures clearance below the candidate, out from
+        // its front face (-10 up + 2.68 normal). It does not set a 2 m
+        // minimum on the horizontal jump distance.
+        let normal = -frame.z_axis.truncate();
+        let start = point + 0.3 * normal;
+        let cast = -10. * glam::Vec3::Y + 2.68 * normal;
+        if ground.raycast(start.to_array(), (start + cast).to_array()).is_some_and(|fraction| fraction * cast.length() < 2.) {
+            return None;
+        }
+        let arc = WallJumpArc::new(grip, rope.root(), (frame * offset).w_axis.truncate());
+        // Query the broad-phase candidate against solid collision along
+        // the arc before committing the selected grip.
+        let mut previous = arc.start;
+        for part in 1..=8 {
+            let next = WallJumpArc { elapsed: arc.seconds * part as f32 / 8., ..arc }.position();
+            if ground.raycast(previous.to_array(), next.to_array()).is_some() { return None; }
+            previous = next;
+        }
+        Some((point.distance_squared(probe), arc))
+    }).min_by(|a,b| a.0.total_cmp(&b.0).then_with(|| a.1.grip.body.cmp(&b.1.grip.body)).then_with(|| a.1.grip.edge.cmp(&b.1.grip.edge))).map(|(_, arc)| arc)
+}
+
+/// Lateral reach of the two authored hand-over clips. Test the closest
+/// point to the reaching hand, so a long rail parallel to the swing wall
+/// can be caught away from its endpoints.
+fn wall_rope_edge(ground: &Ground, rope: WallRopeHold, side_input: f32) -> Option<Grip> {
+    let facing = rope.facing();
+    let side = facing.cross(glam::Vec3::Y) * side_input.signum();
+    let hands = rope.root() + glam::Quat::from_rotation_y(rope.yaw) * HANG_REACH;
+    let probe = hands + side * 0.5 - glam::Vec3::Y * 0.47;
+    ground.edges_near(probe, 0.55).into_iter().filter_map(|(index, edge, body)| {
+        if edge.flags != 0 && edge.flags & (crate::collision::EDGE_CAN_HANG | crate::collision::EDGE_LADDER) == 0 {
+            return None;
+        }
+        let axis = edge.p1 - edge.p0;
+        let s = (probe - edge.p0).dot(axis.normalize_or_zero()).clamp(0., axis.length());
+        let frame = edge_frame(&edge, s);
+        let point = frame.w_axis.truncate();
+        (frame.z_axis.truncate().dot(facing) > 0.7 && (point - hands).dot(side) > 0.1)
+            .then_some((point.distance_squared(probe), Grip { body, edge: index, s, climb: None }))
+    }).min_by(|a,b| a.0.total_cmp(&b.0).then_with(|| a.1.body.cmp(&b.1.body)).then_with(|| a.1.edge.cmp(&b.1.edge))).map(|(_, g)| g)
+}
+
+/// The begin and settle clips share one align coordinate system. Preserve
+/// their measured trajectory, fitting its endpoints to the actual two grips.
+fn transfer_root(clips: &HashMap<u32, crate::player::ClipInfo>, root: &crate::player::Root, from: glam::Vec3, to: glam::Vec3, yaw: f32) -> Option<glam::Vec3> {
+    let (clip, suffix) = root.clip.strip_suffix(crate::anim::MIRROR_SUFFIX).map_or((root.clip.as_str(), ""), |base| (base, crate::anim::MIRROR_SUFFIX));
+    let base = clip.strip_suffix("-begin").unwrap_or(clip);
+    let start = clips.get(&sid(&format!("{base}-begin{suffix}")))?.align.first()?.0;
+    let end = clips.get(&sid(&format!("{base}{suffix}")))?.align.last()?.0;
+    let total = end - start;
+    let displacement = root.align.0 - start;
+    let progress = (displacement.dot(total) / total.length_squared().max(1e-8)).clamp(0., 1.);
+    let rotation = glam::Quat::from_rotation_y(yaw);
+    Some(from + rotation * displacement + (to - from - rotation * total) * progress)
+}
+
 /// Whether a grip is on a bar: a hang edge without `EdgeNoSwing` and no
 /// wall under it (nothing within 0.5 m into the wall 0.9 m below the grab
 /// point). Wall holds such as the prologue car's floor beams lack
@@ -5647,7 +6226,39 @@ fn is_bar(ground: &Ground, g: &Grip) -> bool {
     }
     let frame = edge_frame(&e, g.s);
     let into = frame.transform_vector3(glam::Vec3::Z);
-    let below = frame.transform_point3(glam::Vec3::ZERO) - glam::Vec3::Y * 0.9;
+    let grip = frame.transform_point3(glam::Vec3::ZERO);
+    // The two wrists of swing-bars-swing span 0.675 m along the bar.
+    // The 0.16 m end cap on the train underside can be held, but cannot
+    // accommodate that pose. Closely stacked handholds on the same face
+    // likewise form a climbing wall even when the bottom rung overhangs.
+    let axis = (e.p1 - e.p0).normalize_or_zero();
+    let mut span = e.p0.distance(e.p1);
+    for forward in [false, true] {
+        let mut segment = e;
+        for _ in 0..32 {
+            if span >= 0.67 { break; }
+            let Some(next) = (if forward { segment.next } else { segment.prev }).map(usize::from) else { break };
+            let Some(rail) = ground.edge(g.body, next).filter(|_| next != g.edge) else { break };
+            let delta = rail.p1 - rail.p0;
+            if rail.flags & crate::collision::EDGE_CAN_HANG == 0 || delta.normalize_or_zero().dot(axis) < 0.94 {
+                break;
+            }
+            span += delta.dot(axis);
+            segment = rail;
+        }
+    }
+    if span < 0.67 || ground.edges_near(grip + glam::Vec3::Y * 0.55, 0.55).into_iter().any(|(index, other, body)| {
+        if body != g.body || index == g.edge || other.flags & crate::collision::EDGE_CAN_HANG == 0 || e.n1.dot(other.n1) < 0.7 {
+            return false;
+        }
+        let d = other.p1 - other.p0;
+        let at = other.p0 + d * ((grip - other.p0).dot(d) / d.length_squared().max(1e-8)).clamp(0., 1.);
+        let delta = at - grip;
+        delta.y > 0.2 && delta.x.hypot(delta.z) < 0.3
+    }) {
+        return false;
+    }
+    let below = grip - glam::Vec3::Y * 0.9;
     ground.raycast((below - into * 0.3).to_array(), (below + into * 0.5).to_array()).is_none()
 }
 
@@ -5703,6 +6314,261 @@ mod tests {
 
     const CLIENT: ClientId = ClientId(1);
 
+    #[test]
+    fn handoff_only_at_matching_rail_ends() {
+        use crate::collision::{Edge, EDGE_CAN_HANG};
+        use glam::Vec3;
+        let rail = |p0, p1, n1| Edge { p0, p1, n0: Vec3::Y, n1, prev: None, next: None, flags: EDGE_CAN_HANG };
+        let mut ground = Ground::default();
+        ground.add_edges(&[
+            rail(Vec3::X, Vec3::ZERO, Vec3::Z),
+            rail(Vec3::new(-0.1, 0., -0.02), Vec3::new(-0.1, 0., -1.), Vec3::NEG_X),
+        ]);
+        let grip = Grip { body: None, edge: 0, s: 1., climb: None };
+        let (next, request) = corner_target(&ground, grip, -1.).unwrap();
+        assert_eq!((next.edge, request), (1, 0x4a90_1f95));
+        assert!(next.s > 0. && next.s < 0.5);
+        assert!(corner_target(&ground, grip, 1.).is_none());
+        assert!(corner_target(&ground, Grip { s: 0.5, ..grip }, -1.).is_none());
+    }
+
+    #[test]
+    fn rope_turns_once_at_the_apex_and_retains_the_tangent_on_release() {
+        use glam::Vec3;
+        let mut hold = WallRopeHold { top: Vec3::ZERO, length: 6., below: 4., yaw: 0.4, swing: 0., rate: 1., turned: false, left: false };
+        let origin = hold.root();
+        let velocity = hold.velocity();
+        let mut advanced = hold;
+        advanced.swing += hold.rate * 0.0001;
+        assert!(((advanced.root() - origin) / 0.0001 - velocity).length() < 0.01);
+        let mut turns = 0;
+        for _ in 0..100 {
+            hold.advance(0., 0.01);
+            turns += usize::from(hold.turned);
+        }
+        // The first peak is around 0.9 s for a 4 m pendulum.
+        assert_eq!(turns, 1);
+        assert!(hold.rate < 0.);
+        let still = WallRopeHold { swing: 0., rate: 0., ..hold };
+        let mut in_deadzone = still;
+        in_deadzone.advance(0.4, 0.05);
+        assert_eq!(still.root(), in_deadzone.root());
+    }
+
+    #[test]
+    fn targeted_rope_jump_hits_authored_grip_and_rejects_opposite_faces() {
+        use glam::{Quat, Vec3};
+        let rope = WallRopeHold { top: Vec3::Y * 6., length: 6., below: 3., yaw: 0., swing: 0., rate: 1., turned: false, left: false };
+        let edge = crate::collision::Edge {
+            p0: Vec3::new(-3., 3., 0.), p1: Vec3::new(-2., 3., 0.), n0: Vec3::Y, n1: -Vec3::Z,
+            prev: None, next: None, flags: crate::collision::EDGE_CAN_HANG,
+        };
+        let name = "wall-vine-jump-right^ledge-grab";
+        let clips = HashMap::from([(sid(name), crate::player::ClipInfo {
+            name: name.into(), ap: Some((Vec3::new(0., 1.5, 0.4), Quat::IDENTITY)),
+            align: vec![(Vec3::ZERO, Quat::IDENTITY)], ..Default::default()
+        })]);
+        let mut ground = Ground::default();
+        ground.add_edges(&[crate::collision::Edge { n1: Vec3::Z, ..edge }]);
+        assert!(wall_jump_target(&ground, &clips, rope).is_none());
+        ground.add_edges(&[edge]);
+        let arc = wall_jump_target(&ground, &clips, rope).unwrap();
+        assert_eq!(arc.grip.edge, 1);
+        assert_eq!(arc.position(), rope.root());
+        assert!(WallJumpArc { elapsed: arc.seconds / 2., ..arc }.position().y > arc.start.y.max(arc.aim.y));
+        assert!(WallJumpArc { elapsed: arc.seconds, ..arc }.position().distance(Vec3::new(-2.5, 1.5, -0.4)) < 0.0001);
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    #[ignore = "requires local BCAS20097 01.00 via UNCHARTED2_ROOT"]
+    fn installed_temple_uses_placed_lighting_in_render_primitives() -> Result<()> {
+        let root = std::env::var_os("UNCHARTED2_ROOT").context("UNCHARTED2_ROOT")?;
+        let assets = std::path::Path::new(&root).join("PS3_GAME/USRDIR/build/main");
+        let temp = std::env::temp_dir().join(format!("crysirror-temple-light-{}", std::process::id()));
+        let mut vfs = crysirror_runtime::vfs::DiskVfs::new(&assets, &temp)?;
+        vfs.register(CLIENT, "naughty-dog", "light-test")?;
+        let storage = vfs.storage(CLIENT)?;
+        let mut registry = FormatRegistry::default();
+        crysirror_formats_arc::register(&mut registry)?;
+        let mounted = |path| -> Result<ArchiveMount> {
+            let mut context = DecodeContext::new(CLIENT);
+            context.limits.max_entry_size = PACKAGE_LIMIT;
+            let reader = storage.open_asset(&VfsPath::new(Mount::Asset, path)?)?;
+            let (_, arc) = registry.open(reader, Some("sony/psarc"), &context)?;
+            Ok(ArchiveMount::new(arc, context)?)
+        };
+        let bytes = crate::game::ModuleSource::read(&mounted("dc1.psarc")?, "render-settings")?;
+        let mut dc = crate::dc::Dc::default();
+        dc.load(sid("render-settings"), &bytes)?;
+        let settings = crate::render_settings::read(&dc, sid("*menu-temple-render-settings-01*"))?.context("menu settings")?;
+        assert!((settings.baked_vertex_scale - 6.99962).abs() < 1e-5);
+        assert_eq!(settings.sun_colour, [1.24, 1.11, 0.92]);
+        assert_eq!(settings.tint, [1.; 3]);
+        assert_eq!(settings.fog.colour, [2.6, 2.75, 1.5]);
+        assert!((settings.sun_intensity - 6.20830).abs() < 1e-5);
+        assert_eq!(settings.sun_shadow_distance, 20.);
+        let menu = crate::game::ModuleSource::read(&mounted("dc1.psarc")?, "menu")?;
+        let pages = crate::menu::pages(&menu)?;
+        let root_page = pages.iter().find(|p| p.name == "PAGE_ROOT_MAIN").context("root menu page")?;
+        assert_eq!(root_page.flags, 0x5001);
+        let archive = mounted("pak22.psarc")?;
+        let board = archive.open("menu.pak")?;
+        let board_directory = Directory::read(board.as_ref())?;
+        let descriptors = board_directory.items.iter().filter(|i| i.kind == "VRAM_DESC")
+            .map(|i| crate::texture::VramDesc::read(board.as_ref(), i.payload_offset)).collect::<Result<Vec<_>>>()?;
+        let edge = NaughtyDogVm::menu_board(board.as_ref(), board_directory.texture_base, &descriptors, "edge-shadow")?.context("edge shadow")?;
+        assert_eq!((edge.width, edge.height), (256, 256));
+        assert_eq!(&edge.rgba[..4], &[24, 34, 28, 186]);
+        assert_eq!(edge.rgba[(128 * 256 + 128) * 4 + 3], 0);
+        let package = archive.open("menu-temple.pak")?;
+        let reader = crysirror_core::service::MemoryAssetReader(read_all(package.as_ref(), PACKAGE_LIMIT)?.into());
+        let directory = Directory::read(&reader)?;
+        let meshes = scene::package_meshes(&reader, &directory, PACKAGE_LIMIT)?;
+        let fragments = &meshes[0].fragments;
+        assert_eq!(fragments.len(), 37);
+        assert!(fragments.iter().all(|f| f.placed_light.len() == f.positions.len()));
+        assert_eq!(fragments.iter().map(|f| f.placed_light.len()).sum::<usize>(), 12383);
+        let doc = scene::document_lit("test", &meshes, &reader, &directory, 32, None, None)?;
+        let mut gold = 0;
+        let mut entry_statue = 0;
+        for material in &doc.materials {
+            let engine = material.engine.as_ref().context("imported material")?;
+            if material.name.contains("tmp-face-gold/") {
+                gold += 1;
+                assert!(matches!(engine.effect, Some(crysirror_scene::effect::ShaderEffect::LayeredBlinn {
+                    specular_scale: 1.33, specular_exponent: 194.5, softness: 0.23, mask_power: 0.9, ..
+                })));
+                assert!(engine.metallic_roughness_texture.is_some());
+                assert_eq!(engine.metallic_roughness_texture, engine.opacity_texture);
+                assert!(engine.normal_texture.is_some());
+                assert_eq!(engine.normal_encoding, crysirror_scene::material::NormalEncoding::Rg);
+            } else if material.name.ends_with("tmp-entry-statue-bag-of-kittens/01") {
+                entry_statue += 1;
+                assert!(matches!(engine.effect, Some(crysirror_scene::effect::ShaderEffect::LayeredBlinn {
+                    specular_scale: 1.32, specular_exponent: 194.5, ..
+                })));
+                assert_eq!(engine.normal_encoding, crysirror_scene::material::NormalEncoding::Rg);
+            } else {
+                assert!(!matches!(engine.effect, Some(crysirror_scene::effect::ShaderEffect::LayeredBlinn { .. })));
+            }
+        }
+        assert_eq!((gold, entry_statue), (6, 1));
+        let vertices = doc.meshes[0].1.iter().flat_map(|p| &p.aux).collect::<Vec<_>>();
+        assert_eq!(vertices.len(), 12383);
+        assert!(vertices.iter().any(|v| v[0] > 8.));
+        assert!(vertices.iter().any(|v| v[0] < 0.1));
+        Ok(())
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    #[ignore = "requires local BCAS20097 01.00 via UNCHARTED2_ROOT"]
+    fn installed_wall_rope_controls_play_native_clips() -> Result<()> {
+        use crate::player::{Controller, Frame, Mode, RopeTransfer};
+        use glam::Vec3;
+        let root = std::env::var_os("UNCHARTED2_ROOT").context("UNCHARTED2_ROOT")?;
+        let dir = std::path::Path::new(&root).join("PS3_GAME/USRDIR/build/main");
+        let writable = std::env::temp_dir().join(format!("crysirror-rope-fixture-{}", std::process::id()));
+        let mut vfs = crysirror_runtime::vfs::DiskVfs::new(&dir, &writable)?;
+        vfs.register(CLIENT, "naughty-dog", "rope-test")?;
+        let storage = vfs.storage(CLIENT)?;
+        let mut registry = FormatRegistry::default();
+        crysirror_formats_arc::register(&mut registry)?;
+        let mut context = DecodeContext::new(CLIENT);
+        context.limits.max_entry_size = PACKAGE_LIMIT;
+        let mount = |path: &str| -> Result<ArchiveMount> {
+            let reader = storage.open_asset(&VfsPath::new(Mount::Asset, path)?)?;
+            let (_, arc) = registry.open(reader, Some("sony/psarc"), &context)?;
+            ArchiveMount::new(arc, context.clone())
+        };
+        let bytes = crate::game::ModuleSource::read(&mount("dc1.psarc")?, "anim-player")?;
+        let mut graph = crate::anim_tree::Graph::new(&bytes)?;
+        let table = crate::anim_state::parse_loaded(&graph.dc)?;
+        let mut wanted = HashSet::new();
+        let mut mirrored = HashSet::new();
+        for name in crate::player::STATES.iter().filter(|s| s.contains("wall-rope") || **s == "ledge-grab") {
+            let state = table.get(sid(name)).context("missing native rope state")?;
+            wanted.extend(graph.clips(state.tree));
+            if state.mirror != 0 {
+                mirrored.extend(graph.clips(state.tree));
+            }
+        }
+        let (skeleton, decoded) = NaughtyDogVm::player_rig(&mount("actor27.psarc")?, &wanted, &mirrored)?.context("player skeleton")?;
+        let clips = clip_infos(&decoded, Some(&skeleton));
+        let mut control = Controller::new(&table, 0.);
+        let frame = Frame { seconds: 1./60., weapon: 1, ..Frame::default() };
+        for right in [false, true] {
+            control.hang(0.);
+            for (transfer, start, settle, target) in [
+                (RopeTransfer::ToRope { right }, "climb-edge^wall-rope-", Mode::WallRope, "wall-rope-idle"),
+                (RopeTransfer::ToEdge { right }, "climb-wall-rope^edge-", Mode::Hang, "ledge-grab"),
+            ] {
+                let begin = format!("{start}{}", if right { "rt" } else { "lt" });
+                let mut output = control.step(&mut graph, &table, &clips, &Frame { rope_transfer: Some(transfer), ..frame.clone() })?;
+                assert_eq!(control.name(&table), begin);
+                let from = Vec3::new(1., 2., 3.);
+                let to = Vec3::new(1.6, 2.45, 3.08);
+                let mut path = Vec::new();
+                let mut states = Vec::new();
+                for _ in 0..180 {
+                    if output.mode != Mode::RopeTransfer { break; }
+                    let root = output.root.context("missing hand-over animation")?;
+                    path.push(transfer_root(&clips, &root, from, to, 0.).context("missing hand-over track")?);
+                    output = control.step(&mut graph, &table, &clips, &frame)?;
+                    if let Some(state) = &output.state { states.push(state.clone()); }
+                }
+                assert_eq!(states, [format!("{begin}^idle"), target.to_string()]);
+                assert_eq!(output.mode, settle);
+                assert!(path.first().unwrap().distance(from) < 0.02);
+                assert!(path.last().unwrap().distance(to) < 0.001);
+                assert!(path.windows(2).all(|step| step[0].distance(step[1]) < 0.2));
+            }
+        }
+        control.anim.machine.force(sid("wall-rope-swing"), 0.);
+        let swinging = Frame { wall_rope_swing: 1., ..frame.clone() };
+        let turn = control.step(&mut graph, &table, &clips, &Frame { wall_rope_turn: true, ..swinging.clone() })?;
+        assert!(turn.root.unwrap().clip.starts_with("wall-vine-run-r-turn-180"));
+        control.step(&mut graph, &table, &clips, &Frame { jump: true, ..swinging.clone() })?;
+        assert_eq!(control.name(&table), "wall-rope-swing-180");
+        for _ in 0..60 {
+            control.step(&mut graph, &table, &clips, &swinging)?;
+        }
+        assert_eq!(control.name(&table), "wall-rope-swing");
+        let jump = control.step(&mut graph, &table, &clips, &Frame { jump: true, wall_rope_target: true, wall_rope_left: true, ..swinging.clone() })?;
+        assert_eq!(jump.root.unwrap().clip, "wall-vine-jump-right@mirror");
+        let catch = control.step(&mut graph, &table, &clips, &Frame { grab: true, wall_rope_left: true, ..frame.clone() })?;
+        assert_eq!(catch.root.unwrap().clip, "wall-vine-jump-right^ledge-grab@mirror");
+        for _ in 0..120 {
+            control.step(&mut graph, &table, &clips, &frame)?;
+        }
+        assert_eq!(control.name(&table), "ledge-grab");
+        control.anim.machine.force(sid("wall-rope-swing"), 0.);
+        let miss = control.step(&mut graph, &table, &clips, &Frame { jump: true, ..swinging })?;
+        assert_eq!(control.name(&table), "wall-rope-jump-miss");
+        assert!(miss.root.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn swing_requires_room_for_both_wrists_and_clearance_for_the_body() {
+        use crate::collision::{Edge, EDGE_CAN_HANG};
+        use glam::Vec3;
+        let edge = |x: f32, width, level, prev, next| Edge {
+            p0: Vec3::new(x, level, 0.), p1: Vec3::new(x + width, level, 0.), n0: Vec3::Y, n1: Vec3::Z,
+            flags: EDGE_CAN_HANG, prev, next,
+        };
+        let grip = Grip { body: None, edge: 0, s: 0.08, climb: None };
+        let mut short = Ground::default();
+        short.add_edges(&[edge(0., 0.16, 0., None, None)]);
+        assert!(!is_bar(&short, &grip));
+        let mut rail = Ground::default();
+        rail.add_edges(&[edge(0., 0.32, 0., None, Some(1)), edge(0.32, 0.4, 0., Some(0), None)]);
+        assert!(is_bar(&rail, &grip));
+        rail.add_edges(&[edge(0., 0.4, 0.5, None, None)]);
+        assert!(!is_bar(&rail, &grip));
+    }
+
     fn publish(stage: &mut Stage, scene: &mut Scene) {
         stage.publish_lights();
         let ops: Vec<WorldCommand> = stage.ops.drain(..)
@@ -5718,6 +6584,42 @@ mod tests {
             rt.dc.mem.write_u32(address + (4 * index) as u32, value.to_bits()).unwrap();
         }
         address
+    }
+
+    #[test]
+    fn spawn_script_animates_each_callers_own_entity() {
+        let mut rt = Runtime::new(Dc::default());
+        let mut stage = Stage::default();
+        let script = sid("ss-play-anim-on-spawn");
+        let record = rt.dc.mem.alloc(32).unwrap();
+        rt.dc.mem.write_u32(record, crate::dc::TYPE_STATE_SCRIPT).unwrap();
+        rt.dc.symbols.insert(script, record + 4);
+        let a = sid("pigeon-1");
+        let b = sid("pigeon-2");
+        stage.entities.insert(a, vec![11]);
+        stage.entities.insert(b, vec![12]);
+        let pa = rt.spawn(sid("first-process"), script, Some(a)).unwrap();
+        let pb = rt.spawn(sid("second-process"), script, Some(b)).unwrap();
+        for (process, clip) in [(pa, sid("menu-page")), (pb, sid("menu-page-a"))] {
+            assert_eq!(rt.call_in_process_for_test(&mut stage, Some(process), "animate", &[sid("self"), clip]).unwrap(), 1);
+        }
+        assert_eq!(stage.animations[&a].clip, sid("menu-page"));
+        assert_eq!(stage.animations[&b].clip, sid("menu-page-a"));
+        assert_eq!(rt.call_for_test(&mut stage, "animate", &[sid("self"), sid("idle")]).unwrap(), 0);
+        assert_eq!(rt.call_in_process_for_test(&mut stage, Some(pa), "animate", &[sid("second-process"), sid("idle")]).unwrap(), 1);
+        assert_eq!(stage.animations[&b].clip, sid("idle"));
+        assert_eq!(stage.animations[&a].clip, sid("menu-page"));
+        for (object, looping) in [(a, true), (b, false)] {
+            let animation = stage.animations.get_mut(&object).unwrap();
+            animation.duration = Some(2.);
+            animation.looping = looping;
+        }
+        stage.now = 0.5;
+        assert!(!stage.animation_wait_complete(a));
+        stage.now = 4.5;
+        assert!(stage.animation_wait_complete(a));
+        assert_eq!(stage.animation_phase(a), Some(0.25));
+        assert_eq!(stage.animation_phase(b), None);
     }
 
     #[test]

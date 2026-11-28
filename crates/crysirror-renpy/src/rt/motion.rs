@@ -13,12 +13,18 @@ use crysirror_python::{ObjRef, PyResult, Value, Vm, builtins::Kw, ops};
 const MODULE: &str = "renpy.display.motion";
 
 fn less_updates(vm: &mut Vm) -> bool {
-    py::import_attr(vm, "renpy.game", "less_updates").map(|v| ops::truthy(vm, &v).unwrap_or(false)).unwrap_or(false)
+    py::import_attr(vm, "renpy.game", "less_updates")
+        .map(|v| ops::truthy(vm, &v).unwrap_or(false))
+        .unwrap_or(false)
 }
 
 fn fattr(vm: &mut Vm, this: &Value, n: &str) -> PyResult<f64> {
     let v = py::get_or_none(vm, this, n)?;
-    if py::is_none(&v) { Ok(0.) } else { py::f64_of(vm, &v) }
+    if py::is_none(&v) {
+        Ok(0.)
+    } else {
+        py::f64_of(vm, &v)
+    }
 }
 
 fn battr(vm: &mut Vm, this: &Value, n: &str) -> PyResult<bool> {
@@ -30,7 +36,21 @@ fn battr(vm: &mut Vm, this: &Value, n: &str) -> PyResult<bool> {
 
 fn motion_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["function", "period", "child", "new_widget", "old_widget", "repeat", "bounce", "delay", "anim_timebase", "tag_start", "time_warp", "add_sizes", "style"];
+    let names = [
+        "function",
+        "period",
+        "child",
+        "new_widget",
+        "old_widget",
+        "repeat",
+        "bounce",
+        "delay",
+        "anim_timebase",
+        "tag_start",
+        "time_warp",
+        "add_sizes",
+        "style",
+    ];
     let mut vals: Vec<Value> = vec![Value::None; names.len()];
     for (i, d) in [(5, false), (6, false), (8, false), (11, false)] {
         vals[i] = Value::Bool(d);
@@ -46,15 +66,32 @@ fn motion_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             None => props.push((k.clone(), v.clone())),
         }
     }
-    let child = if py::is_none(&vals[2]) { vals[3].clone() } else { vals[2].clone() };
+    let child = if py::is_none(&vals[2]) {
+        vals[3].clone()
+    } else {
+        vals[2].clone()
+    };
     let repeat = ops::truthy(vm, &vals[5])?;
-    let delay = if py::is_none(&vals[7]) && !repeat { vals[1].clone() } else { vals[7].clone() };
+    let delay = if py::is_none(&vals[7]) && !repeat {
+        vals[1].clone()
+    } else {
+        vals[7].clone()
+    };
     props.push(("style".into(), vals[12].clone()));
     super::layout::container_init(vm, &[this.clone()], &props)?;
     if !py::is_none(&child) {
         vm.call_method(this, "add", vec![child])?;
     }
-    for (n, v) in [("function", &vals[0]), ("period", &vals[1]), ("repeat", &vals[5]), ("bounce", &vals[6]), ("delay", &delay), ("anim_timebase", &vals[8]), ("time_warp", &vals[10]), ("add_sizes", &vals[11])] {
+    for (n, v) in [
+        ("function", &vals[0]),
+        ("period", &vals[1]),
+        ("repeat", &vals[5]),
+        ("bounce", &vals[6]),
+        ("delay", &delay),
+        ("anim_timebase", &vals[8]),
+        ("time_warp", &vals[10]),
+        ("add_sizes", &vals[11]),
+    ] {
         py::set(vm, this, n, v.clone())?;
     }
     py::set(vm, this, "position", Value::None)?;
@@ -100,13 +137,25 @@ fn update_position(vm: &mut Vm, this: &Value, mut t: f64, sizes: Value) -> PyRes
         }
     }
     let f = py::get(vm, this, "function")?;
-    let res = if battr(vm, this, "add_sizes")? { vm.call(&f, vec![Value::Float(t), sizes], Vec::new())? } else { vm.call(&f, vec![Value::Float(t)], Vec::new())? };
+    let res = if battr(vm, this, "add_sizes")? {
+        vm.call(&f, vec![Value::Float(t), sizes], Vec::new())?
+    } else {
+        vm.call(&f, vec![Value::Float(t)], Vec::new())?
+    };
     let mut r = py::items(vm, &res)?;
     if r.len() == 2 {
         let xa = style(vm, this, "xanchor")?;
         let ya = style(vm, this, "yanchor")?;
-        r.push(if ops::truthy(vm, &xa)? { xa } else { Value::Int(0) });
-        r.push(if ops::truthy(vm, &ya)? { ya } else { Value::Int(0) });
+        r.push(if ops::truthy(vm, &xa)? {
+            xa
+        } else {
+            Value::Int(0)
+        });
+        r.push(if ops::truthy(vm, &ya)? {
+            ya
+        } else {
+            Value::Int(0)
+        });
     }
     py::set(vm, this, "position", vm.types.new_tuple(r))?;
     Ok(())
@@ -132,11 +181,20 @@ fn motion_get_placement(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn motion_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (w, h, st, at) = rargs(vm, args)?;
-    let t = if battr(vm, this, "anim_timebase")? { at } else { st };
+    let t = if battr(vm, this, "anim_timebase")? {
+        at
+    } else {
+        st
+    };
     let child = py::get(vm, this, "child")?;
     let cr = render::render(vm, &child, w, h, st, at)?;
     let (cw, ch) = size(&cr);
-    let sizes = vm.types.new_tuple(vec![Value::Float(w), Value::Float(h), Value::Float(cw), Value::Float(ch)]);
+    let sizes = vm.types.new_tuple(vec![
+        Value::Float(w),
+        Value::Float(h),
+        Value::Float(cw),
+        Value::Float(ch),
+    ]);
     update_position(vm, this, t, sizes)?;
     let rv = super::layout::new(vm, cw, ch);
     super::layout::blit(vm, &rv, &cr, 0., 0.)?;
@@ -164,7 +222,10 @@ fn interp_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let s = py::items(vm, &args.get(1).cloned().unwrap_or(Value::None))?;
     let e = py::items(vm, &args.get(2).cloned().unwrap_or(Value::None))?;
     if s.len() != e.len() {
-        return Err(py::error(vm, "The start and end must have the same number of arguments."));
+        return Err(py::error(
+            vm,
+            "The start and end must have the same number of arguments.",
+        ));
     }
     let s: Vec<Value> = s.iter().map(|v| anchor_name(vm, v)).collect();
     let e: Vec<Value> = e.iter().map(|v| anchor_name(vm, v)).collect();
@@ -187,7 +248,17 @@ fn interp_call(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn revolver_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let half = || Value::Float(0.5);
-    for (i, (n, d)) in [("start", None), ("end", None), ("child", None), ("around", Some(())), ("cor", Some(())), ("pos", None)].iter().enumerate() {
+    for (i, (n, d)) in [
+        ("start", None),
+        ("end", None),
+        ("child", None),
+        ("around", Some(())),
+        ("cor", Some(())),
+        ("pos", None),
+    ]
+    .iter()
+    .enumerate()
+    {
         let v = match arg(args, kw, i + 1, n) {
             Some(v) => v.clone(),
             None if d.is_some() => vm.types.new_tuple(vec![half(), half()]),
@@ -202,11 +273,25 @@ fn revolver_call(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let t = py::f64_of(vm, &args.get(1).cloned().unwrap_or(Value::Int(0)))?;
     let rect = py::items(vm, &args.get(2).cloned().unwrap_or(Value::None))?;
-    let r: Vec<f64> = rect.iter().map(|v| py::f64_of(vm, v)).collect::<PyResult<_>>()?;
+    let r: Vec<f64> = rect
+        .iter()
+        .map(|v| py::f64_of(vm, v))
+        .collect::<PyResult<_>>()?;
     let (w, h, cw, ch) = (r[0], r[1], r[2], r[3]);
-    let fti = |vm: &mut Vm, x: &Value, room: f64| -> PyResult<f64> { if py::is_none(x) { Ok(0.) } else { compute_raw(vm, x, room) } };
+    let fti = |vm: &mut Vm, x: &Value, room: f64| -> PyResult<f64> {
+        if py::is_none(x) {
+            Ok(0.)
+        } else {
+            compute_raw(vm, x, room)
+        }
+    };
     let pos = py::get_or_none(vm, this, "pos")?;
-    let pos = if py::is_none(&pos) { let c = py::get(vm, this, "child")?; vm.call_method(&c, "get_placement", Vec::new())? } else { pos };
+    let pos = if py::is_none(&pos) {
+        let c = py::get(vm, this, "child")?;
+        vm.call_method(&c, "get_placement", Vec::new())?
+    } else {
+        pos
+    };
     let p = py::items(vm, &pos)?;
     let xpos = fti(vm, &p[0], w)?;
     let ypos = fti(vm, &p[1], h)?;
@@ -228,16 +313,30 @@ fn revolver_call(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let abs = py::import_attr(vm, "renpy.display.core", "absolute")?;
     let ax = vm.call(&abs, vec![Value::Float(nx)], Vec::new())?;
     let ay = vm.call(&abs, vec![Value::Float(ny)], Vec::new())?;
-    Ok(vm.types.new_tuple(vec![ax, ay, Value::Int(0), Value::Int(0)]))
+    Ok(vm
+        .types
+        .new_tuple(vec![ax, ay, Value::Int(0), Value::Int(0)]))
 }
 
-fn motion_call(vm: &mut Vm, f: Value, time: Value, child: Value, mut kw: Vec<(std::rc::Rc<str>, Value)>) -> PyResult<Value> {
+fn motion_call(
+    vm: &mut Vm,
+    f: Value,
+    time: Value,
+    child: Value,
+    mut kw: Vec<(std::rc::Rc<str>, Value)>,
+) -> PyResult<Value> {
     let m = py::import_attr(vm, MODULE, "Motion")?;
     kw.insert(0, ("child".into(), child));
     vm.call(&m, vec![f, time], kw)
 }
 
-fn split_kw(kw: Kw, take: &[&str]) -> (Vec<(std::rc::Rc<str>, Value)>, Vec<(std::rc::Rc<str>, Value)>) {
+fn split_kw(
+    kw: Kw,
+    take: &[&str],
+) -> (
+    Vec<(std::rc::Rc<str>, Value)>,
+    Vec<(std::rc::Rc<str>, Value)>,
+) {
     kw.iter().cloned().partition(|(k, _)| take.contains(&&**k))
 }
 
@@ -250,7 +349,8 @@ fn f_pan_move(vm: &mut Vm, args: &[Value], kw: Kw, pan: bool) -> PyResult<Value>
     let (s, e) = if pan {
         let s = py::items(vm, &sp)?;
         let e = py::items(vm, &ep)?;
-        let neg = |vm: &mut Vm, v: &Value| ops::unary_op(vm, v, crysirror_python::ast::UnaryOp::USub);
+        let neg =
+            |vm: &mut Vm, v: &Value| ops::unary_op(vm, v, crysirror_python::ast::UnaryOp::USub);
         let s = vec![neg(vm, &s[0])?, neg(vm, &s[1])?];
         let e = vec![neg(vm, &e[0])?, neg(vm, &e[1])?];
         (vm.types.new_tuple(s), vm.types.new_tuple(e))
@@ -260,7 +360,10 @@ fn f_pan_move(vm: &mut Vm, args: &[Value], kw: Kw, pan: bool) -> PyResult<Value>
     let ic = py::import_attr(vm, MODULE, "Interpolate")?;
     let f = vm.call(&ic, vec![s, e], Vec::new())?;
     let mut rest = rest;
-    for (i, n) in ["repeat", "bounce", "anim_timebase", "style", "time_warp"].iter().enumerate() {
+    for (i, n) in ["repeat", "bounce", "anim_timebase", "style", "time_warp"]
+        .iter()
+        .enumerate()
+    {
         if let Some(v) = args.get(4 + i) {
             rest.push(((*n).into(), v.clone()));
         }
@@ -294,11 +397,28 @@ fn f_revolve(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 // Zoom family ------------------------------------------------------------------------------------
 
-fn zc_init(vm: &mut Vm, this: &Value, vals: &[(&str, Value)], props: Vec<(std::rc::Rc<str>, Value)>) -> PyResult<()> {
-    let get = |n: &str| vals.iter().find(|v| v.0 == n).map(|v| v.1.clone()).unwrap_or(Value::None);
+fn zc_init(
+    vm: &mut Vm,
+    this: &Value,
+    vals: &[(&str, Value)],
+    props: Vec<(std::rc::Rc<str>, Value)>,
+) -> PyResult<()> {
+    let get = |n: &str| {
+        vals.iter()
+            .find(|v| v.0 == n)
+            .map(|v| v.1.clone())
+            .unwrap_or(Value::None)
+    };
     let mut props = props;
     let style_v = get("style");
-    props.push(("style".into(), if py::is_none(&style_v) { vm.types.new_str("motion") } else { style_v }));
+    props.push((
+        "style".into(),
+        if py::is_none(&style_v) {
+            vm.types.new_str("motion")
+        } else {
+            style_v
+        },
+    ));
     super::core::d_init(vm, &[this.clone()], &props)?;
     let child = super::easy::displayable(vm, &get("child"), &Value::None, true)?;
     py::set(vm, this, "time", get("time"))?;
@@ -319,8 +439,21 @@ fn zc_init(vm: &mut Vm, this: &Value, vals: &[(&str, Value)], props: Vec<(std::r
     Ok(())
 }
 
-fn zc_kwargs(vm: &mut Vm, kw: Kw, mut vals: Vec<(&'static str, Value)>) -> (Vec<(&'static str, Value)>, Vec<(std::rc::Rc<str>, Value)>) {
-    let known = ["end_identity", "after_child", "time_warp", "bilinear", "opaque", "anim_timebase", "repeat", "style"];
+fn zc_kwargs(
+    vm: &mut Vm,
+    kw: Kw,
+    mut vals: Vec<(&'static str, Value)>,
+) -> (Vec<(&'static str, Value)>, Vec<(std::rc::Rc<str>, Value)>) {
+    let known = [
+        "end_identity",
+        "after_child",
+        "time_warp",
+        "bilinear",
+        "opaque",
+        "anim_timebase",
+        "repeat",
+        "style",
+    ];
     let _ = vm;
     let mut props = Vec::new();
     for (k, v) in kw {
@@ -329,7 +462,12 @@ fn zc_kwargs(vm: &mut Vm, kw: Kw, mut vals: Vec<(&'static str, Value)>) -> (Vec<
             None => props.push((k.clone(), v.clone())),
         }
     }
-    for (n, d) in [("bilinear", true), ("opaque", true), ("anim_timebase", false), ("repeat", false)] {
+    for (n, d) in [
+        ("bilinear", true),
+        ("opaque", true),
+        ("anim_timebase", false),
+        ("repeat", false),
+    ] {
         if !vals.iter().any(|v| v.0 == n) {
             vals.push((n, Value::Bool(d)));
         }
@@ -340,14 +478,32 @@ fn zc_kwargs(vm: &mut Vm, kw: Kw, mut vals: Vec<(&'static str, Value)>) -> (Vec<
 fn zoom_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let a = |i: usize, n: &str| arg_or(args, kw, i, n, Value::None);
-    let (size, start, end, time, child) = (a(1, "size"), a(2, "start"), a(3, "end"), a(4, "time"), a(5, "child"));
-    let kw2: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "size" | "start" | "end" | "time" | "child")).cloned().collect();
+    let (size, start, end, time, child) = (
+        a(1, "size"),
+        a(2, "start"),
+        a(3, "end"),
+        a(4, "time"),
+        a(5, "child"),
+    );
+    let kw2: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "size" | "start" | "end" | "time" | "child"))
+        .cloned()
+        .collect();
     let sz = py::items(vm, &size)?;
     let mut ident = vec![Value::Float(0.), Value::Float(0.)];
     ident.extend(sz.clone());
     let it = vm.types.new_tuple(ident);
     let end_identity = ops::eq(vm, &end, &it)?;
-    let (vals, props) = zc_kwargs(vm, &kw2, vec![("time", time), ("child", child), ("end_identity", Value::Bool(end_identity))]);
+    let (vals, props) = zc_kwargs(
+        vm,
+        &kw2,
+        vec![
+            ("time", time),
+            ("child", child),
+            ("end_identity", Value::Bool(end_identity)),
+        ],
+    );
     zc_init(vm, this, &vals, props)?;
     py::set(vm, this, "size", size)?;
     py::set(vm, this, "start", start)?;
@@ -359,9 +515,21 @@ fn factorzoom_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let a = |i: usize, n: &str| arg_or(args, kw, i, n, Value::None);
     let (start, end, time, child) = (a(1, "start"), a(2, "end"), a(3, "time"), a(4, "child"));
-    let kw2: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "start" | "end" | "time" | "child")).cloned().collect();
+    let kw2: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "start" | "end" | "time" | "child"))
+        .cloned()
+        .collect();
     let ei = py::f64_of(vm, &end)? == 1.;
-    let (vals, props) = zc_kwargs(vm, &kw2, vec![("time", time), ("child", child), ("end_identity", Value::Bool(ei))]);
+    let (vals, props) = zc_kwargs(
+        vm,
+        &kw2,
+        vec![
+            ("time", time),
+            ("child", child),
+            ("end_identity", Value::Bool(ei)),
+        ],
+    );
     zc_init(vm, this, &vals, props)?;
     py::set(vm, this, "start", start)?;
     py::set(vm, this, "end", end)?;
@@ -372,8 +540,20 @@ fn sizezoom_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let a = |i: usize, n: &str| arg_or(args, kw, i, n, Value::None);
     let (start, end, time, child) = (a(1, "start"), a(2, "end"), a(3, "time"), a(4, "child"));
-    let kw2: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "start" | "end" | "time" | "child")).cloned().collect();
-    let (vals, props) = zc_kwargs(vm, &kw2, vec![("time", time), ("child", child), ("end_identity", Value::Bool(false))]);
+    let kw2: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "start" | "end" | "time" | "child"))
+        .cloned()
+        .collect();
+    let (vals, props) = zc_kwargs(
+        vm,
+        &kw2,
+        vec![
+            ("time", time),
+            ("child", child),
+            ("end_identity", Value::Bool(false)),
+        ],
+    );
     zc_init(vm, this, &vals, props)?;
     py::set(vm, this, "start", start)?;
     py::set(vm, this, "end", end)?;
@@ -411,7 +591,11 @@ fn zoom_rect(vm: &mut Vm, this: &Value, done: f64, w: f64, h: f64) -> PyResult<[
             Ok([0., 0., w, h, sw + (ew - sw) * done, sh + (eh - sh) * done])
         }
         _ => {
-            let r = vm.call_method(this, "zoom_rectangle", vec![Value::Float(done), Value::Float(w), Value::Float(h)])?;
+            let r = vm.call_method(
+                this,
+                "zoom_rectangle",
+                vec![Value::Float(done), Value::Float(w), Value::Float(h)],
+            )?;
             let r = py::items(vm, &r)?;
             let mut out = [0.; 6];
             for (i, v) in r.iter().take(6).enumerate() {
@@ -425,7 +609,11 @@ fn zoom_rect(vm: &mut Vm, this: &Value, done: f64, w: f64, h: f64) -> PyResult<[
 fn zc_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (w, h, st, at) = rargs(vm, args)?;
-    let t = if battr(vm, this, "anim_timebase")? { at } else { st };
+    let t = if battr(vm, this, "anim_timebase")? {
+        at
+    } else {
+        st
+    };
     let time = fattr(vm, this, "time")?;
     let mut done = if time != 0. { (t / time).min(1.) } else { 1. };
     if battr(vm, this, "repeat")? {
@@ -448,9 +636,17 @@ fn zc_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let child = py::get(vm, this, "child")?;
     let rend = render::render(vm, &child, w, h, st, at)?;
     let (rw, rh) = size(&rend);
-    let [rx, ry, zw0, zh0, zw, zh] = { let r = zoom_rect(vm, this, d2, rw, rh)?; [r[0], r[1], r[2], r[3], r[4], r[5]] };
+    let [rx, ry, zw0, zh0, zw, zh] = {
+        let r = zoom_rect(vm, this, d2, rw, rh)?;
+        [r[0], r[1], r[2], r[3], r[4], r[5]]
+    };
     if rx < 0. || ry < 0. || rx + zw0 > rw || ry + zh0 > rh {
-        return Err(py::error(vm, format!("Zoom rectangle ({rx}, {ry}, {zw0}, {zh0}) falls outside of {rw}x{rh} parent surface.")));
+        return Err(py::error(
+            vm,
+            format!(
+                "Zoom rectangle ({rx}, {ry}, {zw0}, {zh0}) falls outside of {rw}x{rh} parent surface."
+            ),
+        ));
     }
     let mut rd = RenderData::new(zw, zh);
     if zw != 0. && zh != 0. && zw0 != 0. && zh0 != 0. {
@@ -461,7 +657,13 @@ fn zc_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         rd.yclipping = true;
         let (bx, by) = rev.transform2(-rx, -ry);
         let src = render::source_of(vm, &rend)?;
-        rd.children.push(render::Blit { source: src, x: bx.trunc(), y: by.trunc(), focus: true, main: true });
+        rd.children.push(render::Blit {
+            source: src,
+            x: bx.trunc(),
+            y: by.trunc(),
+            focus: true,
+            main: true,
+        });
     }
     if done < 1. {
         render::redraw(vm, this, 0.);
@@ -495,7 +697,25 @@ fn zc_zoom_rectangle(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn rotozoom_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["rot_start", "rot_end", "rot_delay", "zoom_start", "zoom_end", "zoom_delay", "child", "rot_repeat", "zoom_repeat", "rot_bounce", "zoom_bounce", "rot_anim_timebase", "zoom_anim_timebase", "rot_time_warp", "zoom_time_warp", "opaque", "style"];
+    let names = [
+        "rot_start",
+        "rot_end",
+        "rot_delay",
+        "zoom_start",
+        "zoom_end",
+        "zoom_delay",
+        "child",
+        "rot_repeat",
+        "zoom_repeat",
+        "rot_bounce",
+        "zoom_bounce",
+        "rot_anim_timebase",
+        "zoom_anim_timebase",
+        "rot_time_warp",
+        "zoom_time_warp",
+        "opaque",
+        "style",
+    ];
     let mut vals: Vec<Value> = vec![Value::None; names.len()];
     for i in 7..=12 {
         vals[i] = Value::Bool(false);
@@ -525,7 +745,11 @@ fn rotozoom_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (w, h, st, at) = rargs(vm, args)?;
     let phase = |vm: &mut Vm, p: &str| -> PyResult<f64> {
-        let mut t = if battr(vm, this, &format!("{p}_anim_timebase"))? { at } else { st };
+        let mut t = if battr(vm, this, &format!("{p}_anim_timebase"))? {
+            at
+        } else {
+            st
+        };
         let delay = fattr(vm, this, &format!("{p}_delay"))?;
         t = if delay == 0. { 1. } else { t / delay };
         if battr(vm, this, &format!("{p}_repeat"))? {
@@ -578,35 +802,117 @@ fn child_visit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[("Pan", f_pan), ("Move", f_move), ("Revolve", f_revolve)]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[("Pan", f_pan), ("Move", f_move), ("Revolve", f_revolve)],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
-    for n in ["Transform", "Proxy", "TransformState", "ATLTransform", "null"] {
+    for n in [
+        "Transform",
+        "Proxy",
+        "TransformState",
+        "ATLTransform",
+        "null",
+    ] {
         let v = py::import_attr(vm, super::transform::MODULE, n)?;
         set(vm, n, v);
     }
     let container = py::import_attr(vm, "renpy.display.layout", "Container")?;
     let d = Value::Obj(super::core::displayable_class(vm));
-    let c = |vm: &mut Vm, name: &str, bases: &[Value], methods: Methods, attrs: &[(&str, Value)]| -> PyResult<Value> {
+    let c = |vm: &mut Vm,
+             name: &str,
+             bases: &[Value],
+             methods: Methods,
+             attrs: &[(&str, Value)]|
+     -> PyResult<Value> {
         let cls = py::class(vm, MODULE, name, bases, methods, attrs)?;
         let v = Value::Obj(cls);
         crysirror_python::modules::set(vm, &m, name, v.clone());
         Ok(v)
     };
-    c(vm, "Motion", &[container], &[("__init__", motion_init), ("get_placement", motion_get_placement), ("render", motion_render)], &[])?;
+    c(
+        vm,
+        "Motion",
+        &[container],
+        &[
+            ("__init__", motion_init),
+            ("get_placement", motion_get_placement),
+            ("render", motion_render),
+        ],
+        &[],
+    )?;
     let anchors = vm.types.new_dict();
-    for (k, v) in [("top", 0.), ("center", 0.5), ("bottom", 1.), ("left", 0.), ("right", 1.)] {
+    for (k, v) in [
+        ("top", 0.),
+        ("center", 0.5),
+        ("bottom", 1.),
+        ("left", 0.),
+        ("right", 1.),
+    ] {
         py::dict_set(vm, &anchors, k, Value::Float(v))?;
     }
-    c(vm, "Interpolate", &[], &[("__init__", interp_init), ("__call__", interp_call)], &[("anchors", anchors)])?;
-    c(vm, "Revolver", &[], &[("__init__", revolver_init), ("__call__", revolver_call)], &[])?;
-    let zc = c(vm, "ZoomCommon", &[d.clone()], &[("visit", zc_visit), ("zoom_rectangle", zc_zoom_rectangle), ("render", zc_render), ("event", zc_event)], &[])?;
+    c(
+        vm,
+        "Interpolate",
+        &[],
+        &[("__init__", interp_init), ("__call__", interp_call)],
+        &[("anchors", anchors)],
+    )?;
+    c(
+        vm,
+        "Revolver",
+        &[],
+        &[("__init__", revolver_init), ("__call__", revolver_call)],
+        &[],
+    )?;
+    let zc = c(
+        vm,
+        "ZoomCommon",
+        &[d.clone()],
+        &[
+            ("visit", zc_visit),
+            ("zoom_rectangle", zc_zoom_rectangle),
+            ("render", zc_render),
+            ("event", zc_event),
+        ],
+        &[],
+    )?;
     c(vm, "Zoom", &[zc.clone()], &[("__init__", zoom_init)], &[])?;
-    c(vm, "FactorZoom", &[zc.clone()], &[("__init__", factorzoom_init)], &[])?;
+    c(
+        vm,
+        "FactorZoom",
+        &[zc.clone()],
+        &[("__init__", factorzoom_init)],
+        &[],
+    )?;
     c(vm, "SizeZoom", &[zc], &[("__init__", sizezoom_init)], &[])?;
-    c(vm, "RotoZoom", &[d], &[("__init__", rotozoom_init), ("visit", child_visit), ("render", rotozoom_render)], &[("transform", Value::None)])?;
+    c(
+        vm,
+        "RotoZoom",
+        &[d],
+        &[
+            ("__init__", rotozoom_init),
+            ("visit", child_visit),
+            ("render", rotozoom_render),
+        ],
+        &[("transform", Value::None)],
+    )?;
     // Upstream also publishes these on renpy.display.layout.
     if let Ok(layout) = py::import(vm, "renpy.display.layout") {
-        for n in ["Transform", "RotoZoom", "SizeZoom", "FactorZoom", "Zoom", "Revolver", "Motion", "Interpolate", "Revolve", "Move", "Pan"] {
+        for n in [
+            "Transform",
+            "RotoZoom",
+            "SizeZoom",
+            "FactorZoom",
+            "Zoom",
+            "Revolver",
+            "Motion",
+            "Interpolate",
+            "Revolve",
+            "Move",
+            "Pan",
+        ] {
             if let Some(v) = crysirror_python::ops::get_raw_attr(&m, n) {
                 py::set(vm, &layout, n, v)?;
             }

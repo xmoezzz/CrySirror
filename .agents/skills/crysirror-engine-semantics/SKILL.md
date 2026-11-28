@@ -65,8 +65,7 @@ replays to measure exercise coverage separately.
 
 Connect a syscall to the active dispatcher only after implementing its full
 contract for that ABI. Keep unfinished work isolated, keep the syscall visibly
-unsupported, and record the gap in the inventory and through the
-[SATD skill](../crysirror-satd/SKILL.md). Do not publish a partial syscall
+unsupported, and record the gap in the inventory. Do not publish a partial syscall
 handler or classify it as `Partial`. A native no-op or rejection is complete
 only when the original behavior is established and reproduced.
 

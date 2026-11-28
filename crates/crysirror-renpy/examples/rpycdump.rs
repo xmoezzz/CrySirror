@@ -21,18 +21,36 @@ fn main() {
                     for n in &arena.nodes {
                         use crysirror_renpy::ast::NodeKind::*;
                         match &n.kind {
-                            Python { code, .. } | EarlyPython { code, .. } => println!("#PY {}:{}\n{}", n.filename, n.linenumber, code.source.text),
-                            Define { code, name, .. } | Default { code, name, .. } => println!("#DEF {name} = {}", code.source.text),
-                            Image { code: Some(code), name, .. } => println!("#IMG {} = {}", name.join(" "), code.source.text),
+                            Python { code, .. } | EarlyPython { code, .. } => println!(
+                                "#PY {}:{}\n{}",
+                                n.filename, n.linenumber, code.source.text
+                            ),
+                            Define { code, name, .. } | Default { code, name, .. } => {
+                                println!("#DEF {name} = {}", code.source.text)
+                            }
+                            Image {
+                                code: Some(code),
+                                name,
+                                ..
+                            } => println!("#IMG {} = {}", name.join(" "), code.source.text),
                             UserStatement { line, .. } => println!("#US {line}"),
                             _ => {}
                         }
                     }
                 }
+                if std::env::var("DUMP_ALL").is_ok() {
+                    for n in &arena.nodes {
+                        println!("{}:{} {:?}", n.filename, n.linenumber, n.kind);
+                    }
+                }
                 total += arena.nodes.len();
                 for n in &arena.nodes {
                     let k = format!("{:?}", n.kind);
-                    let k = k.split(|c: char| !c.is_alphanumeric()).next().unwrap().to_string();
+                    let k = k
+                        .split(|c: char| !c.is_alphanumeric())
+                        .next()
+                        .unwrap()
+                        .to_string();
                     *stats.entry(k).or_default() += 1;
                 }
             }

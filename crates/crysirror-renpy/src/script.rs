@@ -52,13 +52,16 @@ pub fn discover_release(files: &dyn GameFiles, ren_py: bool) -> Result<Vec<Scrip
 }
 
 pub(crate) fn discover_interruptible(
-    files: &dyn GameFiles, check: impl Fn() -> Result<(), String>,
+    files: &dyn GameFiles,
+    check: impl Fn() -> Result<(), String>,
 ) -> Result<Vec<ScriptFile>, String> {
     discover_with(files, false, check)
 }
 
 fn discover_with(
-    files: &dyn GameFiles, ren_py: bool, check: impl Fn() -> Result<(), String>,
+    files: &dyn GameFiles,
+    ren_py: bool,
+    check: impl Fn() -> Result<(), String>,
 ) -> Result<Vec<ScriptFile>, String> {
     let mut entries = Vec::new();
     let mut conflict = None;
@@ -67,10 +70,15 @@ fn discover_with(
         for n in list {
             if let Some(stem) = n.strip_suffix(".rpyc") {
                 by_stem.entry(stem.to_string()).or_default().1 = Some(n.clone());
-            } else if let Some(stem) = n.strip_suffix(".rpy").or_else(|| n.strip_suffix("_ren.py").filter(|_| ren_py)) {
+            } else if let Some(stem) = n
+                .strip_suffix(".rpy")
+                .or_else(|| n.strip_suffix("_ren.py").filter(|_| ren_py))
+            {
                 let e = by_stem.entry(stem.to_string()).or_default();
                 if let Some(other) = &e.0 {
-                    conflict.get_or_insert_with(|| format!("{other} and {n} conflict, and can't exist in the same game."));
+                    conflict.get_or_insert_with(|| {
+                        format!("{other} and {n} conflict, and can't exist in the same game.")
+                    });
                 }
                 e.0 = Some(n.clone());
             }
@@ -93,8 +101,13 @@ fn discover_with(
     for (_stem, common, source, compiled) in entries {
         check()?;
         let file = select_script(files, common, source.as_deref(), compiled.as_deref())?;
-        let size = match &file.source { Source::Rpyc(raw) => raw.len(), Source::Rpy(text) => text.len() };
-        bytes = bytes.checked_add(size).filter(|bytes| *bytes <= 128 * 1024 * 1024)
+        let size = match &file.source {
+            Source::Rpyc(raw) => raw.len(),
+            Source::Rpy(text) => text.len(),
+        };
+        bytes = bytes
+            .checked_add(size)
+            .filter(|bytes| *bytes <= 128 * 1024 * 1024)
             .ok_or("Ren'Py script input exceeds memory limit")?;
         out.push(file);
     }
@@ -102,40 +115,60 @@ fn discover_with(
 }
 
 fn select_script(
-    files: &dyn GameFiles, common: bool, source: Option<&str>, compiled: Option<&str>,
+    files: &dyn GameFiles,
+    common: bool,
+    source: Option<&str>,
+    compiled: Option<&str>,
 ) -> Result<ScriptFile, String> {
     let prefix = if common { "renpy/common" } else { "game" };
     let read = |path: &str| {
-        let data = if common { files.common_read(path) } else { files.read(path) };
+        let data = if common {
+            files.common_read(path)
+        } else {
+            files.read(path)
+        };
         data.ok_or_else(|| format!("unable to read Ren'Py script {prefix}/{path}"))
     };
-    let source = source.map(|path| {
-        let bytes = read(path)?;
-        let text = std::str::from_utf8(&bytes).map_err(|e| format!("{prefix}/{path}: {e}"))?;
-        // Python 2's rU reads both CRLF and CR as LF before hashing.
-        let text = text.replace("\r\n", "\n").replace('\r', "\n");
-        Ok::<_, String>((path, text))
-    }).transpose()?;
+    let source = source
+        .map(|path| {
+            let bytes = read(path)?;
+            let text = std::str::from_utf8(&bytes).map_err(|e| format!("{prefix}/{path}: {e}"))?;
+            // Python 2's rU reads both CRLF and CR as LF before hashing.
+            let text = text.replace("\r\n", "\n").replace('\r', "\n");
+            Ok::<_, String>((path, text))
+        })
+        .transpose()?;
     // The digest covers the file; an `_ren.py` file parses as its `.rpy` form.
-    let source = source.map(|(path, text)| {
-        if path.ends_with("_ren.py") {
-            let rpy = crate::lexer::ren_py_to_rpy(&text, Some(&format!("{prefix}/{path}")))?;
-            Ok::<_, String>((path, text, Some(rpy)))
-        } else {
-            Ok((path, text, None))
-        }
-    }).transpose()?;
+    let source = source
+        .map(|(path, text)| {
+            if path.ends_with("_ren.py") {
+                let rpy = crate::lexer::ren_py_to_rpy(&text, Some(&format!("{prefix}/{path}")))?;
+                Ok::<_, String>((path, text, Some(rpy)))
+            } else {
+                Ok((path, text, None))
+            }
+        })
+        .transpose()?;
     if let Some(path) = compiled {
         let data = read(path)?;
         let current = source.as_ref().is_none_or(|(_, text, _)| {
-            data.last_chunk::<16>() == Some(&crysirror_resource::checksum::md5_legacy(text.as_bytes()))
+            data.last_chunk::<16>()
+                == Some(&crysirror_resource::checksum::md5_legacy(text.as_bytes()))
         });
         if current {
-            return Ok(ScriptFile { name: format!("{prefix}/{path}"), common, source: Source::Rpyc(data) });
+            return Ok(ScriptFile {
+                name: format!("{prefix}/{path}"),
+                common,
+                source: Source::Rpyc(data),
+            });
         }
     }
     let (path, text, rpy) = source.ok_or("Ren'Py script has neither source nor compiled bytes")?;
-    Ok(ScriptFile { name: format!("{prefix}/{path}"), common, source: Source::Rpy(rpy.unwrap_or(text)) })
+    Ok(ScriptFile {
+        name: format!("{prefix}/{path}"),
+        common,
+        source: Source::Rpy(rpy.unwrap_or(text)),
+    })
 }
 
 /// `name.rpym` / `name.rpymc`, from the game first, then the common files.
@@ -154,8 +187,14 @@ pub fn find_module(files: &dyn GameFiles, name: &str) -> Result<Option<ScriptFil
 
 /// The native bootstrap loads these modules before any ordinary scripts.
 pub(crate) fn bootstrap_modules(files: &dyn GameFiles) -> Result<Vec<ScriptFile>, String> {
-    let game_names = files.list().into_iter().collect::<std::collections::HashSet<_>>();
-    let common_names = files.common_list().into_iter().collect::<std::collections::HashSet<_>>();
+    let game_names = files
+        .list()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    let common_names = files
+        .common_list()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
     let mut modules = Vec::new();
     for name in ["_errorhandling", "tl/None/common"] {
         let compiled = format!("{name}.rpymc");
@@ -174,7 +213,14 @@ pub(crate) fn bootstrap_modules(files: &dyn GameFiles) -> Result<Vec<ScriptFile>
 
 impl Script {
     /// Loads one file's top-level block, returning it chained.
-    pub fn load_file(&mut self, vm: &mut Vm, shells: &mut rpyc::Shells, cx: &dyn ScriptContext, registry: &crate::sl2::Registry, f: &ScriptFile) -> Vec<NodeId> {
+    pub fn load_file(
+        &mut self,
+        vm: &mut Vm,
+        shells: &mut rpyc::Shells,
+        cx: &dyn ScriptContext,
+        registry: &crate::sl2::Registry,
+        f: &ScriptFile,
+    ) -> Vec<NodeId> {
         let stmts = match &f.source {
             Source::Rpyc(bytes) => match rpyc::unpickle_script(vm, shells, bytes) {
                 Ok((_data, objs)) => {
@@ -211,7 +257,14 @@ impl Script {
     }
 
     /// Converts a compiled file's top-level block (unchained).
-    pub fn load_rpyc(&mut self, vm: &mut Vm, shells: &mut rpyc::Shells, registry: &crate::sl2::Registry, f: &ScriptFile, bytes: &[u8]) -> Vec<NodeId> {
+    pub fn load_rpyc(
+        &mut self,
+        vm: &mut Vm,
+        shells: &mut rpyc::Shells,
+        registry: &crate::sl2::Registry,
+        f: &ScriptFile,
+        bytes: &[u8],
+    ) -> Vec<NodeId> {
         match rpyc::unpickle_script(vm, shells, bytes) {
             Ok((_data, objs)) => {
                 let mut c = rpyc::Converter::new(vm, &mut self.arena, registry);
@@ -228,7 +281,12 @@ impl Script {
 
     /// Parses a source file (names not yet assigned); `None` after a lexer
     /// error.
-    pub fn parse_rpy(&mut self, cx: &dyn ScriptContext, name: &str, text: &str) -> Option<Vec<NodeId>> {
+    pub fn parse_rpy(
+        &mut self,
+        cx: &dyn ScriptContext,
+        name: &str,
+        text: &str,
+    ) -> Option<Vec<NodeId>> {
         match lexer::lex_file(name, text) {
             Ok(block) => {
                 let mut p = Parser::new(&mut self.arena, cx);
@@ -270,7 +328,11 @@ impl Script {
                 let n = match &self.arena.get(id).kind {
                     NodeKind::Label { name, .. } => NodeName::Label(name.clone()),
                     _ => {
-                        let n = NodeName::Generated { filename: filename.into(), stamp, serial: self.serial };
+                        let n = NodeName::Generated {
+                            filename: filename.into(),
+                            stamp,
+                            serial: self.serial,
+                        };
                         self.serial += 1;
                         n
                     }
@@ -305,7 +367,10 @@ impl Script {
                 if let NodeName::Label(l) = &name {
                     if let Some(old) = self.labels.get(&**l) {
                         let o = self.arena.get(*old);
-                        self.duplicate_labels.push(format!("The label {} is defined twice, at {}:{} and {}:{}.", l, o.filename, o.linenumber, n.filename, n.linenumber));
+                        self.duplicate_labels.push(format!(
+                            "The label {} is defined twice, at {}:{} and {}:{}.",
+                            l, o.filename, o.linenumber, n.filename, n.linenumber
+                        ));
                     }
                     self.labels.insert(l.to_string(), id);
                 }
@@ -313,20 +378,37 @@ impl Script {
             }
             match &self.arena.get(id).kind {
                 NodeKind::Init { priority, .. } => self.initcode.push((*priority, id)),
-                NodeKind::UserStatement { init_priority, .. } => self.initcode.push((*init_priority, id)),
-                NodeKind::Translate { identifier, language, .. } | NodeKind::TranslateSay { identifier, language, .. } => {
-                    match language {
-                        None => {
-                            self.translates.insert(identifier.clone(), id);
-                        }
-                        Some(l) => {
-                            self.language_translates.insert((identifier.clone(), l.clone()), id);
-                        }
-                    }
+                NodeKind::UserStatement { init_priority, .. } => {
+                    self.initcode.push((*init_priority, id))
                 }
+                NodeKind::Translate {
+                    identifier,
+                    language,
+                    ..
+                }
+                | NodeKind::TranslateSay {
+                    identifier,
+                    language,
+                    ..
+                } => match language {
+                    None => {
+                        self.translates.insert(identifier.clone(), id);
+                    }
+                    Some(l) => {
+                        self.language_translates
+                            .insert((identifier.clone(), l.clone()), id);
+                    }
+                },
                 _ => {}
             }
-            if matches!(self.arena.get(id).kind, NodeKind::EarlyPython { .. } | NodeKind::Python { .. } | NodeKind::Transform { .. } | NodeKind::Define { .. } | NodeKind::Default { .. }) {
+            if matches!(
+                self.arena.get(id).kind,
+                NodeKind::EarlyPython { .. }
+                    | NodeKind::Python { .. }
+                    | NodeKind::Transform { .. }
+                    | NodeKind::Define { .. }
+                    | NodeKind::Default { .. }
+            ) {
                 early.push(id);
             }
         }
@@ -338,7 +420,11 @@ impl Script {
     /// (identifier, language) pairs without a default.
     pub fn chain_translates(&mut self) -> Vec<(String, String)> {
         let mut unchained = Vec::new();
-        let mut pairs: Vec<_> = self.language_translates.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let mut pairs: Vec<_> = self
+            .language_translates
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
         pairs.sort();
         for ((identifier, language), id) in pairs {
             let Some(&default) = self.translates.get(&identifier) else {

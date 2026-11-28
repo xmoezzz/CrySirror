@@ -38,7 +38,9 @@ pub const NODROP_VIDEO: i64 = 1;
 pub const DROP_VIDEO: i64 = 2;
 
 fn at_least(vm: &Vm, major: u32, minor: u32) -> bool {
-    super::state::try_rt(vm).map(|r| r.profile.at_least(major, minor)).unwrap_or(true)
+    super::state::try_rt(vm)
+        .map(|r| r.profile.at_least(major, minor))
+        .unwrap_or(true)
 }
 
 // ---------------------------------------------------------------------------
@@ -117,7 +119,10 @@ fn sync(vm: &mut Vm, channel: i64) {
         }
     }
     c.pos = st.and_then(|a| a.position_ms).map(|p| p as f64 / 1000.0);
-    c.duration = st.and_then(|a| a.duration_ms).map(|d| d as f64 / 1000.0).unwrap_or(0.0);
+    c.duration = st
+        .and_then(|a| a.duration_ms)
+        .map(|d| d as f64 / 1000.0)
+        .unwrap_or(0.0);
 }
 
 fn emit(vm: &Vm, cmd: serde_json::Value) {
@@ -134,7 +139,11 @@ fn rs_enqueue(vm: &mut Vm, args: &[Value], kw: Kw, play: bool) -> PyResult<Value
     let channel = channel_arg(vm, &args[0])?;
     let file = &args[1];
     let name = arg_or(&args[1..], kw, 1, "name", file.clone());
-    let fname = if file.as_str().is_some() { py::string(vm, file)? } else { py::get(vm, file, "name").and_then(|n| py::string(vm, &n))? };
+    let fname = if file.as_str().is_some() {
+        py::string(vm, file)?
+    } else {
+        py::get(vm, file, "name").and_then(|n| py::string(vm, &n))?
+    };
     let g = |i: usize, n: &str, d: Value| arg_or(&args[1..], kw, i, n, d);
     let paused = g(2, "paused", Value::Bool(false));
     let fadein = g(3, "fadein", Value::Int(0));
@@ -143,7 +152,12 @@ fn rs_enqueue(vm: &mut Vm, args: &[Value], kw: Kw, play: bool) -> PyResult<Value
     let end = g(6, "end", Value::Int(-1));
     let rv = g(7, "relative_volume", Value::Float(1.0));
     let (paused, tight) = (py::truthy(vm, &paused)?, py::truthy(vm, &tight)?);
-    let (fadein, start, end, rv) = (py::f64_of(vm, &fadein)?, py::f64_of(vm, &start)?, py::f64_of(vm, &end)?, py::f64_of(vm, &rv)?);
+    let (fadein, start, end, rv) = (
+        py::f64_of(vm, &fadein)?,
+        py::f64_of(vm, &start)?,
+        py::f64_of(vm, &end)?,
+        py::f64_of(vm, &rv)?,
+    );
     let (actual, common) = match super::resloader::find(vm, &fname, Some("audio"))? {
         Some(r) => r,
         None => return Err(vm.exc_msg("IOError", format!("Couldn't find file '{fname}'."))),
@@ -156,7 +170,12 @@ fn rs_enqueue(vm: &mut Vm, args: &[Value], kw: Kw, play: bool) -> PyResult<Value
         s.seq += 1;
         let id = s.seq;
         let c = s.chans.entry(channel).or_default();
-        let item = Item { id, name: name.clone(), tight, issued: tick };
+        let item = Item {
+            id,
+            name: name.clone(),
+            tight,
+            issued: tick,
+        };
         if play {
             c.playing = Some(item);
             c.queued = None;
@@ -169,10 +188,13 @@ fn rs_enqueue(vm: &mut Vm, args: &[Value], kw: Kw, play: bool) -> PyResult<Value
         id
     };
     let n = py::string(vm, &name).unwrap_or_default();
-    emit(vm, json!({
-        "op": if play { "play" } else { "queue" }, "channel": channel, "name": n, "id": item_id(channel, id), "file": actual, "common": common,
-        "fadein": fadein, "tight": tight, "start": start, "end": end, "relative_volume": rv, "paused": paused,
-    }));
+    emit(
+        vm,
+        json!({
+            "op": if play { "play" } else { "queue" }, "channel": channel, "name": n, "id": item_id(channel, id), "file": actual, "common": common,
+            "fadein": fadein, "tight": tight, "start": start, "end": end, "relative_volume": rv, "paused": paused,
+        }),
+    );
     Ok(Value::None)
 }
 
@@ -209,7 +231,10 @@ fn rs_dequeue(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             c.queued = None;
         }
     })?;
-    emit(vm, json!({"op": "dequeue", "channel": ch, "even_tight": even_tight}));
+    emit(
+        vm,
+        json!({"op": "dequeue", "channel": ch, "even_tight": even_tight}),
+    );
     Ok(Value::None)
 }
 
@@ -226,7 +251,9 @@ fn rs_fadeout(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn rs_queue_depth(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let (_, d) = with_chan(vm, &args[0], |c| c.playing.is_some() as i64 + c.queued.is_some() as i64)?;
+    let (_, d) = with_chan(vm, &args[0], |c| {
+        c.playing.is_some() as i64 + c.queued.is_some() as i64
+    })?;
     Ok(Value::Int(d))
 }
 
@@ -241,7 +268,13 @@ fn rs_busy(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn rs_get_pos(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let (_, p) = with_chan(vm, &args[0], |c| if c.playing.is_some() { c.pos.unwrap_or(0.0) } else { -1.0 })?;
+    let (_, p) = with_chan(vm, &args[0], |c| {
+        if c.playing.is_some() {
+            c.pos.unwrap_or(0.0)
+        } else {
+            -1.0
+        }
+    })?;
     Ok(Value::Float(p))
 }
 
@@ -260,14 +293,20 @@ fn rs_set_volume(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn rs_set_pan(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let ch = channel_arg(vm, &args[0])?;
     let (p, d) = (py::f64_of(vm, &args[1])?, py::f64_of(vm, &args[2])?);
-    emit(vm, json!({"op": "pan", "channel": ch, "pan": p, "delay": d}));
+    emit(
+        vm,
+        json!({"op": "pan", "channel": ch, "pan": p, "delay": d}),
+    );
     Ok(Value::None)
 }
 
 fn rs_set_secondary_volume(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let ch = channel_arg(vm, &args[0])?;
     let (v, d) = (py::f64_of(vm, &args[1])?, py::f64_of(vm, &args[2])?);
-    emit(vm, json!({"op": "secondary_volume", "channel": ch, "volume": v, "delay": d}));
+    emit(
+        vm,
+        json!({"op": "secondary_volume", "channel": ch, "volume": v, "delay": d}),
+    );
     Ok(Value::None)
 }
 
@@ -379,7 +418,9 @@ fn aget(vm: &mut Vm, n: &str) -> PyResult<Value> {
 }
 
 fn pcm_ok(vm: &mut Vm) -> bool {
-    aget(vm, "pcm_ok").map(|v| matches!(v, Value::Bool(true))).unwrap_or(false)
+    aget(vm, "pcm_ok")
+        .map(|v| matches!(v, Value::Bool(true)))
+        .unwrap_or(false)
 }
 
 fn cfg(vm: &mut Vm, n: &str) -> Value {
@@ -464,7 +505,17 @@ fn mc_copy(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn qe_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    for (i, n) in ["filename", "fadein", "tight", "loop", "relative_volume", "audio_filter"].iter().enumerate() {
+    for (i, n) in [
+        "filename",
+        "fadein",
+        "tight",
+        "loop",
+        "relative_volume",
+        "audio_filter",
+    ]
+    .iter()
+    .enumerate()
+    {
         let d = match *n {
             "relative_volume" => Value::Float(1.0),
             "loop" => Value::Bool(false),
@@ -475,18 +526,45 @@ fn qe_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
-fn queue_entry(vm: &mut Vm, filename: Value, fadein: Value, tight: Value, loop_: bool, rv: Value, filter: Value) -> PyResult<Value> {
+fn queue_entry(
+    vm: &mut Vm,
+    filename: Value,
+    fadein: Value,
+    tight: Value,
+    loop_: bool,
+    rv: Value,
+    filter: Value,
+) -> PyResult<Value> {
     let c = aget(vm, "QueueEntry")?;
-    vm.call(&c, vec![filename, fadein, tight, Value::Bool(loop_), rv, filter], Vec::new())
+    vm.call(
+        &c,
+        vec![filename, fadein, tight, Value::Bool(loop_), rv, filter],
+        Vec::new(),
+    )
 }
 
 // Channel ------------------------------------------------------------------------
 
-const CH_ARGS: &[&str] = &["name", "default_loop", "stop_on_mute", "tight", "file_prefix", "file_suffix", "buffer_queue", "movie", "framedrop", "synchro_start"];
+const CH_ARGS: &[&str] = &[
+    "name",
+    "default_loop",
+    "stop_on_mute",
+    "tight",
+    "file_prefix",
+    "file_suffix",
+    "buffer_queue",
+    "movie",
+    "framedrop",
+    "synchro_start",
+];
 
 fn ch_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let v: Vec<Value> = CH_ARGS.iter().enumerate().map(|(i, n)| arg_or(&args[1..], kw, i, n, Value::None)).collect();
+    let v: Vec<Value> = CH_ARGS
+        .iter()
+        .enumerate()
+        .map(|(i, n)| arg_or(&args[1..], kw, i, n, Value::None))
+        .collect();
     s(vm, this, "name", v[0].clone())?;
     s(vm, this, "_number", Value::None)?;
     s(vm, this, "mixer", Value::None)?;
@@ -504,10 +582,25 @@ fn ch_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     s(vm, this, "stop_on_mute", v[2].clone())?;
     s(vm, this, "tight", v[3].clone())?;
     s(vm, this, "keep_queue", Value::Int(0))?;
-    let str_or = |vm: &Vm, x: &Value| if py::is_none(x) { vm.types.new_str("") } else { x.clone() };
+    let str_or = |vm: &Vm, x: &Value| {
+        if py::is_none(x) {
+            vm.types.new_str("")
+        } else {
+            x.clone()
+        }
+    };
     s(vm, this, "file_prefix", str_or(vm, &v[4]))?;
     s(vm, this, "file_suffix", str_or(vm, &v[5]))?;
-    s(vm, this, "buffer_queue", if py::is_none(&v[6]) { Value::Bool(true) } else { v[6].clone() })?;
+    s(
+        vm,
+        this,
+        "buffer_queue",
+        if py::is_none(&v[6]) {
+            Value::Bool(true)
+        } else {
+            v[6].clone()
+        },
+    )?;
     s(vm, this, "paused", Value::None)?;
     if py::is_none(&v[1]) {
         s(vm, this, "default_loop", Value::Bool(true))?;
@@ -517,7 +610,11 @@ fn ch_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         s(vm, this, "default_loop_set", Value::Bool(true))?;
     }
     let movie = if py::truthy(vm, &v[7])? {
-        if py::is_none(&v[8]) || py::truthy(vm, &v[8])? { DROP_VIDEO } else { NODROP_VIDEO }
+        if py::is_none(&v[8]) || py::truthy(vm, &v[8])? {
+            DROP_VIDEO
+        } else {
+            NODROP_VIDEO
+        }
     } else {
         NO_VIDEO
     };
@@ -578,7 +675,12 @@ fn ch_copy_context(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 /// `split_filename(filename, looped)` -> (filename, start, end).
-fn split_filename(vm: &mut Vm, this: &Value, filename: &Value, looped: bool) -> PyResult<(Value, f64, f64)> {
+fn split_filename(
+    vm: &mut Vm,
+    this: &Value,
+    filename: &Value,
+    looped: bool,
+) -> PyResult<(Value, f64, f64)> {
     let fs = py::string(vm, filename)?;
     let prefix = g(vm, this, "file_prefix")?;
     let prefix = py::string(vm, &prefix)?;
@@ -586,7 +688,11 @@ fn split_filename(vm: &mut Vm, this: &Value, filename: &Value, looped: bool) -> 
     let suffix = py::string(vm, &suffix)?;
     let rest = fs.strip_prefix('<').and_then(|r| r.split_once('>'));
     let Some((spec, f)) = rest else {
-        return Ok((vm.types.new_str(&format!("{prefix}{fs}{suffix}")), 0.0, -1.0));
+        return Ok((
+            vm.types.new_str(&format!("{prefix}{fs}{suffix}")),
+            0.0,
+            -1.0,
+        ));
     };
     let mut fname = format!("{prefix}{f}{suffix}");
     let err = |vm: &Vm, msg: String| py::error(vm, format!("Parsing audio spec '{fs}': {msg}."));
@@ -595,8 +701,11 @@ fn split_filename(vm: &mut Vm, this: &Value, filename: &Value, looped: bool) -> 
     let (mut start, mut end, mut loop_) = (0.0, -1.0, None);
     while let Some(clause) = words.pop() {
         let float = |vm: &Vm, w: &mut Vec<&str>| -> PyResult<f64> {
-            let Some(v) = w.pop() else { return Err(err(vm, "expected float at end".into())) };
-            v.parse::<f64>().map_err(|_| err(vm, format!("expected float, got '{v}'")))
+            let Some(v) = w.pop() else {
+                return Err(err(vm, "expected float at end".into()));
+            };
+            v.parse::<f64>()
+                .map_err(|_| err(vm, format!("expected float, got '{v}'")))
         };
         match clause {
             "from" => start = float(vm, &mut words)?,
@@ -607,8 +716,11 @@ fn split_filename(vm: &mut Vm, this: &Value, filename: &Value, looped: bool) -> 
                 fname = "_silence.ogg".into();
             }
             "sync" => {
-                let Some(ch) = words.pop() else { return Err(err(vm, "expected channel at end".into())) };
-                let c = get_channel(vm, &vm.types.new_str(ch)).map_err(|_| err(vm, format!("expected channel, got '{ch}'")))?;
+                let Some(ch) = words.pop() else {
+                    return Err(err(vm, "expected channel at end".into()));
+                };
+                let c = get_channel(vm, &vm.types.new_str(ch))
+                    .map_err(|_| err(vm, format!("expected channel, got '{ch}'")))?;
                 let t = vm.call_method(&c, "get_pos", Vec::new())?;
                 let t = py::f64_of(vm, &t).unwrap_or(-1.0);
                 if t > 0.0 {
@@ -639,7 +751,11 @@ fn ch_split_filename(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn py_end(b: f64) -> Value {
-    if b == -1.0 { Value::Int(-1) } else { Value::Float(b) }
+    if b == -1.0 {
+        Value::Int(-1)
+    } else {
+        Value::Float(b)
+    }
 }
 
 fn prefs(vm: &mut Vm) -> PyResult<Value> {
@@ -674,7 +790,8 @@ fn periodic_channel(vm: &mut Vm, this: &Value) -> PyResult<()> {
         let vm_list = cfg(vm, "voice_mixers");
         let is_voice = !py::is_none(&vm_list) && ops::contains(vm, &vm_list, &mixer)?;
         if !is_voice {
-            let drop = py::get_opt(vm, &p, "self_voicing_volume_drop")?.unwrap_or(Value::Float(0.5));
+            let drop =
+                py::get_opt(vm, &p, "self_voicing_volume_drop")?.unwrap_or(Value::Float(0.5));
             mixer_volume *= py::f64_of(vm, &drop)?;
         }
     }
@@ -688,7 +805,12 @@ fn periodic_channel(vm: &mut Vm, this: &Value) -> PyResult<()> {
     let actual = g(vm, this, "actual_volume")?;
     let n = number(vm, this)?;
     if vol != py::f64_of(vm, &actual)? {
-        rs(vm, "set_volume", vec![Value::Int(n), Value::Float(vol)], Vec::new())?;
+        rs(
+            vm,
+            "set_volume",
+            vec![Value::Int(n), Value::Float(vol)],
+            Vec::new(),
+        )?;
         s(vm, this, "actual_volume", Value::Float(vol))?;
     }
     let ctx = context(vm, this)?;
@@ -702,7 +824,11 @@ fn periodic_channel(vm: &mut Vm, this: &Value) -> PyResult<()> {
     if force_stop {
         let lq = py::items(vm, &queue)?;
         let ll = ops::len(vm, &loop_)?;
-        let keep = if ll > 0 { lq[lq.len().saturating_sub(ll)..].to_vec() } else { Vec::new() };
+        let keep = if ll > 0 {
+            lq[lq.len().saturating_sub(ll)..].to_vec()
+        } else {
+            Vec::new()
+        };
         s(vm, this, "queue", vm.types.new_list(keep))?;
         return Ok(());
     }
@@ -723,8 +849,15 @@ fn periodic_channel(vm: &mut Vm, this: &Value) -> PyResult<()> {
         topq = vm.call_method(&queue, "pop", vec![Value::Int(0)])?;
         let fname = g(vm, &topq, "filename")?;
         let suffix = g(vm, this, "file_suffix")?;
-        let lfn = format!("{}{}", py::string(vm, &fname)?.to_lowercase(), py::string(vm, &suffix)?.to_lowercase());
-        if [".mod", ".xm", ".mid", ".midi"].iter().any(|e| lfn.ends_with(e)) {
+        let lfn = format!(
+            "{}{}",
+            py::string(vm, &fname)?.to_lowercase(),
+            py::string(vm, &suffix)?.to_lowercase()
+        );
+        if [".mod", ".xm", ".mid", ".midi"]
+            .iter()
+            .any(|e| lfn.ends_with(e))
+        {
             topq = Value::None;
             continue;
         }
@@ -742,7 +875,12 @@ fn periodic_channel(vm: &mut Vm, this: &Value) -> PyResult<()> {
             let movie = g(vm, this, "movie")?;
             let movie_i = py::int(vm, &movie)?;
             let vloop = movie_i != NO_VIDEO && ops::len(vm, &loop_)? == 1;
-            rs(vm, "set_video", vec![Value::Int(n), movie], vec![("loop".into(), Value::Bool(vloop))])?;
+            rs(
+                vm,
+                "set_video",
+                vec![Value::Int(n), movie],
+                vec![("loop".into(), Value::Bool(vloop))],
+            )?;
             let kw: Vec<(Rc<str>, Value)> = vec![
                 ("synchro_start".into(), g(vm, this, "synchro_start")?),
                 ("fadein".into(), g(vm, &topq, "fadein")?),
@@ -780,10 +918,22 @@ fn periodic_channel(vm: &mut Vm, this: &Value) -> PyResult<()> {
     if ops::len(vm, &queue)? == 0 {
         let l = g(vm, this, "loop")?;
         if ops::len(vm, &l)? > 0 {
-            let filter = if at_least(vm, 8, 2) { g(vm, &ctx, "audio_filter")? } else { Value::None };
+            let filter = if at_least(vm, 8, 2) {
+                g(vm, &ctx, "audio_filter")?
+            } else {
+                Value::None
+            };
             for i in py::items(vm, &l)? {
                 let e = if py::is_none(&topq) {
-                    queue_entry(vm, i, Value::Int(0), Value::Bool(false), true, Value::Float(1.0), filter.clone())?
+                    queue_entry(
+                        vm,
+                        i,
+                        Value::Int(0),
+                        Value::Bool(false),
+                        true,
+                        Value::Float(1.0),
+                        filter.clone(),
+                    )?
                 } else {
                     let (t, rv) = (g(vm, &topq, "tight")?, g(vm, &topq, "relative_volume")?);
                     queue_entry(vm, i, Value::Int(0), t, true, rv, filter.clone())?
@@ -801,7 +951,12 @@ fn periodic_channel(vm: &mut Vm, this: &Value) -> PyResult<()> {
         let want = gb(vm, &ctx, "pause")?;
         let paused = g(vm, this, "paused")?;
         if py::is_none(&paused) || py::truthy(vm, &paused)? != want {
-            rs(vm, if want { "pause" } else { "unpause" }, vec![Value::Int(n)], Vec::new())?;
+            rs(
+                vm,
+                if want { "pause" } else { "unpause" },
+                vec![Value::Int(n)],
+                Vec::new(),
+            )?;
             s(vm, this, "paused", Value::Bool(want))?;
         }
     }
@@ -818,14 +973,24 @@ fn dequeue(vm: &mut Vm, this: &Value, even_tight: bool) -> PyResult<()> {
     let keep = py::int(vm, &keep)?.max(0) as usize;
     let q = g(vm, this, "queue")?;
     let items = py::items(vm, &q)?;
-    s(vm, this, "queue", vm.types.new_list(items.into_iter().take(keep).collect()))?;
+    s(
+        vm,
+        this,
+        "queue",
+        vm.types.new_list(items.into_iter().take(keep).collect()),
+    )?;
     s(vm, this, "loop", vm.types.new_list(Vec::new()))?;
     if !pcm_ok(vm) || py::is_none(&g(vm, this, "_number")?) {
         return Ok(());
     }
     if keep == 0 {
         let n = number(vm, this)?;
-        rs(vm, "dequeue", vec![Value::Int(n), Value::Bool(even_tight)], Vec::new())?;
+        rs(
+            vm,
+            "dequeue",
+            vec![Value::Int(n), Value::Bool(even_tight)],
+            Vec::new(),
+        )?;
         s(vm, this, "synchro_start", Value::Bool(false))?;
     }
     Ok(())
@@ -848,13 +1013,26 @@ fn ch_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         if !ops::eq(vm, &pt, &cpt)? {
             s(vm, this, "pan_time", cpt)?;
             let pan = g(vm, &ctx, "pan")?;
-            rs(vm, "set_pan", vec![Value::Int(n), pan, Value::Int(0)], Vec::new())?;
+            rs(
+                vm,
+                "set_pan",
+                vec![Value::Int(n), pan, Value::Int(0)],
+                Vec::new(),
+            )?;
         }
-        let (st, cst) = (g(vm, this, "secondary_volume_time")?, g(vm, &ctx, "secondary_volume_time")?);
+        let (st, cst) = (
+            g(vm, this, "secondary_volume_time")?,
+            g(vm, &ctx, "secondary_volume_time")?,
+        );
         if !ops::eq(vm, &st, &cst)? {
             s(vm, this, "secondary_volume_time", cst)?;
             let v = g(vm, &ctx, "secondary_volume")?;
-            rs(vm, "set_secondary_volume", vec![Value::Int(n), v, Value::Int(0)], Vec::new())?;
+            rs(
+                vm,
+                "set_secondary_volume",
+                vec![Value::Int(n), v, Value::Int(0)],
+                Vec::new(),
+            )?;
         }
     }
     let q = g(vm, this, "queue")?;
@@ -875,7 +1053,12 @@ fn fadeout(vm: &mut Vm, this: &Value, secs: f64) -> PyResult<()> {
     if secs == 0.0 {
         rs(vm, "stop", vec![Value::Int(n)], Vec::new())?;
     } else {
-        rs(vm, "fadeout", vec![Value::Int(n), Value::Float(secs)], Vec::new())?;
+        rs(
+            vm,
+            "fadeout",
+            vec![Value::Int(n), Value::Float(secs)],
+            Vec::new(),
+        )?;
     }
     Ok(())
 }
@@ -888,7 +1071,12 @@ fn ch_fadeout(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn ch_reload(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let n = number(vm, &args[0])?;
-    rs(vm, "dequeue", vec![Value::Int(n), Value::Bool(true)], Vec::new())?;
+    rs(
+        vm,
+        "dequeue",
+        vec![Value::Int(n), Value::Bool(true)],
+        Vec::new(),
+    )?;
     rs(vm, "stop", vec![Value::Int(n)], Vec::new())?;
     Ok(Value::None)
 }
@@ -907,8 +1095,16 @@ fn ch_set_audio_filter(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     } else {
         let cf = py::import_attr(vm, "renpy.audio.filter", "Crossfade")?;
         let null = py::import_attr(vm, "renpy.audio.filter", "Null")?;
-        let a = if py::is_none(&old) { vm.call(&null, Vec::new(), Vec::new())? } else { old };
-        let b = if py::is_none(&filter) { vm.call(&null, Vec::new(), Vec::new())? } else { filter };
+        let a = if py::is_none(&old) {
+            vm.call(&null, Vec::new(), Vec::new())?
+        } else {
+            old
+        };
+        let b = if py::is_none(&filter) {
+            vm.call(&null, Vec::new(), Vec::new())?
+        } else {
+            filter
+        };
         vm.call(&cf, vec![a, b, duration], Vec::new())?
     };
     s(vm, &ctx, "audio_filter", new.clone())?;
@@ -918,7 +1114,12 @@ fn ch_set_audio_filter(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let n = number(vm, this)?;
     let r = Value::Int(py::truthy(vm, &replace)? as i64);
-    rs(vm, "replace_audio_filter", vec![Value::Int(n), new, r], Vec::new())?;
+    rs(
+        vm,
+        "replace_audio_filter",
+        vec![Value::Int(n), new, r],
+        Vec::new(),
+    )?;
     Ok(Value::None)
 }
 
@@ -933,26 +1134,54 @@ fn persistent_seen_audio(vm: &mut Vm, filename: &Value) -> PyResult<()> {
     ops::setitem(vm, &sa, k, Value::Bool(true))
 }
 
-const ENQ: &[&str] = &["filenames", "loop", "synchro_start", "fadein", "tight", "loop_only", "relative_volume"];
+const ENQ: &[&str] = &[
+    "filenames",
+    "loop",
+    "synchro_start",
+    "fadein",
+    "tight",
+    "loop_only",
+    "relative_volume",
+];
 
 fn ch_enqueue(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let v: Vec<Value> = ENQ.iter().enumerate().map(|(i, n)| arg_or(&args[1..], kw, i, n, Value::None)).collect();
+    let v: Vec<Value> = ENQ
+        .iter()
+        .enumerate()
+        .map(|(i, n)| arg_or(&args[1..], kw, i, n, Value::None))
+        .collect();
     let filenames = py::items(vm, &v[0])?;
-    let loop_ = if py::is_none(&v[1]) { true } else { py::truthy(vm, &v[1])? };
+    let loop_ = if py::is_none(&v[1]) {
+        true
+    } else {
+        py::truthy(vm, &v[1])?
+    };
     let mut synchro = v[2].clone();
     if py::is_none(&synchro) {
         synchro = g(vm, this, "default_synchro_start")?;
     }
-    let mut fadein = if py::is_none(&v[3]) { Value::Int(0) } else { v[3].clone() };
+    let mut fadein = if py::is_none(&v[3]) {
+        Value::Int(0)
+    } else {
+        v[3].clone()
+    };
     let loop_only = py::truthy(vm, &v[5])?;
-    let rv = if py::is_none(&v[6]) { Value::Float(1.0) } else { v[6].clone() };
+    let rv = if py::is_none(&v[6]) {
+        Value::Float(1.0)
+    } else {
+        v[6].clone()
+    };
     for f in &filenames {
         let (f, _, _) = split_filename(vm, this, f, false)?;
         persistent_seen_audio(vm, &f)?;
     }
     if !loop_only {
-        let tight = if py::is_none(&v[4]) { g(vm, this, "tight")? } else { v[4].clone() };
+        let tight = if py::is_none(&v[4]) {
+            g(vm, this, "tight")?
+        } else {
+            v[4].clone()
+        };
         let kq = g(vm, this, "keep_queue")?;
         let kq = py::int(vm, &kq)? + 1;
         s(vm, this, "keep_queue", Value::Int(kq))?;
@@ -964,7 +1193,15 @@ fn ch_enqueue(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             Value::None
         };
         for f in &filenames {
-            let e = queue_entry(vm, f.clone(), fadein.clone(), tight.clone(), false, rv.clone(), filter.clone())?;
+            let e = queue_entry(
+                vm,
+                f.clone(),
+                fadein.clone(),
+                tight.clone(),
+                false,
+                rv.clone(),
+                filter.clone(),
+            )?;
             vm.call_method(&q, "append", vec![e])?;
             fadein = Value::Int(0);
         }
@@ -972,7 +1209,11 @@ fn ch_enqueue(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             s(vm, this, "synchro_start", Value::Bool(true))?;
         }
     }
-    let l = if loop_ { vm.types.new_list(filenames) } else { vm.types.new_list(Vec::new()) };
+    let l = if loop_ {
+        vm.types.new_list(filenames)
+    } else {
+        vm.types.new_list(Vec::new())
+    };
     s(vm, this, "loop", l)?;
     Ok(Value::None)
 }
@@ -1029,7 +1270,12 @@ fn ch_set_pan(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if pcm_ok(vm) {
         s(vm, this, "pan_time", now)?;
         let n = number(vm, this)?;
-        rs(vm, "set_pan", vec![Value::Int(n), args[1].clone(), args[2].clone()], Vec::new())?;
+        rs(
+            vm,
+            "set_pan",
+            vec![Value::Int(n), args[1].clone(), args[2].clone()],
+            Vec::new(),
+        )?;
     }
     Ok(Value::None)
 }
@@ -1043,7 +1289,12 @@ fn ch_set_secondary_volume(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value
     if pcm_ok(vm) {
         s(vm, this, "secondary_volume_time", now)?;
         let n = number(vm, this)?;
-        rs(vm, "set_secondary_volume", vec![Value::Int(n), args[1].clone(), args[2].clone()], Vec::new())?;
+        rs(
+            vm,
+            "set_secondary_volume",
+            vec![Value::Int(n), args[1].clone(), args[2].clone()],
+            Vec::new(),
+        )?;
     }
     Ok(Value::None)
 }
@@ -1079,10 +1330,27 @@ fn ch_video_ready(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 // Module functions -------------------------------------------------------------------
 
-const REG: &[&str] = &["name", "mixer", "loop", "stop_on_mute", "tight", "file_prefix", "file_suffix", "buffer_queue", "movie", "framedrop", "force", "synchro_start"];
+const REG: &[&str] = &[
+    "name",
+    "mixer",
+    "loop",
+    "stop_on_mute",
+    "tight",
+    "file_prefix",
+    "file_suffix",
+    "buffer_queue",
+    "movie",
+    "framedrop",
+    "force",
+    "synchro_start",
+];
 
 fn f_register_channel(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let v: Vec<Value> = REG.iter().enumerate().map(|(i, n)| arg_or(args, kw, i, n, Value::None)).collect();
+    let v: Vec<Value> = REG
+        .iter()
+        .enumerate()
+        .map(|(i, n)| arg_or(args, kw, i, n, Value::None))
+        .collect();
     let name = v[0].clone();
     let ns = py::string(vm, &name)?;
     let mut movie = py::truthy(vm, &v[8])?;
@@ -1091,13 +1359,20 @@ fn f_register_channel(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let mut synchro = v[11].clone();
     if py::is_none(&synchro) {
-        synchro = if movie { Value::Bool(false) } else { v[2].clone() };
+        synchro = if movie {
+            Value::Bool(false)
+        } else {
+            v[2].clone()
+        };
     }
     let force = py::truthy(vm, &v[10])?;
     let ctx = super::exports::util::ctx(vm)?;
     let ip = gb(vm, &ctx, "init_phase")?;
     if !force && !ip && !ns.contains(' ') {
-        return Err(py::error(vm, "Can't register channel outside of init phase."));
+        return Err(py::error(
+            vm,
+            "Can't register channel outside of init phase.",
+        ));
     }
     let channels = aget(vm, "channels")?;
     let all = aget(vm, "all_channels")?;
@@ -1110,8 +1385,20 @@ fn f_register_channel(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let cls = aget(vm, "Channel")?;
     let c = vm.call(
         &cls,
-        vec![name.clone(), v[2].clone(), d(&v[3], Value::Bool(true)), d(&v[4], Value::Bool(false)), v[5].clone(), v[6].clone(), d(&v[7], Value::Bool(true))],
-        vec![("movie".into(), Value::Bool(movie)), ("framedrop".into(), d(&v[9], Value::Bool(true))), ("synchro_start".into(), synchro)],
+        vec![
+            name.clone(),
+            v[2].clone(),
+            d(&v[3], Value::Bool(true)),
+            d(&v[4], Value::Bool(false)),
+            v[5].clone(),
+            v[6].clone(),
+            d(&v[7], Value::Bool(true)),
+        ],
+        vec![
+            ("movie".into(), Value::Bool(movie)),
+            ("framedrop".into(), d(&v[9], Value::Bool(true))),
+            ("synchro_start".into(), synchro),
+        ],
     )?;
     s(vm, &c, "mixer", v[1].clone())?;
     vm.call_method(&all, "append", vec![c.clone()])?;
@@ -1130,11 +1417,38 @@ fn f_alias_channel(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
+/// Through 6.8 channels are numbered (music plays on 7, sounds on 0);
+/// named channels arrived in 6.9.
+fn numbered_channels(vm: &Vm) -> bool {
+    !super::state::rt(vm).profile.at_least(6, 9)
+}
+
+fn default_channel(vm: &Vm, name: &str) -> Value {
+    if numbered_channels(vm) {
+        Value::Int(if name == "music" { 7 } else { 0 })
+    } else {
+        vm.types.new_str(name)
+    }
+}
+
 pub fn get_channel(vm: &mut Vm, name: &Value) -> PyResult<Value> {
     let channels = aget(vm, "channels")?;
     let rv = vm.call_method(&channels, "get", vec![name.clone()])?;
     if !py::is_none(&rv) {
         return Ok(rv);
+    }
+    // 6.7 – 6.8 have the eight channels `Channel(0)` ... `Channel(7)`;
+    // each is made on first use, with the mixer `00mixers` assigns by
+    // default (sfx for 0 – 2, music above).
+    if let Value::Int(n) = name
+        && numbered_channels(vm)
+    {
+        if !(0..8).contains(n) {
+            return Err(py::error(vm, format!("Channel number {n} out of bounds.")));
+        }
+        let mixer = vm.types.new_str(if *n < 3 { "sfx" } else { "music" });
+        f_register_channel(vm, &[name.clone(), mixer], &[("loop".into(), Value::Bool(false))])?;
+        return ops::getitem(vm, &channels, name.clone());
     }
     let ns = py::string(vm, name)?;
     let auto = cfg(vm, "auto_channels");
@@ -1154,7 +1468,16 @@ pub fn get_channel(vm: &mut Vm, name: &Value) -> PyResult<Value> {
         let b = vm.types.new_str(base);
         let spec = ops::getitem(vm, &auto, b)?;
         let sp = py::items(vm, &spec)?;
-        f_register_channel(vm, &[name.clone()], &[("loop".into(), Value::Bool(false)), ("mixer".into(), sp[0].clone()), ("file_prefix".into(), sp[1].clone()), ("file_suffix".into(), sp[2].clone())])?;
+        f_register_channel(
+            vm,
+            &[name.clone()],
+            &[
+                ("loop".into(), Value::Bool(false)),
+                ("mixer".into(), sp[0].clone()),
+                ("file_prefix".into(), sp[1].clone()),
+                ("file_suffix".into(), sp[2].clone()),
+            ],
+        )?;
         return ops::getitem(vm, &channels, name.clone());
     }
     Err(py::error(vm, format!("Audio channel '{ns}' is unknown.")))
@@ -1205,7 +1528,11 @@ fn f_init(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn fadeout_secs(vm: &mut Vm) -> PyResult<f64> {
     let v = cfg(vm, "fadeout_audio");
-    if py::is_none(&v) { Ok(0.016) } else { py::f64_of(vm, &v) }
+    if py::is_none(&v) {
+        Ok(0.016)
+    } else {
+        py::f64_of(vm, &v)
+    }
 }
 
 fn f_fadeout_all(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
@@ -1259,7 +1586,11 @@ fn periodic_pass(vm: &mut Vm) -> PyResult<()> {
             }
         }
         let p = prefs(vm)?;
-        if !py::get_opt(vm, &p, "emphasize_audio")?.map(|v| py::truthy(vm, &v)).transpose()?.unwrap_or(false) {
+        if !py::get_opt(vm, &p, "emphasize_audio")?
+            .map(|v| py::truthy(vm, &v))
+            .transpose()?
+            .unwrap_or(false)
+        {
             emphasized = false;
         }
         let old = py::get(vm, &m, "old_emphasized")?;
@@ -1326,22 +1657,40 @@ fn interact(vm: &mut Vm) -> PyResult<()> {
             let filenames = g(vm, &ctx, "last_filenames")?;
             let tight = g(vm, &ctx, "last_tight")?;
             if at_least(vm, 8, 2) {
-                let (cr, rr) = (g(vm, &ctx, "raw_audio_filter")?, py::get_opt(vm, &c, "raw_audio_filter")?.unwrap_or(Value::None));
+                let (cr, rr) = (
+                    g(vm, &ctx, "raw_audio_filter")?,
+                    py::get_opt(vm, &c, "raw_audio_filter")?.unwrap_or(Value::None),
+                );
                 if !ops::eq(vm, &cr, &rr)? {
-                    py::method_kw(vm, &c, "set_audio_filter", vec![cr], vec![("replace".into(), Value::Bool(true))])?;
+                    py::method_kw(
+                        vm,
+                        &c,
+                        "set_audio_filter",
+                        vec![cr],
+                        vec![("replace".into(), Value::Bool(true))],
+                    )?;
                 }
             }
             let loop_ = g(vm, &c, "loop")?;
             if !ops::eq(vm, &loop_, &filenames)? {
                 let a = cfg(vm, "context_fadeout_music");
-                let a = if py::is_none(&a) { 0.0 } else { py::f64_of(vm, &a)? };
+                let a = if py::is_none(&a) {
+                    0.0
+                } else {
+                    py::f64_of(vm, &a)?
+                };
                 let b = fadeout_secs(vm)?;
                 fadeout(vm, &c, a.max(if at_least(vm, 7, 4) { b } else { 0.0 }))?;
             }
             if py::truthy(vm, &filenames)? {
                 let fi = cfg(vm, "context_fadein_music");
                 let dss = g(vm, &c, "default_synchro_start")?;
-                let mut kw: Vec<(Rc<str>, Value)> = vec![("loop".into(), Value::Bool(true)), ("synchro_start".into(), dss), ("tight".into(), tight), ("fadein".into(), fi)];
+                let mut kw: Vec<(Rc<str>, Value)> = vec![
+                    ("loop".into(), Value::Bool(true)),
+                    ("synchro_start".into(), dss),
+                    ("tight".into(), tight),
+                    ("fadein".into(), fi),
+                ];
                 if let Some(rv) = py::get_opt(vm, &ctx, "last_relative_volume")? {
                     kw.push(("relative_volume".into(), rv));
                 }
@@ -1407,7 +1756,11 @@ fn f_unpause_all(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn f_load(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let f = py::import_attr(vm, "renpy.loader", "load")?;
-    vm.call(&f, vec![args[0].clone()], vec![("directory".into(), py::s(vm, "audio"))])
+    vm.call(
+        &f,
+        vec![args[0].clone()],
+        vec![("directory".into(), py::s(vm, "audio"))],
+    )
 }
 
 fn ad_new(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -1474,9 +1827,23 @@ fn audio_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let str_t = Value::Obj(vm.types.str_.clone());
     let new = vm.types.new_builtin("__new__", ad_new);
     let new = py::staticmethod(vm, new);
-    let ad = py::class(vm, AUDIO, "AudioData", &[str_t], &[("__init__", ad_init), ("__reduce__", ad_reduce)], &[("__new__", new)])?;
+    let ad = py::class(
+        vm,
+        AUDIO,
+        "AudioData",
+        &[str_t],
+        &[("__init__", ad_init), ("__reduce__", ad_reduce)],
+        &[("__new__", new)],
+    )?;
     set(vm, "AudioData", Value::Obj(ad));
-    let qe = py::class(vm, AUDIO, "QueueEntry", &[], &[("__init__", qe_init)], &[("audio_filter", Value::None)])?;
+    let qe = py::class(
+        vm,
+        AUDIO,
+        "QueueEntry",
+        &[],
+        &[("__init__", qe_init)],
+        &[("audio_filter", Value::None)],
+    )?;
     set(vm, "QueueEntry", Value::Obj(qe));
     let ro = py::import_attr(vm, "renpy.revertable", "RevertableObject")?;
     let mc = py::class(
@@ -1485,7 +1852,13 @@ fn audio_module(vm: &mut Vm) -> PyResult<ObjRef> {
         "MusicContext",
         &[ro],
         &[("__init__", mc_init), ("copy", mc_copy)],
-        &[("__version__", Value::Int(0)), ("pause", Value::Bool(false)), ("last_relative_volume", Value::Float(1.0)), ("audio_filter", Value::None), ("raw_audio_filter", Value::None)],
+        &[
+            ("__version__", Value::Int(0)),
+            ("pause", Value::Bool(false)),
+            ("last_relative_volume", Value::Float(1.0)),
+            ("audio_filter", Value::None),
+            ("raw_audio_filter", Value::None),
+        ],
     )?;
     set(vm, "MusicContext", Value::Obj(mc));
     let num = vm.types.new_builtin("get_number", ch_get_number);
@@ -1521,10 +1894,28 @@ fn audio_module(vm: &mut Vm) -> PyResult<ObjRef> {
             ("read_video", ch_read_video),
             ("video_ready", ch_video_ready),
         ],
-        &[("number", num), ("context", ctxp), ("audio_filter", Value::None), ("raw_audio_filter", Value::None)],
+        &[
+            ("number", num),
+            ("context", ctxp),
+            ("audio_filter", Value::None),
+            ("raw_audio_filter", Value::None),
+        ],
     )?;
     set(vm, "Channel", Value::Obj(ch));
-    let lock = py::class(vm, AUDIO, "_Lock", &[], &[("__enter__", lock_enter), ("__exit__", lock_exit), ("notify", rs_noop), ("notify_all", rs_noop), ("wait", rs_noop)], &[])?;
+    let lock = py::class(
+        vm,
+        AUDIO,
+        "_Lock",
+        &[],
+        &[
+            ("__enter__", lock_enter),
+            ("__exit__", lock_exit),
+            ("notify", rs_noop),
+            ("notify_all", rs_noop),
+            ("wait", rs_noop),
+        ],
+        &[],
+    )?;
     let l = vm.call(&Value::Obj(lock.clone()), Vec::new(), Vec::new())?;
     set(vm, "lock", l);
     let pc = vm.call(&Value::Obj(lock), Vec::new(), Vec::new())?;
@@ -1569,7 +1960,15 @@ fn guard(vm: &mut Vm, r: PyResult<()>) -> PyResult<()> {
     }
 }
 
-fn mark_changed(vm: &mut Vm, c: &Value, ctx: &Value, loop_: bool, filenames: &Value, tight: &Value, rv: &Value) -> PyResult<()> {
+fn mark_changed(
+    vm: &mut Vm,
+    c: &Value,
+    ctx: &Value,
+    loop_: bool,
+    filenames: &Value,
+    tight: &Value,
+    rv: &Value,
+) -> PyResult<()> {
     let t = get_serial(vm)?;
     s(vm, ctx, "last_changed", t.clone())?;
     s(vm, c, "last_changed", t)?;
@@ -1596,15 +1995,35 @@ fn skip_enqueue(vm: &mut Vm, loop_: bool) -> bool {
     cfg_true(vm, "skip_sounds") && cfg_true(vm, "skipping") && !loop_
 }
 
-const PLAY: &[&str] = &["filenames", "channel", "loop", "fadeout", "synchro_start", "fadein", "tight", "if_changed", "relative_volume"];
+const PLAY: &[&str] = &[
+    "filenames",
+    "channel",
+    "loop",
+    "fadeout",
+    "synchro_start",
+    "fadein",
+    "tight",
+    "if_changed",
+    "relative_volume",
+];
 
 fn m_play(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let v: Vec<Value> = PLAY.iter().enumerate().map(|(i, n)| arg_or(args, kw, i, n, Value::None)).collect();
+    let v: Vec<Value> = PLAY
+        .iter()
+        .enumerate()
+        .map(|(i, n)| arg_or(args, kw, i, n, Value::None))
+        .collect();
     if init_phase(vm)? {
         return Err(py::error(vm, "Can't play music during init phase."));
     }
-    let Some(filenames) = filenames_of(vm, &v[0])? else { return Ok(Value::None) };
-    let channel = if py::is_none(&v[1]) { py::s(vm, "music") } else { v[1].clone() };
+    let Some(filenames) = filenames_of(vm, &v[0])? else {
+        return Ok(Value::None);
+    };
+    let channel = if py::is_none(&v[1]) {
+        default_channel(vm, "music")
+    } else {
+        v[1].clone()
+    };
     let mut fadeout_v = v[3].clone();
     if m_get_pause_inner(vm, &channel) {
         fadeout_v = Value::Int(0);
@@ -1612,15 +2031,27 @@ fn m_play(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let r = (|| -> PyResult<()> {
         let c = get_channel(vm, &channel)?;
         let ctx = copy_context(vm, &c)?;
-        let loop_ = if py::is_none(&v[2]) { gb(vm, &c, "default_loop")? } else { py::truthy(vm, &v[2])? };
+        let loop_ = if py::is_none(&v[2]) {
+            gb(vm, &c, "default_loop")?
+        } else {
+            py::truthy(vm, &v[2])?
+        };
         let mut tight = v[6].clone();
         if py::is_none(&tight) && cfg_true(vm, "tight_loop_default") {
             tight = Value::Bool(loop_);
         }
         let cl = g(vm, &c, "loop")?;
         let loop_is_filenames = ops::eq(vm, &cl, &filenames)?;
-        let fo = if py::is_none(&fadeout_v) { fadeout_secs(vm)? } else { py::f64_of(vm, &fadeout_v)? };
-        let mut fadein = if py::is_none(&v[5]) { Value::Int(0) } else { v[5].clone() };
+        let fo = if py::is_none(&fadeout_v) {
+            fadeout_secs(vm)?
+        } else {
+            py::f64_of(vm, &fadeout_v)?
+        };
+        let mut fadein = if py::is_none(&v[5]) {
+            Value::Int(0)
+        } else {
+            v[5].clone()
+        };
         let if_changed = py::truthy(vm, &v[7])?;
         let loop_only;
         let playing = vm.call_method(&c, "get_playing", Vec::new())?;
@@ -1635,16 +2066,26 @@ fn m_play(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             fadeout(vm, &c, fo)?;
             loop_only = false;
         }
-        let rv = if py::is_none(&v[8]) { Value::Float(1.0) } else { v[8].clone() };
+        let rv = if py::is_none(&v[8]) {
+            Value::Float(1.0)
+        } else {
+            v[8].clone()
+        };
         if !skip_enqueue(vm, loop_) {
-            py::method_kw(vm, &c, "enqueue", vec![filenames.clone()], vec![
-                ("loop".into(), Value::Bool(loop_)),
-                ("synchro_start".into(), v[4].clone()),
-                ("fadein".into(), fadein),
-                ("tight".into(), tight.clone()),
-                ("loop_only".into(), Value::Bool(loop_only)),
-                ("relative_volume".into(), rv.clone()),
-            ])?;
+            py::method_kw(
+                vm,
+                &c,
+                "enqueue",
+                vec![filenames.clone()],
+                vec![
+                    ("loop".into(), Value::Bool(loop_)),
+                    ("synchro_start".into(), v[4].clone()),
+                    ("fadein".into(), fadein),
+                    ("tight".into(), tight.clone()),
+                    ("loop_only".into(), Value::Bool(loop_only)),
+                    ("relative_volume".into(), rv.clone()),
+                ],
+            )?;
         }
         mark_changed(vm, &c, &ctx, loop_, &filenames, &tight, &rv)
     })();
@@ -1652,10 +2093,22 @@ fn m_play(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
-const QUEUE: &[&str] = &["filenames", "channel", "loop", "clear_queue", "fadein", "tight", "relative_volume"];
+const QUEUE: &[&str] = &[
+    "filenames",
+    "channel",
+    "loop",
+    "clear_queue",
+    "fadein",
+    "tight",
+    "relative_volume",
+];
 
 fn m_queue(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let v: Vec<Value> = QUEUE.iter().enumerate().map(|(i, n)| arg_or(args, kw, i, n, Value::None)).collect();
+    let v: Vec<Value> = QUEUE
+        .iter()
+        .enumerate()
+        .map(|(i, n)| arg_or(args, kw, i, n, Value::None))
+        .collect();
     if init_phase(vm)? {
         return Err(py::error(vm, "Can't play music during init phase."));
     }
@@ -1667,34 +2120,64 @@ fn m_queue(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             vm.types.new_list(Vec::new())
         }
     };
-    let channel = if py::is_none(&v[1]) { py::s(vm, "music") } else { v[1].clone() };
+    let channel = if py::is_none(&v[1]) {
+        default_channel(vm, "music")
+    } else {
+        v[1].clone()
+    };
     if cfg(vm, "skipping").as_str() == Some("fast") {
         m_stop(vm, &[channel.clone()], &[])?;
     }
     if at_least(vm, 7, 0) {
-        m_set_pause(vm, &[Value::Bool(false)], &[("channel".into(), channel.clone())])?;
+        m_set_pause(
+            vm,
+            &[Value::Bool(false)],
+            &[("channel".into(), channel.clone())],
+        )?;
     }
     let r = (|| -> PyResult<()> {
         let c = get_channel(vm, &channel)?;
         let ctx = copy_context(vm, &c)?;
-        let loop_ = if py::is_none(&loop_v) { gb(vm, &c, "default_loop")? } else { py::truthy(vm, &loop_v)? };
+        let loop_ = if py::is_none(&loop_v) {
+            gb(vm, &c, "default_loop")?
+        } else {
+            py::truthy(vm, &loop_v)?
+        };
         let mut tight = v[5].clone();
         if py::is_none(&tight) && cfg_true(vm, "tight_loop_default") {
             tight = Value::Bool(loop_);
         }
-        let clear = if py::is_none(&v[3]) { true } else { py::truthy(vm, &v[3])? };
+        let clear = if py::is_none(&v[3]) {
+            true
+        } else {
+            py::truthy(vm, &v[3])?
+        };
         if clear {
             dequeue(vm, &c, true)?;
         }
-        let rv = if py::is_none(&v[6]) { Value::Float(1.0) } else { v[6].clone() };
+        let rv = if py::is_none(&v[6]) {
+            Value::Float(1.0)
+        } else {
+            v[6].clone()
+        };
         if !skip_enqueue(vm, loop_) {
-            let fadein = if py::is_none(&v[4]) { Value::Int(0) } else { v[4].clone() };
-            py::method_kw(vm, &c, "enqueue", vec![filenames.clone()], vec![
-                ("loop".into(), Value::Bool(loop_)),
-                ("fadein".into(), fadein),
-                ("tight".into(), tight.clone()),
-                ("relative_volume".into(), rv.clone()),
-            ])?;
+            let fadein = if py::is_none(&v[4]) {
+                Value::Int(0)
+            } else {
+                v[4].clone()
+            };
+            py::method_kw(
+                vm,
+                &c,
+                "enqueue",
+                vec![filenames.clone()],
+                vec![
+                    ("loop".into(), Value::Bool(loop_)),
+                    ("fadein".into(), fadein),
+                    ("tight".into(), tight.clone()),
+                    ("relative_volume".into(), rv.clone()),
+                ],
+            )?;
         }
         mark_changed(vm, &c, &ctx, loop_, &filenames, &tight, &rv)
     })();
@@ -1703,18 +2186,23 @@ fn m_queue(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 fn m_playable(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 1, "channel", py::s(vm, "music"));
+    let channel = arg_or(args, kw, 1, "channel", default_channel(vm, "music"));
     let c = get_channel(vm, &channel)?;
     let (f, _, _) = split_filename(vm, &c, &args[0], false)?;
     let f = py::string(vm, &f)?;
-    Ok(Value::Bool(super::resloader::loadable(vm, &f, true, Some("audio"))?))
+    Ok(Value::Bool(super::resloader::loadable(
+        vm,
+        &f,
+        true,
+        Some("audio"),
+    )?))
 }
 
 fn m_stop(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if init_phase(vm)? {
         return Ok(Value::None);
     }
-    let channel = arg_or(args, kw, 0, "channel", py::s(vm, "music"));
+    let channel = arg_or(args, kw, 0, "channel", default_channel(vm, "music"));
     let mut fo = arg_or(args, kw, 1, "fadeout", Value::None);
     if m_get_pause_inner(vm, &channel) {
         fo = Value::Float(0.0);
@@ -1722,7 +2210,11 @@ fn m_stop(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let r = (|| -> PyResult<()> {
         let c = get_channel(vm, &channel)?;
         let ctx = copy_context(vm, &c)?;
-        let secs = if py::is_none(&fo) { fadeout_secs(vm)? } else { py::f64_of(vm, &fo)? };
+        let secs = if py::is_none(&fo) {
+            fadeout_secs(vm)?
+        } else {
+            py::f64_of(vm, &fo)?
+        };
         fadeout(vm, &c, secs)?;
         let t = get_serial(vm)?;
         s(vm, &ctx, "last_changed", t.clone())?;
@@ -1762,10 +2254,14 @@ fn pos_of(vm: &mut Vm, channel: &Value) -> PyResult<Option<f64>> {
 }
 
 fn m_get_delay(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 1, "channel", py::s(vm, "music"));
+    let channel = arg_or(args, kw, 1, "channel", default_channel(vm, "music"));
     let time = py::f64_of(vm, &args[0])?;
     match pos_of(vm, &channel) {
-        Ok(Some(t)) => Ok(if t > time { Value::Int(0) } else { Value::Float(time - t) }),
+        Ok(Some(t)) => Ok(if t > time {
+            Value::Int(0)
+        } else {
+            Value::Float(time - t)
+        }),
         Ok(None) => Ok(Value::None),
         Err(e) if debug_sound(vm) => Err(e),
         Err(_) => Ok(Value::None),
@@ -1773,7 +2269,7 @@ fn m_get_delay(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 fn m_get_pos(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 0, "channel", py::s(vm, "music"));
+    let channel = arg_or(args, kw, 0, "channel", default_channel(vm, "music"));
     match pos_of(vm, &channel) {
         Ok(Some(t)) => Ok(Value::Float(t)),
         Ok(None) => Ok(Value::None),
@@ -1783,7 +2279,7 @@ fn m_get_pos(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 fn m_get_duration(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 0, "channel", py::s(vm, "music"));
+    let channel = arg_or(args, kw, 0, "channel", default_channel(vm, "music"));
     match get_channel(vm, &channel).and_then(|c| vm.call_method(&c, "get_duration", Vec::new())) {
         Ok(v) => Ok(v),
         Err(e) if debug_sound(vm) => Err(e),
@@ -1792,7 +2288,7 @@ fn m_get_duration(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 fn m_get_playing(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 0, "channel", py::s(vm, "music"));
+    let channel = arg_or(args, kw, 0, "channel", default_channel(vm, "music"));
     match get_channel(vm, &channel).and_then(|c| vm.call_method(&c, "get_playing", Vec::new())) {
         Ok(v) => Ok(v),
         Err(e) if debug_sound(vm) => Err(e),
@@ -1806,7 +2302,7 @@ fn m_is_playing(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 fn m_get_loop(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 0, "channel", py::s(vm, "music"));
+    let channel = arg_or(args, kw, 0, "channel", default_channel(vm, "music"));
     let c = get_channel(vm, &channel)?;
     let ctx = context(vm, &c)?;
     let l = g(vm, &ctx, "last_filenames")?;
@@ -1823,18 +2319,23 @@ fn channel_call(vm: &mut Vm, channel: &Value, method: &str, args: Vec<Value>) ->
 
 fn m_set_volume(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let delay = arg_or(args, kw, 1, "delay", Value::Int(0));
-    let channel = arg_or(args, kw, 2, "channel", py::s(vm, "music"));
-    channel_call(vm, &channel, "set_secondary_volume", vec![args[0].clone(), delay])
+    let channel = arg_or(args, kw, 2, "channel", default_channel(vm, "music"));
+    channel_call(
+        vm,
+        &channel,
+        "set_secondary_volume",
+        vec![args[0].clone(), delay],
+    )
 }
 
 fn m_set_pan(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let delay = arg_or(args, kw, 1, "delay", Value::Int(0));
-    let channel = arg_or(args, kw, 2, "channel", py::s(vm, "music"));
+    let channel = arg_or(args, kw, 2, "channel", default_channel(vm, "music"));
     channel_call(vm, &channel, "set_pan", vec![args[0].clone(), delay])
 }
 
 fn m_set_queue_empty_callback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 1, "channel", py::s(vm, "music"));
+    let channel = arg_or(args, kw, 1, "channel", default_channel(vm, "music"));
     match get_channel(vm, &channel) {
         Ok(c) => s(vm, &c, "callback", args[0].clone())?,
         Err(e) if debug_sound(vm) => return Err(e),
@@ -1844,7 +2345,7 @@ fn m_set_queue_empty_callback(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<V
 }
 
 fn m_set_pause(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 1, "channel", py::s(vm, "music"));
+    let channel = arg_or(args, kw, 1, "channel", default_channel(vm, "music"));
     let value = arg_or(args, kw, 0, "value", Value::Bool(false));
     match get_channel(vm, &channel).and_then(|c| copy_context(vm, &c)) {
         Ok(ctx) => s(vm, &ctx, "pause", value)?,
@@ -1865,7 +2366,7 @@ fn m_get_pause_inner(vm: &mut Vm, channel: &Value) -> bool {
 }
 
 fn m_get_pause(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 0, "channel", py::s(vm, "music"));
+    let channel = arg_or(args, kw, 0, "channel", default_channel(vm, "music"));
     Ok(Value::Bool(m_get_pause_inner(vm, &channel)))
 }
 
@@ -1913,7 +2414,11 @@ fn m_pump(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn m_set_audio_filter(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let channel = args[0].clone();
-    let mut filter = args.get(1).cloned().or_else(|| py::kw(kw, "audio_filter").cloned()).unwrap_or(Value::None);
+    let mut filter = args
+        .get(1)
+        .cloned()
+        .or_else(|| py::kw(kw, "audio_filter").cloned())
+        .unwrap_or(Value::None);
     let replace = arg_or(&args[2..], kw, 0, "replace", Value::Bool(false));
     let duration = arg_or(&args[2..], kw, 1, "duration", Value::Float(0.016));
     let ar = py::import_attr(vm, "renpy.game", "after_rollback")?;
@@ -1927,7 +2432,16 @@ fn m_set_audio_filter(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let ctx = copy_context(vm, &c)?;
         let t = get_serial(vm)?;
         s(vm, &ctx, "last_changed", t)?;
-        py::method_kw(vm, &c, "set_audio_filter", vec![filter], vec![("replace".into(), Value::Bool(replace)), ("duration".into(), duration)])?;
+        py::method_kw(
+            vm,
+            &c,
+            "set_audio_filter",
+            vec![filter],
+            vec![
+                ("replace".into(), Value::Bool(replace)),
+                ("duration".into(), duration),
+            ],
+        )?;
         Ok(())
     })();
     guard(vm, r)?;
@@ -1963,14 +2477,24 @@ fn music_module(vm: &mut Vm) -> PyResult<ObjRef> {
             ("set_audio_filter", m_set_audio_filter),
         ],
     );
-    for n in ["get_channel", "get_serial", "register_channel", "alias_channel"] {
+    for n in [
+        "get_channel",
+        "get_serial",
+        "register_channel",
+        "alias_channel",
+    ] {
         let v = py::import_attr(vm, AUDIO, n)?;
         crysirror_python::modules::set(vm, &m, n, v);
     }
     Ok(m)
 }
 
-fn with_default_channel(args: &[Value], kw: Kw, pos: usize, names: &[&str]) -> (Vec<Value>, Vec<(Rc<str>, Value)>) {
+fn with_default_channel(
+    args: &[Value],
+    kw: Kw,
+    pos: usize,
+    names: &[&str],
+) -> (Vec<Value>, Vec<(Rc<str>, Value)>) {
     let mut k: Vec<(Rc<str>, Value)> = kw.to_vec();
     let mut a = args.to_vec();
     for (i, v) in args.iter().enumerate().skip(1) {
@@ -1993,42 +2517,100 @@ fn sound_defaults(vm: &mut Vm, kw: &mut Vec<(Rc<str>, Value)>, defaults: &[(&str
 }
 
 fn s_play(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let (a, mut k) = with_default_channel(args, kw, 1, &["filename", "channel", "fadeout", "fadein", "tight", "loop", "relative_volume"]);
-    sound_defaults(vm, &mut k, &[("channel", py::s(vm, "sound")), ("fadeout", Value::Int(0)), ("fadein", Value::Int(0)), ("tight", Value::Bool(false)), ("loop", Value::Bool(false))]);
+    let (a, mut k) = with_default_channel(
+        args,
+        kw,
+        1,
+        &[
+            "filename",
+            "channel",
+            "fadeout",
+            "fadein",
+            "tight",
+            "loop",
+            "relative_volume",
+        ],
+    );
+    sound_defaults(
+        vm,
+        &mut k,
+        &[
+            ("channel", default_channel(vm, "sound")),
+            ("fadeout", Value::Int(0)),
+            ("fadein", Value::Int(0)),
+            ("tight", Value::Bool(false)),
+            ("loop", Value::Bool(false)),
+        ],
+    );
     m_play(vm, &a, &k)
 }
 
 fn s_queue(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let (a, mut k) = with_default_channel(args, kw, 1, &["filename", "channel", "clear_queue", "fadein", "tight", "loop", "relative_volume"]);
-    sound_defaults(vm, &mut k, &[("channel", py::s(vm, "sound")), ("clear_queue", Value::Bool(true)), ("fadein", Value::Int(0)), ("tight", Value::Bool(false)), ("loop", Value::Bool(false))]);
+    let (a, mut k) = with_default_channel(
+        args,
+        kw,
+        1,
+        &[
+            "filename",
+            "channel",
+            "clear_queue",
+            "fadein",
+            "tight",
+            "loop",
+            "relative_volume",
+        ],
+    );
+    sound_defaults(
+        vm,
+        &mut k,
+        &[
+            ("channel", default_channel(vm, "sound")),
+            ("clear_queue", Value::Bool(true)),
+            ("fadein", Value::Int(0)),
+            ("tight", Value::Bool(false)),
+            ("loop", Value::Bool(false)),
+        ],
+    );
     m_queue(vm, &a, &k)
 }
 
 fn s_stop(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 0, "channel", py::s(vm, "sound"));
+    let channel = arg_or(args, kw, 0, "channel", default_channel(vm, "sound"));
     let fo = arg_or(args, kw, 1, "fadeout", Value::Int(0));
-    m_stop(vm, &[], &[("channel".into(), channel), ("fadeout".into(), fo)])
+    m_stop(
+        vm,
+        &[],
+        &[("channel".into(), channel), ("fadeout".into(), fo)],
+    )
 }
 
 fn s_set_volume(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let delay = arg_or(args, kw, 1, "delay", Value::Int(0));
-    let channel = arg_or(args, kw, 2, "channel", py::s(vm, "sound"));
-    m_set_volume(vm, &[args[0].clone(), delay], &[("channel".into(), channel)])
+    let channel = arg_or(args, kw, 2, "channel", default_channel(vm, "sound"));
+    m_set_volume(
+        vm,
+        &[args[0].clone(), delay],
+        &[("channel".into(), channel)],
+    )
 }
 
 fn s_set_pan(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let delay = arg_or(args, kw, 1, "delay", Value::Int(0));
-    let channel = arg_or(args, kw, 2, "channel", py::s(vm, "sound"));
-    m_set_pan(vm, &[args[0].clone(), delay], &[("channel".into(), channel)])
+    let channel = arg_or(args, kw, 2, "channel", default_channel(vm, "sound"));
+    m_set_pan(
+        vm,
+        &[args[0].clone(), delay],
+        &[("channel".into(), channel)],
+    )
 }
 
 fn s_is_playing(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 0, "channel", py::s(vm, "sound"));
+    let channel = arg_or(args, kw, 0, "channel", default_channel(vm, "sound"));
     m_is_playing(vm, &[], &[("channel".into(), channel)])
 }
 
 fn s_get_playing(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let channel = arg_or(args, kw, 0, "channel", py::s(vm, "sound"));
+    let channel = arg_or(args, kw, 0, "channel", default_channel(vm, "sound"));
     m_get_playing(vm, &[], &[("channel".into(), channel)])
 }
 
@@ -2036,7 +2618,15 @@ fn sound_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let m = crysirror_python::modules::module_with(
         vm,
         SOUND,
-        &[("play", s_play), ("queue", s_queue), ("stop", s_stop), ("set_volume", s_set_volume), ("set_pan", s_set_pan), ("is_playing", s_is_playing), ("get_playing", s_get_playing)],
+        &[
+            ("play", s_play),
+            ("queue", s_queue),
+            ("stop", s_stop),
+            ("set_volume", s_set_volume),
+            ("set_pan", s_set_pan),
+            ("is_playing", s_is_playing),
+            ("get_playing", s_get_playing),
+        ],
     );
     for n in ["set_mixer", "set_queue_empty_callback"] {
         let v = py::import_attr(vm, MUSIC, n)?;
@@ -2066,7 +2656,10 @@ fn filter_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn to_audio_filter(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let f = &args[0];
-    if matches!(f.payload(), Some(crysirror_python::Payload::List(_) | crysirror_python::Payload::Tuple(_))) {
+    if matches!(
+        f.payload(),
+        Some(crysirror_python::Payload::List(_) | crysirror_python::Payload::Tuple(_))
+    ) {
         let seq = py::import_attr(vm, "renpy.audio.filter", "Sequence")?;
         let items = py::items(vm, f)?;
         return vm.call(&seq, items, Vec::new());
@@ -2075,11 +2668,49 @@ fn to_audio_filter(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn filter_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, "renpy.audio.filter", &[("to_audio_filter", to_audio_filter)]);
-    let base = py::class(vm, "renpy.audio.filter", "AudioFilter", &[], &[("__init__", filter_init), ("__repr__", filter_repr)], &[])?;
+    let m = crysirror_python::modules::module_with(
+        vm,
+        "renpy.audio.filter",
+        &[("to_audio_filter", to_audio_filter)],
+    );
+    let base = py::class(
+        vm,
+        "renpy.audio.filter",
+        "AudioFilter",
+        &[],
+        &[("__init__", filter_init), ("__repr__", filter_repr)],
+        &[],
+    )?;
     crysirror_python::modules::set(vm, &m, "AudioFilter", Value::Obj(base.clone()));
-    for n in ["Null", "Sequence", "Crossfade", "Biquad", "Lowpass", "Highpass", "Bandpass", "Lowshelf", "Highshelf", "Peaking", "Allpass", "Notch", "Mix", "Multiply", "Delay", "Comb", "WetDry", "Reverb", "SimpleReverb"] {
-        let c = py::class(vm, "renpy.audio.filter", n, &[Value::Obj(base.clone())], &[], &[])?;
+    for n in [
+        "Null",
+        "Sequence",
+        "Crossfade",
+        "Biquad",
+        "Lowpass",
+        "Highpass",
+        "Bandpass",
+        "Lowshelf",
+        "Highshelf",
+        "Peaking",
+        "Allpass",
+        "Notch",
+        "Mix",
+        "Multiply",
+        "Delay",
+        "Comb",
+        "WetDry",
+        "Reverb",
+        "SimpleReverb",
+    ] {
+        let c = py::class(
+            vm,
+            "renpy.audio.filter",
+            n,
+            &[Value::Obj(base.clone())],
+            &[],
+            &[],
+        )?;
         crysirror_python::modules::set(vm, &m, n, Value::Obj(c));
     }
     Ok(m)

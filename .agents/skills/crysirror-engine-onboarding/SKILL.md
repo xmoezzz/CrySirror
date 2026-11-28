@@ -36,8 +36,6 @@ and synthetic regression tests during implementation.
 
 Land complete syscall contracts one at a time. Follow the per-syscall coverage rules
 in [engine semantics](../crysirror-engine-semantics/SKILL.md#2-maintain-opcode-and-syscall-inventories).
-Record unfinished experiments and existing gaps using
-[SATD](../crysirror-satd/SKILL.md).
 
 For resource ownership, caches, asynchronous allocation and CPU/GPU pressure,
 use [memory management](../crysirror-memory-management/SKILL.md). Read the affected

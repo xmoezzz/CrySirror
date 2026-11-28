@@ -448,6 +448,7 @@ fn compilation_rejects_untextured_flipbooks_unordered_forces_and_unsupported_gpu
         frames: 4,
         fps: 1.,
         soft_distance: 0.,
+        triplanar_coverage: None,
         blend: BlendMode::Alpha,
         facing: FacingMode::Camera,
     };

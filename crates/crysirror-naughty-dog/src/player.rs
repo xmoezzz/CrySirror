@@ -84,6 +84,22 @@ pub const STATES: &[&str] = &[
     "ledge-grab",
     "ledge-shimmy-left",
     "ledge-shimmy-right",
+    "climb-out-90-lt",
+    "climb-out-90-lt^idle",
+    "climb-out-90-rt",
+    "climb-out-90-rt^idle",
+    "climb-in-90-lt",
+    "climb-in-90-lt^idle",
+    "climb-in-90-rt",
+    "climb-in-90-rt^idle",
+    "climb-up-lh",
+    "climb-up-lh^idle",
+    "climb-up-rh",
+    "climb-up-rh^idle",
+    "climb-down-lh",
+    "climb-down-lh^idle",
+    "climb-down-rh",
+    "climb-down-rh^idle",
     "ledge-climb-up",
     "ledge-climb-up-2",
     "climb-onto-1-75m^idle",
@@ -119,6 +135,8 @@ pub const STATES: &[&str] = &[
     "wall-jump-ant-90",
     "wall-jump-90-long-jump",
     "wall-rope-enter-bottom-grab",
+    "wall-rope-enter-bottom-settle",
+    "wall-rope-idle^climb-up",
     "jump^wall-rope-idle",
     "wall-rope-idle",
     "wall-rope-climb-up",
@@ -126,17 +144,28 @@ pub const STATES: &[&str] = &[
     "wall-rope-exit-bottom^idle",
     "wall-rope-climb-onto-1-75m^idle",
     "wall-rope-jump",
+    "wall-rope-jump-miss",
     "wall-rope-idle^swing",
     "wall-rope-swing",
     "wall-rope-swing^idle",
+    "wall-rope-swing-180",
+    "wall-rope-jump-ledge-end",
+    "climb-edge^wall-rope-rt",
+    "climb-edge^wall-rope-rt^idle",
+    "climb-edge^wall-rope-lt",
+    "climb-edge^wall-rope-lt^idle",
+    "climb-wall-rope^edge-rt",
+    "climb-wall-rope^edge-rt^idle",
+    "climb-wall-rope^edge-lt",
+    "climb-wall-rope^edge-lt^idle",
 ];
-const WALL_ROPE: &[&str] = &["wall-rope-enter-bottom-grab", "jump^wall-rope-idle", "wall-rope-idle", "wall-rope-climb-up", "wall-rope-climb-down", "wall-rope-idle^swing", "wall-rope-swing", "wall-rope-swing^idle"];
+const WALL_ROPE: &[&str] = &["wall-rope-enter-bottom-grab", "wall-rope-enter-bottom-settle", "wall-rope-idle^climb-up", "jump^wall-rope-idle", "wall-rope-idle", "wall-rope-climb-up", "wall-rope-climb-down", "wall-rope-idle^swing", "wall-rope-swing", "wall-rope-swing-180", "wall-rope-swing^idle"];
 const ROPE: &[&str] = &["free-rope-grab", "free-rope-idle", "free-rope-swing-mid^front", "free-rope-swing-mid^back", "free-rope-swing-front^mid", "free-rope-swing-back^mid"];
 /// Airborne states besides the jumps and the fall: rope and bar
 /// releases, wall jumps.
 /// Swing rate (rad/s) above which a wall rope plays its swing states.
 const WALL_ROPE_SWING: f32 = 0.6;
-const FLIGHT: &[&str] = &["free-rope^jump-long", "ledge-overhead-swing-jump", "wall-jump-90-long-jump", "wall-rope-jump"];
+const FLIGHT: &[&str] = &["free-rope^jump-long", "ledge-overhead-swing-jump", "wall-jump-90-long-jump", "wall-rope-jump", "wall-rope-jump-miss"];
 
 /// One-shot ground actions that return to `idle` when their clip ends,
 /// and the death states, which hold.
@@ -144,7 +173,7 @@ const ACTIONS: &[&str] = &["wall-rope-exit-bottom^idle", "wall-rope-climb-onto-1
 const DEATHS: &[&str] = &["hero-multi-death-front", "hero-multi-death-back", "death-stand-explosion-front", "death-stand-explosion-back", "fall-death"];
 const AIM: &[&str] = &["aim-idle", "aim-run-forward", "aim-run-backward"];
 
-const HANG: &[&str] = &["ledge-grab", "ledge-shimmy-left", "ledge-shimmy-right", "fall-grab-edge", "ledge-overhead-swing-enter", "ledge-overhead-swing"];
+const HANG: &[&str] = &["wall-rope-jump-ledge-end", "ledge-grab", "ledge-shimmy-left", "ledge-shimmy-right", "fall-grab-edge", "ledge-overhead-swing-enter", "ledge-overhead-swing"];
 const LEAP: &[&str] = &["ledge-jump-begin", "ledge-jump-mid", "ledge-jump-end", "climb-up-lh", "climb-up-rh", "climb-down-lh", "climb-down-rh", "ledge-overhead-forward"];
 const CLIMB: &[&str] = &["ledge-climb-up", "ledge-climb-up-2", "climb-onto-1-75m^idle", "climb-onto-1-75m^run"];
 
@@ -172,6 +201,26 @@ pub enum Mode {
     /// On a wall rope (`wall-rope-…`): the adapter holds the root on the
     /// rope at the climbed height.
     WallRope,
+    /// Two native clips bridge the held edge and the wall rope.
+    RopeTransfer,
+}
+
+/// Requests in anim-player's ledge-grab and wall-rope-idle transition group.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RopeTransfer {
+    ToRope { right: bool },
+    ToEdge { right: bool },
+}
+
+impl RopeTransfer {
+    fn request(self) -> u32 {
+        match self {
+            Self::ToRope { right: true } => 0xce34_0538,
+            Self::ToRope { right: false } => 0xb1fb_62df,
+            Self::ToEdge { right: true } => 0x08fd_b8ec,
+            Self::ToEdge { right: false } => 0x7732_df0b,
+        }
+    }
 }
 
 const AMBIENT: &[&str] = &["ambient-casual", "ambient-stand-a1", "ambient-stand-a2", "ambient-stand-a3"];
@@ -255,6 +304,8 @@ pub struct Frame {
     /// While hanging: step to the hand hold above (+1) or below (−1)
     /// (wall and ladder climbing, `climb-up-lh/rh`, `climb-down-lh/rh`).
     pub step: i8,
+    /// Native inner/outer corner transition request when both rail endpoints meet.
+    pub corner: Option<u32>,
     /// Deep water at the player's position, and the sprint input.
     pub swim: bool,
     pub movement_fast: bool,
@@ -285,6 +336,11 @@ pub struct Frame {
     /// The sideways swing rate on a wall rope (rad/s, + toward the
     /// player's right).
     pub wall_rope_swing: f32,
+    pub wall_rope_turn: bool,
+    pub wall_rope_target: bool,
+    pub wall_rope_linear_speed: f32,
+    pub wall_rope_left: bool,
+    pub rope_transfer: Option<RopeTransfer>,
     /// Land hard whatever the drop (`player-force-hard-land`).
     pub hard_land: bool,
 }
@@ -415,10 +471,12 @@ impl Controller {
             Mode::Hang
         } else if CLIMB.contains(&state.as_str()) {
             Mode::Climb
-        } else if LEAP.contains(&state.as_str()) {
+        } else if LEAP.contains(&state.as_str()) || state.starts_with("climb-in-90-") || state.starts_with("climb-out-90-") || (state.starts_with("climb-up-") || state.starts_with("climb-down-")) && state.ends_with("^idle") {
             Mode::Leap
         } else if ROPE.contains(&state.as_str()) {
             Mode::Rope
+        } else if state.starts_with("climb-edge^wall-rope-") || state.starts_with("climb-wall-rope^edge-") {
+            Mode::RopeTransfer
         } else if WALL_ROPE.contains(&state.as_str()) {
             Mode::WallRope
         } else if state.starts_with("swim-") {
@@ -439,15 +497,31 @@ impl Controller {
         let before = self.anim.machine.state;
         let state = self.name(table);
         let finished = self.anim.duration > 0. && self.anim.machine.time >= self.anim.duration;
-        match self.mode(table) {
+        let mode = self.mode(table);
+        if matches!(mode, Mode::Hang | Mode::WallRope) && !f.jump && !f.drop {
+            if let Some(transfer) = f.rope_transfer {
+                if self.anim.machine.request(table, transfer.request()) {
+                    return self.finish(graph, table, clips, f, before, None, 0.);
+                }
+            }
+        }
+        match mode {
+            Mode::RopeTransfer => return self.finish(graph, table, clips, f, before, None, 0.),
             Mode::WallRope => {
-                let busy = matches!(state.as_str(), "wall-rope-enter-bottom-grab" | "jump^wall-rope-idle" | "wall-rope-climb-up" | "wall-rope-climb-down" | "wall-rope-idle^swing" | "wall-rope-swing^idle") && !finished;
+                let busy = matches!(state.as_str(), "wall-rope-enter-bottom-grab" | "wall-rope-enter-bottom-settle" | "wall-rope-idle^climb-up" | "jump^wall-rope-idle" | "wall-rope-climb-up" | "wall-rope-climb-down" | "wall-rope-idle^swing" | "wall-rope-swing^idle") && !finished;
                 let swinging = f.wall_rope_swing.abs() > WALL_ROPE_SWING;
-                if f.jump {
+                if f.jump && (state != "wall-rope-swing-180" || f.wall_rope_target) {
                     // Away from the wall, or sideways with a swing.
                     self.yaw = if swinging { wrap(self.yaw - f.wall_rope_swing.signum() * PI / 2.) } else { wrap(self.yaw + PI) };
-                    self.anim.machine.force(sid("wall-rope-jump"), 0.1);
+                    if f.wall_rope_target {
+                        self.anim.machine.force(sid("wall-rope-jump"), 0.5);
+                    } else {
+                        self.anim.machine.force(sid("wall-rope-jump-miss"), 0.2);
+                    }
                     return self.finish(graph, table, clips, f, before, Some(JUMP_LIFT), 0.);
+                }
+                if !f.drop && (state == "wall-rope-swing-180" || (f.wall_rope_turn && self.anim.machine.request(table, 0x668c_107f))) {
+                    return self.finish(graph, table, clips, f, before, None, 0.);
                 }
                 if f.drop {
                     self.anim.machine.force(sid("fall"), 0.2);
@@ -464,7 +538,16 @@ impl Controller {
                         _ => "wall-rope-idle",
                     };
                     if state != target || finished {
-                        self.anim.machine.force(sid(target), 0.15);
+                        let request = match target {
+                            "wall-rope-idle^swing" => Some(0x73bc_e895),
+                            "wall-rope-swing^idle" | "wall-rope-idle" => Some(sid("idle")),
+                            "wall-rope-climb-up" => Some(sid("climb-up")),
+                            "wall-rope-climb-down" => Some(sid("climb-down")),
+                            _ => None,
+                        };
+                        if !request.is_some_and(|r| self.anim.machine.request(table, r)) {
+                            self.anim.machine.force(sid(target), 0.15);
+                        }
                     }
                 }
                 return self.finish(graph, table, clips, f, before, None, 0.);
@@ -510,10 +593,14 @@ impl Controller {
             Mode::Hang => {
                 if f.drop {
                     self.anim.machine.force(sid("fall"), 0.2);
+                } else if state == "wall-rope-jump-ledge-end" {
+                    // The catch clip returns to ledge-grab with an authored 0.8 s fade.
                 } else if state == "fall-grab-edge" {
                     if finished {
                         self.anim.machine.force(sid("ledge-grab"), 0.15);
                     }
+                } else if let Some(request) = f.corner {
+                    self.anim.machine.request(table, request);
                 } else if f.step != 0 {
                     self.hand = !self.hand;
                     let target = format!("climb-{}-{}", if f.step > 0 { "up" } else { "down" }, if self.hand { "lh" } else { "rh" });
@@ -532,7 +619,7 @@ impl Controller {
                 return self.finish(graph, table, clips, f, before, None, 0.);
             }
             Mode::Leap => {
-                if (state == "ledge-jump-end" || state.starts_with("climb-up-") || state.starts_with("climb-down-")) && finished {
+                if state == "ledge-jump-end" && finished {
                     self.anim.machine.force(sid("ledge-grab"), 0.15);
                 } else if state == "ledge-overhead-forward" && finished {
                     self.anim.machine.force(sid("ledge-overhead-swing"), 0.15);
@@ -665,7 +752,8 @@ impl Controller {
             return self.finish(graph, table, clips, f, before, Some(JUMP_LIFT), 0.);
         }
         if airborne && f.grab {
-            self.anim.machine.force(sid("fall-grab-edge"), 0.1);
+            let catch = if state == "wall-rope-jump" { "wall-rope-jump-ledge-end" } else { "fall-grab-edge" };
+            self.anim.machine.force(sid(catch), if state == "wall-rope-jump" { 0.2 } else { 0.1 });
             return self.finish(graph, table, clips, f, before, None, 0.);
         }
         let at_rest = state == "idle" || state == "run-idle" || state.starts_with("ambient-") || state.starts_with("idle-turn-") || state.ends_with("-land-idle") || state == "jump-in-place-land" || state.starts_with("fall-land-") && state.ends_with("-idle");
@@ -755,9 +843,12 @@ impl Controller {
     /// Present the state and report the step.
     #[allow(clippy::too_many_arguments)]
     fn finish(&mut self, graph: &mut Graph, table: &StateTable, clips: &HashMap<u32, ClipInfo>, f: &Frame, before: u32, lift: Option<f32>, lean: f32) -> Result<Step> {
+        // sub_6A4618 blends the run and walk clips by tangential speed.
+        let rope_speed = f.wall_rope_linear_speed.abs();
+        let rope_walk = 1. - ((rope_speed - 1.6) / (5. - 1.6)).clamp(0., 1.);
         let inputs = Inputs {
-            info: vec![(28, lean.max(0.)), (32, (-lean).max(0.)), (40, (f.slope * 2.).clamp(0., 1.)), (44, (-f.slope * 2.).clamp(0., 1.))],
-            instance: vec![(48, f.movement), (52, f.weapon)],
+            info: vec![(0xd8, rope_speed / (5. - 3.4 * rope_walk)), (0xdc, rope_walk), (28, lean.max(0.)), (32, (-lean).max(0.)), (40, (f.slope * 2.).clamp(0., 1.)), (44, (-f.slope * 2.).clamp(0., 1.))],
+            instance: vec![(28, u32::from(f.wall_rope_left)), (48, f.movement), (52, f.weapon)],
             phase: 0.,
         };
         let (layers, speed) = self.anim.present(graph, table, clips, &|c| c, inputs, before, f.seconds)?;

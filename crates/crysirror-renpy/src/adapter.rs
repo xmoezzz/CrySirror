@@ -88,6 +88,7 @@ impl VmFactory for Factory {
             diagnostics: VecDeque::new(),
             title: None,
             text_rect: None,
+            text_session: None,
         }))
     }
 }
@@ -111,6 +112,9 @@ impl rt::state::Files for RtFiles {
     }
     fn common_read(&self, name: &str) -> Option<Vec<u8>> {
         self.0.common_read(name)
+    }
+    fn temporary_storage(&self) -> Option<&dyn crysirror_core::service::ClientStorage> {
+        self.0.temporary_storage()
     }
 }
 
@@ -141,6 +145,9 @@ struct Adapter {
     diagnostics: VecDeque<String>,
     title: Option<String>,
     text_rect: Option<[i32; 4]>,
+    /// Host text-input session while a Ren'Py input is focused, with the
+    /// cursor area it was configured for.
+    text_session: Option<(crysirror_core::service::TextInputSessionHandle, [i32; 4])>,
 }
 
 impl Adapter {
@@ -159,15 +166,23 @@ impl Adapter {
         if self.preparation.is_none() {
             let storage = host.storage(self.client)?;
             let archives = self.config.archives.clone();
-            let pool = TaskPool::new("renpy-prepare", 1, 1).map_err(|e| Error::Io(e.to_string()))?;
+            let pool =
+                TaskPool::new("renpy-prepare", 1, 1).map_err(|e| Error::Io(e.to_string()))?;
             let task = pool
-                .spawn(move |cancel| Ok(ScopedFiles::load(storage, &archives, || cancel.check().map_err(|e| Error::Io(e.to_string())))?))
+                .spawn(move |cancel| {
+                    Ok(ScopedFiles::load(storage, &archives, || {
+                        cancel.check().map_err(|e| Error::Io(e.to_string()))
+                    })?)
+                })
                 .map_err(|e| Error::Io(e.to_string()))?;
             self.preparation = Some(task);
             self.pool = Some(pool);
             return Ok(false);
         }
-        let task = self.preparation.as_mut().expect("pending Ren'Py preparation");
+        let task = self
+            .preparation
+            .as_mut()
+            .expect("pending Ren'Py preparation");
         let Some(files) = task.try_take().map_err(|e| Error::Io(e.to_string()))? else {
             return Ok(false);
         };
@@ -186,7 +201,10 @@ impl Adapter {
         let profile = self.profile.clone();
         let (to_script, from_owner) = mpsc::sync_channel::<ToScript>(1);
         let (to_owner, from_script) = mpsc::sync_channel::<FromScript>(1);
-        let first = Tick { now_ms: host.now_ms(), ..Tick::default() };
+        let first = Tick {
+            now_ms: host.now_ms(),
+            ..Tick::default()
+        };
         let thread = std::thread::Builder::new()
             .name("renpy-script".into())
             .stack_size(SCRIPT_STACK)
@@ -201,11 +219,20 @@ impl Adapter {
                     h.saves = saves.clone();
                     h.canvas = canvas;
                     let f = files.clone();
-                    h.assets = Some(std::rc::Rc::new(move |name: &str| f.asset_path(name).map(|p| p.relative().to_owned())));
+                    h.assets = Some(std::rc::Rc::new(move |name: &str| {
+                        f.asset_path(name).map(|p| p.relative().to_owned())
+                    }));
                 });
             })
             .map_err(|e| Error::Io(format!("Ren'Py script thread: {e}")))?;
-        self.session = Some(Session { to_script, from_script, thread: Some(thread), awaiting: true, wait: Wait::NextFrame, last_input: InputFrame::default() });
+        self.session = Some(Session {
+            to_script,
+            from_script,
+            thread: Some(thread),
+            awaiting: true,
+            wait: Wait::NextFrame,
+            last_input: InputFrame::default(),
+        });
         Ok(())
     }
 
@@ -226,7 +253,12 @@ impl Adapter {
             }
             // Removing a layer removes its subtree, so only the topmost
             // layer of each vanished subtree is removed.
-            let gone: BTreeSet<u64> = self.layers.keys().filter(|id| !ids.contains_key(id)).copied().collect();
+            let gone: BTreeSet<u64> = self
+                .layers
+                .keys()
+                .filter(|id| !ids.contains_key(id))
+                .copied()
+                .collect();
             let under_gone = |mut id: u64| {
                 while let Some(Some(p)) = self.layers.get(&id) {
                     if gone.contains(p) {
@@ -236,13 +268,22 @@ impl Adapter {
                 }
                 false
             };
-            let mut layers: Vec<J> = gone.iter().filter(|id| !under_gone(**id)).map(|id| json!({"op": "remove", "id": id})).collect();
+            let mut layers: Vec<J> = gone
+                .iter()
+                .filter(|id| !under_gone(**id))
+                .map(|id| json!({"op": "remove", "id": id}))
+                .collect();
             layers.extend(ops);
             self.layers = ids;
             if let Some(path) = std::env::var_os("CRYSIRROR_RENPY_DUMP_FRAME") {
-                let _ = std::fs::write(path, serde_json::to_vec_pretty(&layers).unwrap_or_default());
+                let _ =
+                    std::fs::write(path, serde_json::to_vec_pretty(&layers).unwrap_or_default());
             }
-            host.submit_engine(self.client, 1, json!({"layers": layers}).to_string().as_bytes())?;
+            host.submit_engine(
+                self.client,
+                1,
+                json!({"layers": layers}).to_string().as_bytes(),
+            )?;
         }
         if std::env::var_os("CRYSIRROR_RENPY_TRACE").is_some() {
             for c in &out.audio {
@@ -253,28 +294,70 @@ impl Adapter {
         for d in std::mem::take(&mut self.audio.diagnostics) {
             self.note(d);
         }
-        self.published.extend(rt::im::publish(host, self.client, out.publish));
+        self.published
+            .extend(rt::im::publish(host, self.client, out.publish));
         if let Some(t) = out.title {
             self.title = Some(t);
         }
         self.text_rect = out.text_rect;
+        self.sync_text_session(host)?;
         for s in out.speech {
             self.note(format!("self-voicing: {s}"));
         }
         Ok(())
     }
 
+    /// Opens, moves or releases the host text-input session to follow the
+    /// focused input's rectangle (`pygame.key.start_text_input`,
+    /// `set_text_input_rect`, `stop_text_input`).
+    fn sync_text_session(&mut self, host: &mut dyn HostServices) -> Result<()> {
+        use crysirror_core::service::TextInputSessionSpec;
+        let spec = |rect: [i32; 4]| TextInputSessionSpec {
+            capture: true,
+            ime_allowed: true,
+            cursor_area: Some([rect[0], rect[1], rect[2].max(1), rect[3].max(1)]),
+            ..Default::default()
+        };
+        match (self.text_rect, self.text_session) {
+            (Some(rect), None) => {
+                if let Ok(h) = host.open_text_input_session(self.client, spec(rect)) {
+                    self.text_session = Some((h, rect));
+                }
+            }
+            (Some(rect), Some((h, old))) if rect != old => {
+                host.configure_text_input_session(self.client, h, spec(rect))?;
+                self.text_session = Some((h, rect));
+            }
+            (None, Some((h, _))) => {
+                self.text_session = None;
+                host.release_text_input_session(self.client, h)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn input_changed(last: &InputFrame, input: &InputFrame) -> bool {
-        input.buttons_pressed != 0 || input.buttons_down != last.buttons_down || input.pointer_x != last.pointer_x || input.pointer_y != last.pointer_y
+        input.buttons_pressed != 0
+            || input.buttons_down != last.buttons_down
+            || input.pointer_x != last.pointer_x
+            || input.pointer_y != last.pointer_y
     }
 
     fn shutdown(&mut self, host: &mut dyn HostServices) {
+        if let Some((h, _)) = self.text_session.take() {
+            let _ = host.release_text_input_session(self.client, h);
+        }
         if let Some(mut s) = self.session.take() {
             let _ = s.to_script.try_send(ToScript::Shutdown);
             drop(s.to_script);
             // The script thread unwinds with QuitException; draining lets it
             // deliver its final message.
-            while s.from_script.recv_timeout(Duration::from_millis(500)).is_ok() {}
+            while s
+                .from_script
+                .recv_timeout(Duration::from_millis(500))
+                .is_ok()
+            {}
             if let Some(t) = s.thread.take() {
                 let _ = t.join();
             }
@@ -293,18 +376,27 @@ impl VmAdapter for Adapter {
     }
 
     fn snapshot(&self) -> Result<Vec<u8>> {
-        Err(Error::Unsupported("Ren'Py runtime snapshot (use the game's own save slots)"))
+        Err(Error::Unsupported(
+            "Ren'Py runtime snapshot (use the game's own save slots)",
+        ))
     }
 
     fn restore(&mut self, _: &[u8]) -> Result<()> {
-        Err(Error::Unsupported("Ren'Py runtime snapshot (use the game's own save slots)"))
+        Err(Error::Unsupported(
+            "Ren'Py runtime snapshot (use the game's own save slots)",
+        ))
     }
 
     fn preparation_pending(&self) -> bool {
         self.session.is_none() && !self.halted
     }
 
-    fn step(&mut self, host: &mut dyn HostServices, input: InputFrame, _budget: u32) -> Result<VmYield> {
+    fn step(
+        &mut self,
+        host: &mut dyn HostServices,
+        input: InputFrame,
+        _budget: u32,
+    ) -> Result<VmYield> {
         if self.halted {
             return Ok(VmYield::Halted);
         }
@@ -316,26 +408,47 @@ impl VmAdapter for Adapter {
         }
         let now = host.now_ms();
         let files = self.files.clone().expect("prepared files");
+        let text_pending = self.text_session.is_some_and(|(h, _)| {
+            host.text_input_session_info(self.client, h).is_ok_and(|i| !i.committed.is_empty())
+        });
         let send = {
             let s = self.session.as_ref().expect("session");
+            let woken = text_pending || Self::input_changed(&s.last_input, &input);
             !s.awaiting
                 && match s.wait {
                     Wait::NextFrame => true,
-                    Wait::Until(t) => now >= t || Self::input_changed(&s.last_input, &input),
-                    Wait::Input => Self::input_changed(&s.last_input, &input),
+                    Wait::Until(t) => now >= t || woken,
+                    Wait::Input => woken,
                 }
         };
         if send {
             let audio = self.audio.status(host, self.client, &files)?;
             let published = std::mem::take(&mut self.published);
-            if std::env::var_os("CRYSIRROR_RENPY_TRACE").is_some() && Self::input_changed(&self.session.as_ref().expect("session").last_input, &input) {
+            let text = match self.text_session {
+                Some((h, _)) => host.take_text_input_committed(self.client, h).map(|t| (*t).clone()).unwrap_or_default(),
+                None => String::new(),
+            };
+            if std::env::var_os("CRYSIRROR_RENPY_TRACE").is_some()
+                && Self::input_changed(&self.session.as_ref().expect("session").last_input, &input)
+            {
                 self.note(format!("trace: tick {now} input {input:?}"));
             }
             let s = self.session.as_mut().expect("session");
             s.last_input = input;
-            if s.to_script.send(ToScript::Tick(Tick { now_ms: now, input, audio, published })).is_err() {
+            if s.to_script
+                .send(ToScript::Tick(Tick {
+                    now_ms: now,
+                    input,
+                    audio,
+                    published,
+                    text,
+                }))
+                .is_err()
+            {
                 self.halted = true;
-                return Err(Error::Io("the Ren'Py script thread ended unexpectedly".into()));
+                return Err(Error::Io(
+                    "the Ren'Py script thread ended unexpectedly".into(),
+                ));
             }
             s.awaiting = true;
         }
@@ -371,7 +484,9 @@ impl VmAdapter for Adapter {
             Err(RecvTimeoutError::Timeout) => Ok(VmYield::BudgetExhausted),
             Err(RecvTimeoutError::Disconnected) => {
                 self.halted = true;
-                Err(Error::Io("the Ren'Py script thread ended unexpectedly".into()))
+                Err(Error::Io(
+                    "the Ren'Py script thread ended unexpectedly".into(),
+                ))
             }
         }
     }
@@ -394,7 +509,11 @@ impl Drop for Adapter {
         if let Some(mut s) = self.session.take() {
             let _ = s.to_script.try_send(ToScript::Shutdown);
             drop(s.to_script);
-            while s.from_script.recv_timeout(Duration::from_millis(200)).is_ok() {}
+            while s
+                .from_script
+                .recv_timeout(Duration::from_millis(200))
+                .is_ok()
+            {}
             if let Some(t) = s.thread.take() {
                 let _ = t.join();
             }

@@ -305,6 +305,76 @@ impl Parser {
         Ok(Some(Stmt { loc, kind }))
     }
 
+    /// `type` is a soft keyword (3.12): `type Name = ...` or
+    /// `type Name[T, ...] = ...`.
+    fn looks_like_type_alias(&self) -> bool {
+        matches!(self.tok(), Tok::Name(w) if w == "type")
+            && matches!(self.tok_at(1), Tok::Name(n) if !self.is_keyword(n))
+            && matches!(self.tok_at(2), Tok::Op("=" | "["))
+    }
+
+    /// `type Name[T, *Ts, **P] = value`, desugared to
+    /// `Name = (lambda T, Ts, P: typing.TypeAliasType("Name", lambda: value,
+    /// type_params=(T, Ts, P)))(TypeVar("T"), TypeVarTuple("Ts"), ParamSpec("P"))`
+    /// so the value is evaluated lazily with the parameters in scope.
+    fn type_alias(&mut self, loc: Loc) -> Result<Stmt, SyntaxError> {
+        let name = self.name()?;
+        let mut params: Vec<(String, &'static str)> = Vec::new();
+        if self.eat_op("[") {
+            loop {
+                let kind = if self.eat_op("**") {
+                    "ParamSpec"
+                } else if self.eat_op("*") {
+                    "TypeVarTuple"
+                } else {
+                    "TypeVar"
+                };
+                params.push((self.name()?, kind));
+                if self.eat_op(":") {
+                    self.test()?;
+                }
+                if self.eat_op("=") {
+                    self.test()?;
+                }
+                if !self.eat_op(",") || matches!(self.tok(), Tok::Op("]")) {
+                    break;
+                }
+            }
+            self.expect_op("]")?;
+        }
+        self.expect_op("=")?;
+        let value = self.test()?;
+        let e = |kind: ExprKind| Expr::new(loc.clone(), kind);
+        let load = |id: &str| Expr::new(loc.clone(), ExprKind::Name { id: id.to_owned(), ctx: Ctx::Load });
+        let s = |v: &str| Expr::new(loc.clone(), ExprKind::Constant(Constant::Str(v.to_owned())));
+        let typing = |attr: &str| {
+            let imp = Expr::new(
+                loc.clone(),
+                ExprKind::Call { func: Box::new(load("__import__")), args: vec![s("typing")], keywords: Vec::new() },
+            );
+            Expr::new(loc.clone(), ExprKind::Attribute { value: Box::new(imp), attr: attr.to_owned(), ctx: Ctx::Load })
+        };
+        let lazy = e(ExprKind::Lambda { args: Box::new(Arguments::default()), body: Box::new(value) });
+        let tparams = e(ExprKind::Tuple { elts: params.iter().map(|(n, _)| load(n)).collect(), ctx: Ctx::Load });
+        let alias = e(ExprKind::Call {
+            func: Box::new(typing("TypeAliasType")),
+            args: vec![s(&name), lazy],
+            keywords: vec![Keyword { arg: Some("type_params".into()), value: tparams }],
+        });
+        let mut outer = Arguments::default();
+        for (n, _) in &params {
+            outer.args.push(Arg { name: n.clone(), annotation: None, unpack: None });
+        }
+        let maker = e(ExprKind::Lambda { args: Box::new(outer), body: Box::new(alias) });
+        let args = params
+            .iter()
+            .map(|(n, kind)| e(ExprKind::Call { func: Box::new(typing(kind)), args: vec![s(n)], keywords: Vec::new() }))
+            .collect();
+        let value = e(ExprKind::Call { func: Box::new(maker), args, keywords: Vec::new() });
+        let target = Expr::new(loc.clone(), ExprKind::Name { id: name, ctx: Ctx::Store });
+        Ok(Stmt { loc, kind: StmtKind::Assign { targets: vec![target], value } })
+    }
+
     fn looks_like_match(&self) -> bool {
         // `match` is a soft keyword: a statement only when followed by an
         // expression and a ':' that ends the logical line.
@@ -740,6 +810,10 @@ impl Parser {
 
     fn simple_stmt(&mut self) -> Result<Stmt, SyntaxError> {
         let loc = self.loc();
+        if !self.py2() && self.looks_like_type_alias() {
+            self.pos += 1;
+            return self.type_alias(loc);
+        }
         if let Tok::Name(w) = self.tok().clone() {
             if self.is_keyword(&w) || (w == "print" && self.opts.print_statement) {
                 let kind = match w.as_str() {

@@ -31,3 +31,25 @@ No proprietary pixels are included here. These checks did not launch the
 game, compare GPU blend pixels or validate the subsequent native save or
 dialogue. Record and opcode admission counts are unchanged: the exact
 opening tuple already reached its dispatch arm before the geometry fix.
+
+## First-chapter crop and scale
+
+The `F11A1101.rld+0x5bd` record selects a 400 × 300 window at (0,840)
+on a 1600 × 1200 opaque GYU. In the 0x8c580 branch, each axis takes
+the integer pixel at the current and next output coordinate. Weights
+come from the current coordinate in 8.8 precision and sum to 255 on
+each axis. RGB uses one final right shift of 16 bits. The successor
+tap can cross the crop boundary while it remains inside the full source.
+At the source edge, the corresponding tap repeats the current pixel.
+The original helper has a different path when either extent equals
+its destination or is at most a quarter of it.
+
+The adapter reads bounded metadata from the original asset, then uses
+the shared `rect_resample_byte255` image job and submits its immutable
+output to the existing mode-9 crossfade. Preparation preserves the
+previous layer and the instruction cursor. The fade completes before
+the VM commits geometry, CG experience and the next instruction.
+Subsequent replacement retires the generated resource through the host,
+including its retained transition references. Existing image commands
+and other image-effect variants retain their parameter and execution
+contracts. Exhaustive Rust matches on `ImageEffect` need the new variant.

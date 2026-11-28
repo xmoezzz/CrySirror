@@ -25,7 +25,17 @@ fn hex(d: &[u8]) -> String {
 /// `Node.get_code()` of the translatable nodes.
 pub fn get_code(kind: &NodeKind) -> Option<String> {
     match kind {
-        NodeKind::Say { who, what, attributes, temporary_attributes, with_, interact, identifier, explicit_identifier, arguments } => {
+        NodeKind::Say {
+            who,
+            what,
+            attributes,
+            temporary_attributes,
+            with_,
+            interact,
+            identifier,
+            explicit_identifier,
+            arguments,
+        } => {
             let mut rv = Vec::new();
             if let Some(w) = who {
                 rv.push(w.text.to_string());
@@ -79,7 +89,11 @@ impl Restructurer<'_> {
         };
         let mut i = 0;
         loop {
-            let id = if i == 0 { base.clone() } else { format!("{base}_{i}") };
+            let id = if i == 0 {
+                base.clone()
+            } else {
+                format!("{base}_{i}")
+            };
             if !self.id_exists(&id) && !self.preexisting.contains(&id) {
                 return id;
             }
@@ -124,7 +138,15 @@ impl Restructurer<'_> {
         let first = self.arena.get(block[0]).clone();
         let loc = (first.filename.clone(), first.linenumber);
         let base_name = first.name.clone().unwrap_or(NodeName::Other("".into()));
-        let tl = self.arena.add(&loc, NodeKind::Translate { identifier, language: None, block, alternate });
+        let tl = self.arena.add(
+            &loc,
+            NodeKind::Translate {
+                identifier,
+                language: None,
+                block,
+                alternate,
+            },
+        );
         self.arena.get_mut(tl).name = Some(base_name.suffixed("translate"));
         self.arena.get_mut(tl).rollback = crate::ast::Rollback::Never;
         let ed = self.arena.add(&loc, NodeKind::EndTranslate);
@@ -135,7 +157,15 @@ impl Restructurer<'_> {
 
     /// `combine_translate`: a translate around one say becomes TranslateSay.
     fn combine(&mut self, id: NodeId) -> NodeId {
-        let NodeKind::Translate { identifier, language, block, .. } = self.arena.get(id).kind.clone() else { return id };
+        let NodeKind::Translate {
+            identifier,
+            language,
+            block,
+            ..
+        } = self.arena.get(id).kind.clone()
+        else {
+            return id;
+        };
         if block.len() != 1 {
             return id;
         }
@@ -144,7 +174,14 @@ impl Restructurer<'_> {
             return id;
         }
         let loc = (say.filename.clone(), say.linenumber);
-        let ts = self.arena.add(&loc, NodeKind::TranslateSay { identifier, language, say: Box::new(say.kind.clone()) });
+        let ts = self.arena.add(
+            &loc,
+            NodeKind::TranslateSay {
+                identifier,
+                language,
+                say: Box::new(say.kind.clone()),
+            },
+        );
         self.arena.get_mut(ts).name = say.name.clone();
         ts
     }
@@ -210,30 +247,76 @@ impl Restructurer<'_> {
                 let b = self.callback(&block);
                 self.arena.get_mut(id).kind = NodeKind::Init { block: b, priority };
             }
-            NodeKind::Label { name, block, parameters, hide } => {
+            NodeKind::Label {
+                name,
+                block,
+                parameters,
+                hide,
+            } => {
                 let b = self.callback(&block);
-                self.arena.get_mut(id).kind = NodeKind::Label { name, block: b, parameters, hide };
+                self.arena.get_mut(id).kind = NodeKind::Label {
+                    name,
+                    block: b,
+                    parameters,
+                    hide,
+                };
             }
             NodeKind::While { condition, block } => {
                 let b = self.callback(&block);
-                self.arena.get_mut(id).kind = NodeKind::While { condition, block: b };
+                self.arena.get_mut(id).kind = NodeKind::While {
+                    condition,
+                    block: b,
+                };
             }
             NodeKind::If { entries } => {
-                let e = entries.into_iter().map(|(c, b)| (c, self.callback(&b))).collect();
+                let e = entries
+                    .into_iter()
+                    .map(|(c, b)| (c, self.callback(&b)))
+                    .collect();
                 self.arena.get_mut(id).kind = NodeKind::If { entries: e };
             }
-            NodeKind::Menu { mut items, set, with_, has_caption, arguments } => {
+            NodeKind::Menu {
+                mut items,
+                set,
+                with_,
+                has_caption,
+                arguments,
+            } => {
                 for it in items.iter_mut() {
                     if let Some(b) = &it.block {
                         it.block = Some(self.callback(b));
                     }
                 }
-                self.arena.get_mut(id).kind = NodeKind::Menu { items, set, with_, has_caption, arguments };
+                self.arena.get_mut(id).kind = NodeKind::Menu {
+                    items,
+                    set,
+                    with_,
+                    has_caption,
+                    arguments,
+                };
             }
-            NodeKind::UserStatement { line, block, parsed, subparses, code_block, init_priority, translatable, atl } => {
+            NodeKind::UserStatement {
+                line,
+                block,
+                parsed,
+                subparses,
+                code_block,
+                init_priority,
+                translatable,
+                atl,
+            } => {
                 let code_block = code_block.map(|b| self.callback(&b));
                 let subparses = subparses.iter().map(|b| self.callback(b)).collect();
-                self.arena.get_mut(id).kind = NodeKind::UserStatement { line, block, parsed, subparses, code_block, init_priority, translatable, atl };
+                self.arena.get_mut(id).kind = NodeKind::UserStatement {
+                    line,
+                    block,
+                    parsed,
+                    subparses,
+                    code_block,
+                    init_priority,
+                    translatable,
+                    atl,
+                };
             }
             _ => {}
         }
@@ -251,17 +334,32 @@ fn collect(arena: &Arena, id: NodeId, out: &mut Vec<NodeId>) {
 
 /// `renpy.translation.restructure(children)` for a file's top-level
 /// block; `existing` holds identifiers of previously loaded files.
-pub fn restructure(arena: &mut Arena, block: &[NodeId], existing: &HashMap<String, NodeId>) -> Vec<NodeId> {
+pub fn restructure(
+    arena: &mut Arena,
+    block: &[NodeId],
+    existing: &HashMap<String, NodeId>,
+) -> Vec<NodeId> {
     let mut preexisting = HashSet::new();
     let mut all = Vec::new();
     for &b in block {
         collect(arena, b, &mut all);
     }
     for id in all {
-        if let NodeKind::Say { identifier: Some(i), .. } = &arena.get(id).kind {
+        if let NodeKind::Say {
+            identifier: Some(i),
+            ..
+        } = &arena.get(id).kind
+        {
             preexisting.insert(i.clone());
         }
     }
-    let mut r = Restructurer { arena, existing, label: None, alternate: None, preexisting, identifiers: HashSet::new() };
+    let mut r = Restructurer {
+        arena,
+        existing,
+        label: None,
+        alternate: None,
+        preexisting,
+        identifiers: HashSet::new(),
+    };
     r.callback(block)
 }

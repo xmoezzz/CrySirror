@@ -43,7 +43,12 @@ fn evargs(vm: &mut Vm, args: &[Value]) -> PyResult<(Value, f64, f64, f64)> {
     Ok((ev, x, y, st))
 }
 
-fn split(args: &[Value], kw: Kw, names: &[&str], defaults: Vec<Value>) -> (Vec<Value>, Vec<(Rc<str>, Value)>) {
+fn split(
+    args: &[Value],
+    kw: Kw,
+    names: &[&str],
+    defaults: Vec<Value>,
+) -> (Vec<Value>, Vec<(Rc<str>, Value)>) {
     let mut vals = defaults;
     for (i, v) in args.iter().skip(1).enumerate().take(names.len()) {
         vals[i] = v.clone();
@@ -94,17 +99,27 @@ fn f_input_post(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
         mset(vm, "input_value_active", Value::Bool(true))?;
     }
     let cur = mget(vm, "current_input_value")?;
-    let active = { let v = mget(vm, "input_value_active")?; ops::truthy(vm, &v)? };
+    let active = {
+        let v = mget(vm, "input_value_active")?;
+        ops::truthy(vm, &v)?
+    };
     let inputs = mget(vm, "inputs")?;
     for i in py::items(vm, &inputs)? {
         let value = py::get(vm, &i, "value")?;
         let ed = py::get_or_none(vm, &value, "editable")?;
         let editable = ops::eq(vm, &value, &cur)? && active && ops::truthy(vm, &ed)?;
         let content = vm.call_method(&value, "get_text", Vec::new())?;
-        let ie = { let v = py::get_or_none(vm, &i, "editable")?; ops::truthy(vm, &v)? };
+        let ie = {
+            let v = py::get_or_none(vm, &i, "editable")?;
+            ops::truthy(vm, &v)?
+        };
         let ic = py::get_or_none(vm, &i, "content")?;
         if ie != editable || !ops::eq(vm, &content, &ic)? {
-            vm.call_method(&i, "update_text", vec![content.clone(), Value::Bool(editable)])?;
+            vm.call_method(
+                &i,
+                "update_text",
+                vec![content.clone(), Value::Bool(editable)],
+            )?;
             let n = ops::len(vm, &content)?;
             py::set(vm, &i, "caret_pos", Value::Int(n as i64))?;
         }
@@ -116,7 +131,12 @@ fn f_input_post(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn caret_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let (vals, mut props) = split(args, kw, &["caret", "caret_blink"], vec![Value::None, Value::None]);
+    let (vals, mut props) = split(
+        args,
+        kw,
+        &["caret", "caret_blink"],
+        vec![Value::None, Value::None],
+    );
     if !props.iter().any(|(k, _)| &**k == "yalign") {
         props.push(("yalign".into(), Value::Float(0.)));
     }
@@ -146,13 +166,19 @@ fn caret_visit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn caret_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (w, h, st, at) = rargs(vm, args)?;
-    let base = { let v = py::get_or_none(vm, this, "st_base")?; py::f64_of(vm, &v).unwrap_or(0.) };
+    let base = {
+        let v = py::get_or_none(vm, this, "st_base")?;
+        py::f64_of(vm, &v).unwrap_or(0.)
+    };
     let st = st - base;
     let caret = py::get(vm, this, "caret")?;
     let cr = render::render(vm, &caret, w, h, st, at)?;
     let (cw, _) = super::layout::size(&cr);
     let rv = super::layout::new(vm, cw, h);
-    let blink = { let v = py::get(vm, this, "caret_blink")?; py::f64_of(vm, &v)? };
+    let blink = {
+        let v = py::get(vm, this, "caret_blink")?;
+        py::f64_of(vm, &v)?
+    };
     let ttl = blink - st.rem_euclid(blink);
     if ttl > blink / 2. {
         super::layout::blit(vm, &rv, &cr, 0., 0.)?;
@@ -163,14 +189,47 @@ fn caret_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 // Input -----------------------------------------------------------------------------------------------
 
-const INPUT_NAMES: &[&str] = &["default", "length", "style", "allow", "exclude", "prefix", "suffix", "changed", "button", "replaces", "editable", "pixel_width", "value", "copypaste", "caret_blink", "multiline", "action"];
+const INPUT_NAMES: &[&str] = &[
+    "default",
+    "length",
+    "style",
+    "allow",
+    "exclude",
+    "prefix",
+    "suffix",
+    "changed",
+    "button",
+    "replaces",
+    "editable",
+    "pixel_width",
+    "value",
+    "copypaste",
+    "caret_blink",
+    "multiline",
+    "action",
+];
 
 fn input_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let e = vm.types.new_str("");
     let defaults = vec![
-        e.clone(), Value::None, vm.types.new_str("input"), Value::None, Value::None, e.clone(), e.clone(), Value::None, Value::None,
-        Value::None, Value::Bool(true), Value::None, Value::None, Value::Bool(false), Value::None, Value::Bool(false), Value::None,
+        e.clone(),
+        Value::None,
+        vm.types.new_str("input"),
+        Value::None,
+        Value::None,
+        e.clone(),
+        e.clone(),
+        Value::None,
+        Value::None,
+        Value::None,
+        Value::Bool(true),
+        Value::None,
+        Value::None,
+        Value::Bool(false),
+        Value::None,
+        Value::Bool(false),
+        Value::None,
     ];
     let (mut v, props) = split(args, kw, INPUT_NAMES, defaults);
     let text = py::import_attr(vm, "renpy.text.text", "Text")?;
@@ -189,14 +248,30 @@ fn input_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         v[0] = vm.call_method(&v[12], "get_text", Vec::new())?;
     }
     if py::is_none(&v[0]) {
-        let msg = if py::is_none(&v[12]) { "The default value of an input must not be None." } else { "The data accessed by an InputValue must not be None." };
+        let msg = if py::is_none(&v[12]) {
+            "The default value of an input must not be None."
+        } else {
+            "The data accessed by an InputValue must not be None."
+        };
         return Err(py::error(vm, msg));
     }
     let ds = py::string(vm, &v[0])?;
     let default = vm.types.new_string(ds);
     py::set(vm, this, "default", default.clone())?;
     py::set(vm, this, "content", default.clone())?;
-    for (n, i) in [("length", 1), ("allow", 3), ("exclude", 4), ("prefix", 5), ("suffix", 6), ("copypaste", 13), ("changed", 7), ("editable", 10), ("pixel_width", 11), ("multiline", 15), ("action", 16)] {
+    for (n, i) in [
+        ("length", 1),
+        ("allow", 3),
+        ("exclude", 4),
+        ("prefix", 5),
+        ("suffix", 6),
+        ("copypaste", 13),
+        ("changed", 7),
+        ("editable", 10),
+        ("pixel_width", 11),
+        ("multiline", 15),
+        ("action", 16),
+    ] {
         py::set(vm, this, n, v[i].clone())?;
     }
     let mut caretprops: Vec<(Rc<str>, Value)> = vec![("color".into(), Value::None)];
@@ -205,10 +280,19 @@ fn input_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             caretprops.push((k.clone(), val.clone()));
         }
     }
-    let prefs = py::import_attr(vm, "renpy.store", "preferences")?;
-    let fs = py::get_or_none(vm, &prefs, "font_size").unwrap_or(Value::None);
-    let fs = if py::is_none(&fs) { Value::Int(1) } else { fs };
-    caretprops.push(("xysize".into(), vm.types.new_tuple(vec![Value::Int(1), fs])));
+    // The caret's size: xmaximum=1 through 7.4.6, xsize=1 from 7.4.7,
+    // one line of `preferences.font_size` from 7.5 / 8.0.
+    let version = super::state::rt(vm).profile.version;
+    if version >= [7, 5, 0, 0] {
+        let prefs = py::import_attr(vm, "renpy.store", "preferences")?;
+        let fs = py::get_or_none(vm, &prefs, "font_size").unwrap_or(Value::None);
+        let fs = if py::is_none(&fs) { Value::Int(1) } else { fs };
+        caretprops.push(("xysize".into(), vm.types.new_tuple(vec![Value::Int(1), fs])));
+    } else if version >= [7, 4, 7, 0] {
+        caretprops.push(("xsize".into(), Value::Int(1)));
+    } else {
+        caretprops.push(("xmaximum".into(), Value::Int(1)));
+    }
     caretprops.push(("style".into(), v[2].clone()));
     let solid = py::import_attr(vm, "renpy.display.image", "Solid")?;
     let mut caret = vm.call(&solid, Vec::new(), caretprops)?;
@@ -252,13 +336,30 @@ fn escape(s: &str) -> String {
     s.replace('{', "{{")
 }
 
-fn input_set_content(vm: &mut Vm, this: &Value, content: &str, editable: bool, edit_text: &str, caret: &Value) -> PyResult<()> {
-    let prefix = { let v = py::get_or_none(vm, this, "prefix")?; py::string(vm, &v).unwrap_or_default() };
-    let suffix = { let v = py::get_or_none(vm, this, "suffix")?; py::string(vm, &v).unwrap_or_default() };
+fn input_set_content(
+    vm: &mut Vm,
+    this: &Value,
+    content: &str,
+    editable: bool,
+    edit_text: &str,
+    caret: &Value,
+) -> PyResult<()> {
+    let prefix = {
+        let v = py::get_or_none(vm, this, "prefix")?;
+        py::string(vm, &v).unwrap_or_default()
+    };
+    let suffix = {
+        let v = py::get_or_none(vm, this, "suffix")?;
+        py::string(vm, &v).unwrap_or_default()
+    };
     let mut parts: Vec<Value> = Vec::new();
     if editable {
         let c = chars(content);
-        let pos = { let v = py::get_or_none(vm, this, "caret_pos")?; py::int(vm, &v).unwrap_or(0) }.clamp(0, c.len() as i64) as usize;
+        let pos = {
+            let v = py::get_or_none(vm, this, "caret_pos")?;
+            py::int(vm, &v).unwrap_or(0)
+        }
+        .clamp(0, c.len() as i64) as usize;
         parts.push(vm.types.new_string(prefix));
         parts.push(vm.types.new_string(escape(&cs(&c[..pos]))));
         parts.push(vm.types.new_string(edit_text.to_owned()));
@@ -290,12 +391,28 @@ fn input_set_content(vm: &mut Vm, this: &Value, content: &str, editable: bool, e
 fn input_update_text(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let new_content = py::string(vm, &arg_or(args, kw, 1, "new_content", Value::None))?;
-    let editable = { let v = arg_or(args, kw, 2, "editable", Value::Bool(false)); ops::truthy(vm, &v)? };
-    let check_size = { let v = arg_or(args, kw, 3, "check_size", Value::Bool(false)); ops::truthy(vm, &v)? };
+    let editable = {
+        let v = arg_or(args, kw, 2, "editable", Value::Bool(false));
+        ops::truthy(vm, &v)?
+    };
+    let check_size = {
+        let v = arg_or(args, kw, 3, "check_size", Value::Bool(false));
+        ops::truthy(vm, &v)?
+    };
     let disp_iface = py::import_attr(vm, "renpy.display", "interface")?;
-    let edit = if py::is_none(&disp_iface) { Value::None } else { py::get_or_none(vm, &disp_iface, "text_editing")? };
-    let old_content = { let v = py::get_or_none(vm, this, "content")?; py::string(vm, &v).unwrap_or_default() };
-    let cur_ed = { let v = py::get_or_none(vm, this, "editable")?; ops::truthy(vm, &v)? };
+    let edit = if py::is_none(&disp_iface) {
+        Value::None
+    } else {
+        py::get_or_none(vm, &disp_iface, "text_editing")?
+    };
+    let old_content = {
+        let v = py::get_or_none(vm, this, "content")?;
+        py::string(vm, &v).unwrap_or_default()
+    };
+    let cur_ed = {
+        let v = py::get_or_none(vm, this, "editable")?;
+        ops::truthy(vm, &v)?
+    };
     let has_edit = ops::truthy(vm, &edit)?;
     if new_content != old_content || editable != cur_ed || has_edit {
         render::redraw(vm, this, 0.);
@@ -306,9 +423,20 @@ fn input_update_text(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         caret = py::get(vm, this, "caret")?;
     }
     let edit_text = if has_edit {
-        let t = { let v = py::get(vm, &edit, "text")?; py::string(vm, &v)? };
-        let s = { let v = py::get(vm, &edit, "start")?; py::int(vm, &v)? }.max(0) as usize;
-        let l = { let v = py::get(vm, &edit, "length")?; py::int(vm, &v)? }.max(0) as usize;
+        let t = {
+            let v = py::get(vm, &edit, "text")?;
+            py::string(vm, &v)?
+        };
+        let s = {
+            let v = py::get(vm, &edit, "start")?;
+            py::int(vm, &v)?
+        }
+        .max(0) as usize;
+        let l = {
+            let v = py::get(vm, &edit, "length")?;
+            py::int(vm, &v)?
+        }
+        .max(0) as usize;
         py::set(vm, this, "edit_text", vm.types.new_string(t.clone()))?;
         let c = chars(&t);
         let s = s.min(c.len());
@@ -328,7 +456,10 @@ fn input_update_text(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let pw = py::get_or_none(vm, this, "pixel_width")?;
     if check_size && ops::truthy(vm, &pw)? {
         let sz = vm.call_method(this, "size", Vec::new())?;
-        let w = { let s = py::items(vm, &sz)?; py::f64_of(vm, &s[0])? };
+        let w = {
+            let s = py::items(vm, &sz)?;
+            py::f64_of(vm, &s[0])?
+        };
         if w > py::f64_of(vm, &pw)? {
             let ocp = py::get_or_none(vm, this, "old_caret_pos")?;
             py::set(vm, this, "caret_pos", ocp)?;
@@ -385,7 +516,10 @@ fn input_per_interact(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             mset(vm, "default_input_value", value.clone())?;
         }
     }
-    let shown = { let v = py::get_or_none(vm, this, "shown")?; ops::truthy(vm, &v)? };
+    let shown = {
+        let v = py::get_or_none(vm, this, "shown")?;
+        ops::truthy(vm, &v)?
+    };
     if !shown {
         if !py::is_none(&value) {
             let d = vm.call_method(&value, "get_text", Vec::new())?;
@@ -456,26 +590,53 @@ fn input_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     py::set(vm, this, "st", Value::Float(st))?;
     let cp = py::get_or_none(vm, this, "caret_pos")?;
     py::set(vm, this, "old_caret_pos", cp.clone())?;
-    let editable = { let v = py::get_or_none(vm, this, "editable")?; ops::truthy(vm, &v)? };
+    let editable = {
+        let v = py::get_or_none(vm, this, "editable")?;
+        ops::truthy(vm, &v)?
+    };
     if !editable {
         return Ok(Value::None);
     }
     let mut edit_controls = false;
-    for n in ["input_jump_word_left", "input_jump_word_right", "input_delete_word", "input_delete_full"] {
+    for n in [
+        "input_jump_word_left",
+        "input_jump_word_right",
+        "input_delete_word",
+        "input_delete_full",
+    ] {
         edit_controls |= map_name(vm, &ev, n)?;
     }
-    let ty = { let v = py::get_or_none(vm, &ev, "type")?; py::int(vm, &v).unwrap_or(0) };
+    let ty = {
+        let v = py::get_or_none(vm, &ev, "type")?;
+        py::int(vm, &v).unwrap_or(0)
+    };
     let mods = events::input(vm).borrow().mods;
-    let unicode = { let v = py::get_or_none(vm, &ev, "unicode")?; if py::is_none(&v) { String::new() } else { py::string(vm, &v)? } };
+    let unicode = {
+        let v = py::get_or_none(vm, &ev, "unicode")?;
+        if py::is_none(&v) {
+            String::new()
+        } else {
+            py::string(vm, &v)?
+        }
+    };
     if ty == events::KEYDOWN && mods & 0x100 != 0 && unicode.is_empty() && !edit_controls {
         return Ok(Value::None);
     }
-    let content = { let v = py::get_or_none(vm, this, "content")?; py::string(vm, &v)? };
+    let content = {
+        let v = py::get_or_none(vm, this, "content")?;
+        py::string(vm, &v)?
+    };
     let c = chars(&content);
     let l = c.len();
     let pos = (py::int(vm, &cp).unwrap_or(0).max(0) as usize).min(l);
-    let multiline = { let v = py::get_or_none(vm, this, "multiline")?; ops::truthy(vm, &v)? };
-    let copypaste = { let v = py::get_or_none(vm, this, "copypaste")?; ops::truthy(vm, &v)? };
+    let multiline = {
+        let v = py::get_or_none(vm, this, "multiline")?;
+        ops::truthy(vm, &v)?
+    };
+    let copypaste = {
+        let v = py::get_or_none(vm, this, "copypaste")?;
+        ops::truthy(vm, &v)?
+    };
     let mut raw_text: Option<String> = None;
     macro_rules! done {
         () => {{
@@ -496,8 +657,15 @@ fn input_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         update(vm, this, &nc, false)?;
         done!();
     } else if map_name(vm, &ev, "input_enter")? {
-        let et = { let v = py::get_or_none(vm, this, "edit_text")?; py::string(vm, &v).unwrap_or_default() };
-        let out = if et.is_empty() { content.clone() } else { cs(&c[..pos]) + &et + &cs(&c[pos..]) };
+        let et = {
+            let v = py::get_or_none(vm, this, "edit_text")?;
+            py::string(vm, &v).unwrap_or_default()
+        };
+        let out = if et.is_empty() {
+            content.clone()
+        } else {
+            cs(&c[..pos]) + &et + &cs(&c[pos..])
+        };
         let action = py::get_or_none(vm, this, "action")?;
         if !py::is_none(&action) {
             let rv = run(vm, &action, Vec::new(), Vec::new())?;
@@ -509,7 +677,9 @@ fn input_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let value = py::get_or_none(vm, this, "value")?;
         if ops::truthy(vm, &value)? {
             let rv = vm.call_method(&value, "enter", Vec::new())?;
-            if !py::is_none(&rv) {
+            // Before 7.8 / 8.3 a None result passes the event on (to a
+            // screen's `key "K_RETURN"`, for one).
+            if !py::is_none(&rv) || !super::state::rt(vm).profile.since_pair(8, 3) {
                 return Ok(rv);
             }
             return Err(ignore_event(vm));
@@ -599,8 +769,14 @@ fn input_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         } else if text_event_in_queue(vm)? {
             return Err(ignore_event(vm));
         } else {
-            let key = { let v = py::get_or_none(vm, &ev, "key")?; py::int(vm, &v).unwrap_or(0) };
-            let emod = { let v = py::get_or_none(vm, &ev, "mod")?; py::int(vm, &v).unwrap_or(0) };
+            let key = {
+                let v = py::get_or_none(vm, &ev, "key")?;
+                py::int(vm, &v).unwrap_or(0)
+            };
+            let emod = {
+                let v = py::get_or_none(vm, &ev, "mod")?;
+                py::int(vm, &v).unwrap_or(0)
+            };
             if (32..127).contains(&key) && emod & (0x300 | 0xC00) == 0 {
                 return Err(ignore_event(vm));
             }
@@ -638,7 +814,9 @@ fn input_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn text_event_in_queue(vm: &mut Vm) -> PyResult<bool> {
     let queued: Vec<Value> = events::input(vm).borrow().queue.clone();
     for ev in queued {
-        if events::is_type(vm, &ev, events::TEXTINPUT)? || events::is_type(vm, &ev, events::TEXTEDITING)? {
+        if events::is_type(vm, &ev, events::TEXTINPUT)?
+            || events::is_type(vm, &ev, events::TEXTEDITING)?
+        {
             return Ok(true);
         }
     }
@@ -667,19 +845,52 @@ fn is_float(v: &Value) -> bool {
 /// `type(like)(x)`: int truncation when `like` is an int.
 fn same_type(vm: &Vm, like: &Value, x: f64) -> Value {
     let _ = vm;
-    if is_float(like) { Value::Float(x) } else { Value::Int(x.trunc() as i64) }
+    if is_float(like) {
+        Value::Float(x)
+    } else {
+        Value::Int(x.trunc() as i64)
+    }
 }
 
 fn adj_registered(vm: &mut Vm, this: &Value) -> PyResult<Vec<Value>> {
     let reg = mget(vm, "adj_registered")?;
-    let l = vm.call_method(&reg, "setdefault", vec![this.clone(), vm.types.new_list(Vec::new())])?;
+    let l = vm.call_method(
+        &reg,
+        "setdefault",
+        vec![this.clone(), vm.types.new_list(Vec::new())],
+    )?;
     py::items(vm, &l)
 }
 
 fn adj_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["range", "value", "step", "page", "changed", "adjustable", "ranged", "force_step", "raw_changed"];
-    let (v, _) = split(args, kw, &names, vec![Value::Int(1), Value::Int(0), Value::None, Value::None, Value::None, Value::None, Value::None, Value::Bool(false), Value::None]);
+    let names = [
+        "range",
+        "value",
+        "step",
+        "page",
+        "changed",
+        "adjustable",
+        "ranged",
+        "force_step",
+        "raw_changed",
+    ];
+    let (v, _) = split(
+        args,
+        kw,
+        &names,
+        vec![
+            Value::Int(1),
+            Value::Int(0),
+            Value::None,
+            Value::None,
+            Value::None,
+            Value::None,
+            Value::None,
+            Value::Bool(false),
+            Value::None,
+        ],
+    );
     let mut adjustable = v[5].clone();
     if py::is_none(&adjustable) && ops::truthy(vm, &v[4])? {
         adjustable = Value::Bool(true);
@@ -702,7 +913,15 @@ fn adj_viewport_replaces(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> 
     if py::same(this, r) {
         return Ok(Value::None);
     }
-    for n in ["range", "value", "animation_amplitude", "animation_target", "animation_start", "animation_delay", "animation_warper"] {
+    for n in [
+        "range",
+        "value",
+        "animation_amplitude",
+        "animation_target",
+        "animation_start",
+        "animation_delay",
+        "animation_warper",
+    ] {
         let v = py::get_or_none(vm, r, n)?;
         py::set(vm, this, n, v)?;
     }
@@ -711,13 +930,20 @@ fn adj_viewport_replaces(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> 
 
 fn fget(vm: &mut Vm, this: &Value, n: &str) -> PyResult<f64> {
     let v = py::get_or_none(vm, this, n)?;
-    if py::is_none(&v) { Ok(0.) } else { py::f64_of(vm, &v) }
+    if py::is_none(&v) {
+        Ok(0.)
+    } else {
+        py::f64_of(vm, &v)
+    }
 }
 
 fn adj_round_value(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let value = arg_or(args, kw, 1, "value", Value::Int(0));
-    let release = { let v = arg_or(args, kw, 2, "release", Value::Bool(false)); ops::truthy(vm, &v)? };
+    let release = {
+        let v = arg_or(args, kw, 2, "release", Value::Bool(false));
+        ops::truthy(vm, &v)?
+    };
     let x = py::f64_of(vm, &value)?;
     let cur = py::get(vm, this, "_value")?;
     let range = py::get(vm, this, "_range")?;
@@ -734,7 +960,10 @@ fn adj_round_value(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !release && fs.as_str() == Some("release") {
         return Ok(value);
     }
-    let step = { let s = py::get(vm, this, "step")?; py::f64_of(vm, &s)? };
+    let step = {
+        let s = py::get(vm, this, "step")?;
+        py::f64_of(vm, &s)?
+    };
     Ok(same_type(vm, &cur, step * (x / step).round()))
 }
 
@@ -798,7 +1027,10 @@ fn adj_get_step(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let p = py::get_or_none(vm, this, "_page")?;
     if !py::is_none(&p) {
-        let page = { let v = py::get(vm, this, "page")?; py::f64_of(vm, &v)? };
+        let page = {
+            let v = py::get(vm, this, "page")?;
+            py::f64_of(vm, &v)?
+        };
         if page > 0. {
             return Ok(Value::Float(py::f64_of(vm, &p)? / 10.));
         }
@@ -817,7 +1049,11 @@ fn adj_set_step(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn adj_register(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let reg = mget(vm, "adj_registered")?;
-    let l = vm.call_method(&reg, "setdefault", vec![args[0].clone(), vm.types.new_list(Vec::new())])?;
+    let l = vm.call_method(
+        &reg,
+        "setdefault",
+        vec![args[0].clone(), vm.types.new_list(Vec::new())],
+    )?;
     vm.call_method(&l, "append", vec![args[1].clone()])?;
     Ok(Value::None)
 }
@@ -825,7 +1061,10 @@ fn adj_register(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn adj_change(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let mut value = arg_or(args, kw, 1, "value", Value::Int(0));
-    let end = { let v = arg_or(args, kw, 2, "end_animation", Value::Bool(true)); ops::truthy(vm, &v)? };
+    let end = {
+        let v = arg_or(args, kw, 2, "end_animation", Value::Bool(true));
+        ops::truthy(vm, &v)?
+    };
     if end {
         vm.call_method(this, "end_animation", Vec::new())?;
     }
@@ -887,7 +1126,10 @@ fn adj_animate(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if !ops::truthy(vm, &amp)? || !ops::truthy(vm, &range)? {
         vm.call_method(this, "end_animation", Vec::new())?;
     } else {
-        let cur = { let v = py::get(vm, this, "_value")?; py::f64_of(vm, &v)? };
+        let cur = {
+            let v = py::get(vm, this, "_value")?;
+            py::f64_of(vm, &v)?
+        };
         let a = py::f64_of(vm, &amp)?;
         py::set(vm, this, "animation_amplitude", amp)?;
         py::set(vm, this, "animation_target", Value::Float(cur + a))?;
@@ -902,7 +1144,10 @@ fn adj_animate(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn adj_inertia(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let amp = arg_or(args, kw, 1, "amplitude", Value::Int(0));
-    let tc = { let v = arg_or(args, kw, 2, "time_constant", Value::Int(0)); py::f64_of(vm, &v)? };
+    let tc = {
+        let v = arg_or(args, kw, 2, "time_constant", Value::Int(0));
+        py::f64_of(vm, &v)?
+    };
     let st = arg_or(args, kw, 3, "st", Value::Int(0));
     let w = py::get(vm, this, "inertia_warper")?;
     vm.call_method(this, "animate", vec![amp, Value::Float(tc * 6.), w])?;
@@ -912,14 +1157,29 @@ fn adj_inertia(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn adj_end_animation(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let instantly = { let v = arg_or(args, kw, 1, "instantly", Value::Bool(false)); ops::truthy(vm, &v)? };
+    let instantly = {
+        let v = arg_or(args, kw, 1, "instantly", Value::Bool(false));
+        ops::truthy(vm, &v)?
+    };
     let target = py::get_or_none(vm, this, "animation_target")?;
     if !py::is_none(&target) || instantly {
-        for n in ["animation_amplitude", "animation_target", "animation_start", "animation_delay", "animation_warper"] {
+        for n in [
+            "animation_amplitude",
+            "animation_target",
+            "animation_start",
+            "animation_delay",
+            "animation_warper",
+        ] {
             py::set(vm, this, n, Value::None)?;
         }
         if !instantly {
-            py::method_kw(vm, this, "change", vec![target], vec![("end_animation".into(), Value::Bool(false))])?;
+            py::method_kw(
+                vm,
+                this,
+                "change",
+                vec![target],
+                vec![("end_animation".into(), Value::Bool(false))],
+            )?;
         }
     }
     Ok(Value::None)
@@ -939,7 +1199,15 @@ fn adj_periodic(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     } else {
         py::f64_of(vm, &start)?
     };
-    let end_inst = |vm: &mut Vm| py::method_kw(vm, this, "end_animation", vec![], vec![("instantly".into(), Value::Bool(true))]);
+    let end_inst = |vm: &mut Vm| {
+        py::method_kw(
+            vm,
+            this,
+            "end_animation",
+            vec![],
+            vec![("instantly".into(), Value::Bool(true))],
+        )
+    };
     if st < start {
         end_inst(vm)?;
         return Ok(Value::Int(0));
@@ -954,7 +1222,13 @@ fn adj_periodic(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let done = py::f64_of(vm, &d)?;
     let amp = fget(vm, this, "animation_amplitude")?;
     let value = py::f64_of(vm, &target)? - amp * (1. - done);
-    py::method_kw(vm, this, "change", vec![Value::Float(value)], vec![("end_animation".into(), Value::Bool(false))])?;
+    py::method_kw(
+        vm,
+        this,
+        "change",
+        vec![Value::Float(value)],
+        vec![("end_animation".into(), Value::Bool(false))],
+    )?;
     let range = fget(vm, this, "_range")?;
     if value < 0. || value > range {
         end_inst(vm)?;
@@ -997,14 +1271,32 @@ fn bar_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn bar_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["range", "value", "width", "height", "changed", "adjustment", "step", "page", "bar", "style", "vertical", "replaces", "hovered", "unhovered", "released"];
+    let names = [
+        "range",
+        "value",
+        "width",
+        "height",
+        "changed",
+        "adjustment",
+        "step",
+        "page",
+        "bar",
+        "style",
+        "vertical",
+        "replaces",
+        "hovered",
+        "unhovered",
+        "released",
+    ];
     let mut defaults = vec![Value::None; names.len()];
     defaults[10] = Value::Bool(false);
     let (v, mut props) = split(args, kw, &names, defaults);
     py::set(vm, this, "value", Value::None)?;
     let mut adjustment = v[5].clone();
     if py::is_none(&adjustment) {
-        let bv = py::import_attr(vm, "renpy.ui", "BarValue").ok().and_then(|c| c.obj().cloned());
+        let bv = py::import_attr(vm, "renpy.ui", "BarValue")
+            .ok()
+            .and_then(|c| c.obj().cloned());
         if bv.is_some_and(|c| ops::isinstance(vm, &v[1], &c)) {
             let bar = mget(vm, "Bar")?;
             if bar.obj().is_some_and(|c| ops::isinstance(vm, &v[11], c)) {
@@ -1020,7 +1312,15 @@ fn bar_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             }
         } else {
             let adj = mget(vm, "Adjustment")?;
-            adjustment = vm.call(&adj, vec![v[0].clone(), v[1].clone()], vec![("step".into(), v[6].clone()), ("page".into(), v[7].clone()), ("changed".into(), v[4].clone())])?;
+            adjustment = vm.call(
+                &adj,
+                vec![v[0].clone(), v[1].clone()],
+                vec![
+                    ("step".into(), v[6].clone()),
+                    ("page".into(), v[7].clone()),
+                    ("changed".into(), v[4].clone()),
+                ],
+            )?;
         }
     }
     let mut style = v[9].clone();
@@ -1097,9 +1397,18 @@ fn bar_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     py::set(vm, this, "width", Value::Float(w))?;
     py::set(vm, this, "height", Value::Float(h))?;
     let adj = py::get(vm, this, "adjustment")?;
-    let range = { let v = py::get(vm, &adj, "range")?; py::f64_of(vm, &v)? };
-    let mut value = { let v = py::get(vm, &adj, "value")?; py::f64_of(vm, &v)? };
-    let page = { let v = py::get(vm, &adj, "page")?; py::f64_of(vm, &v)? };
+    let range = {
+        let v = py::get(vm, &adj, "range")?;
+        py::f64_of(vm, &v)?
+    };
+    let mut value = {
+        let v = py::get(vm, &adj, "value")?;
+        py::f64_of(vm, &v)?
+    };
+    let page = {
+        let v = py::get(vm, &adj, "page")?;
+        py::f64_of(vm, &v)?
+    };
     if range <= 0. {
         let u = sty(vm, this, "unscrollable")?;
         match u.as_str() {
@@ -1108,7 +1417,11 @@ fn bar_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
                 return Ok(super::layout::new(vm, w, h));
             }
             Some("insensitive") => {
-                vm.call_method(this, "set_style_prefix", vec![vm.types.new_str("insensitive_"), Value::Bool(true)])?;
+                vm.call_method(
+                    this,
+                    "set_style_prefix",
+                    vec![vm.types.new_str("insensitive_"), Value::Bool(true)],
+                )?;
             }
             _ => {}
         }
@@ -1116,7 +1429,11 @@ fn bar_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let s = py::get(vm, this, "style")?;
         let p = py::get_or_none(vm, &s, "prefix")?;
         if p.as_str() == Some("insensitive_") {
-            vm.call_method(this, "set_style_prefix", vec![vm.types.new_str("idle_"), Value::Bool(true)])?;
+            vm.call_method(
+                this,
+                "set_style_prefix",
+                vec![vm.types.new_str("idle_"), Value::Bool(true)],
+            )?;
         }
     }
     py::set(vm, this, "hidden", Value::Bool(false))?;
@@ -1128,12 +1445,20 @@ fn bar_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let fore_gutter = super::layout::style_f(vm, this, "fore_gutter", dimension)?;
     let aft_gutter = super::layout::style_f(vm, this, "aft_gutter", dimension)?;
     let mut active = dimension - fore_gutter - aft_gutter;
-    let thumb_dim0 = if range != 0. { (active * page / (range + page)).floor() } else { active };
+    let thumb_dim0 = if range != 0. {
+        (active * page / (range + page)).floor()
+    } else {
+        active
+    };
     let thumb_offset = super::layout::style_f(vm, this, "thumb_offset", dimension)?.abs();
     let thumb_s = sty(vm, this, "thumb")?;
     let shadow_s = sty(vm, this, "thumb_shadow")?;
     let r = |vm: &mut Vm, d: &Value, w: f64, h: f64| -> PyResult<Value> {
-        if py::is_none(d) { Ok(super::layout::new(vm, 0., 0.)) } else { render::render(vm, d, w, h, st, at) }
+        if py::is_none(d) {
+            Ok(super::layout::new(vm, 0., 0.))
+        } else {
+            render::render(vm, d, w, h, st, at)
+        }
     };
     let (thumb, shadow, mut thumb_dim) = if vertical {
         let t = r(vm, &thumb_s, w, thumb_dim0)?;
@@ -1149,7 +1474,11 @@ fn bar_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     thumb_dim -= thumb_offset * 2.;
     py::set(vm, this, "thumb_dim", Value::Float(thumb_dim))?;
     active -= thumb_dim;
-    let fore = if range != 0. { (active * value / range).floor() } else { active };
+    let fore = if range != 0. {
+        (active * value / range).floor()
+    } else {
+        active
+    };
     let fore = fore.trunc();
     let aft = active - fore + aft_gutter;
     let fore = fore + fore_gutter;
@@ -1159,7 +1488,13 @@ fn bar_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let aft_bar = sty(vm, this, "aft_bar")?;
     let blit = |vm: &mut Vm, src: &Value, x: f64, y: f64, main: bool| -> PyResult<()> {
         let pos = vm.types.new_tuple(vec![Value::Float(x), Value::Float(y)]);
-        py::method_kw(vm, &rv, "blit", vec![src.clone(), pos], vec![("main".into(), Value::Bool(main))])?;
+        py::method_kw(
+            vm,
+            &rv,
+            "blit",
+            vec![src.clone(), pos],
+            vec![("main".into(), Value::Bool(main))],
+        )?;
         Ok(())
     };
     if vertical {
@@ -1199,14 +1534,28 @@ fn bar_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let f = py::get_or_none(vm, this, "focusable")?;
     if ops::truthy(vm, &f)? {
-        vm.call_method(&rv, "add_focus", vec![this.clone(), Value::None, Value::Int(0), Value::Int(0), Value::Float(w), Value::Float(h)])?;
+        vm.call_method(
+            &rv,
+            "add_focus",
+            vec![
+                this.clone(),
+                Value::None,
+                Value::Int(0),
+                Value::Int(0),
+                Value::Float(w),
+                Value::Float(h),
+            ],
+        )?;
     }
     Ok(rv)
 }
 
 fn bar_focus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let default = match arg(args, kw, 1, "default") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let default = match arg(args, kw, 1, "default") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     let d = super::core::displayable_class(vm);
     let f = py::get(vm, &Value::Obj(d), "focus")?;
     vm.call(&f, vec![this.clone(), Value::Bool(default)], Vec::new())?;
@@ -1220,7 +1569,10 @@ fn bar_focus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn bar_unfocus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let default = match arg(args, kw, 1, "default") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let default = match arg(args, kw, 1, "default") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     let d = super::core::displayable_class(vm);
     let f = py::get(vm, &Value::Obj(d), "unfocus")?;
     vm.call(&f, vec![this.clone()], Vec::new())?;
@@ -1290,7 +1642,11 @@ fn bar_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if !grabbed && map_name(vm, &ev, "bar_activate")? {
         speak(vm, "activate", true)?;
         set_grab(vm, this.clone())?;
-        vm.call_method(this, "set_style_prefix", vec![vm.types.new_str("hover_"), Value::Bool(true)])?;
+        vm.call_method(
+            this,
+            "set_style_prefix",
+            vec![vm.types.new_str("hover_"), Value::Bool(true)],
+        )?;
         just_grabbed = true;
         grabbed = true;
         ignore = true;
@@ -1301,8 +1657,15 @@ fn bar_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         }
     }
     if grabbed {
-        let (inc, dec) = if vertical { ("bar_down", "bar_up") } else { ("bar_right", "bar_left") };
-        let step = { let v = py::get(vm, &adj, "step")?; py::f64_of(vm, &v)? };
+        let (inc, dec) = if vertical {
+            ("bar_down", "bar_up")
+        } else {
+            ("bar_right", "bar_left")
+        };
+        let step = {
+            let v = py::get(vm, &adj, "step")?;
+            py::f64_of(vm, &v)?
+        };
         if map_name(vm, &ev, dec)? {
             speak(vm, "decrease", true)?;
             value -= step;
@@ -1313,14 +1676,28 @@ fn bar_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             value += step;
             ignore = true;
         }
-        let ty = { let v = py::get_or_none(vm, &ev, "type")?; py::int(vm, &v).unwrap_or(0) };
-        if matches!(ty, events::MOUSEMOTION | events::MOUSEBUTTONUP | events::MOUSEBUTTONDOWN) {
+        let ty = {
+            let v = py::get_or_none(vm, &ev, "type")?;
+            py::int(vm, &v).unwrap_or(0)
+        };
+        if matches!(
+            ty,
+            events::MOUSEMOTION | events::MOUSEBUTTONUP | events::MOUSEBUTTONDOWN
+        ) {
             let tdim = fget(vm, this, "thumb_dim")?;
-            let (pos, size) = if vertical { (y, fget(vm, this, "height")?) } else { (x, fget(vm, this, "width")?) };
+            let (pos, size) = if vertical {
+                (y, fget(vm, this, "height")?)
+            } else {
+                (x, fget(vm, this, "width")?)
+            };
             let fg = super::layout::style_f(vm, this, "fore_gutter", size)?;
             let ag = super::layout::style_f(vm, this, "aft_gutter", size)?;
             let zone = size - fg - ag - tdim;
-            value = if zone != 0. { (pos - fg - tdim / 2.) * range / zone } else { 0. };
+            value = if zone != 0. {
+                (pos - fg - tdim / 2.) * range / zone
+            } else {
+                0.
+            };
             ignore = true;
         }
         if !is_float(&range_v) {
@@ -1336,14 +1713,34 @@ fn bar_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         }
     }
     if invert {
-        value = if value == old_inverted { old_value } else { range - value };
+        value = if value == old_inverted {
+            old_value
+        } else {
+            range - value
+        };
     }
-    let num = |v: f64| if is_float(&range_v) || is_float(&old_v) { Value::Float(v) } else { Value::Int(v as i64) };
+    let num = |v: f64| {
+        if is_float(&range_v) || is_float(&old_v) {
+            Value::Float(v)
+        } else {
+            Value::Int(v as i64)
+        }
+    };
     if grabbed && !just_grabbed && map_name(vm, &ev, "bar_deactivate")? {
         speak(vm, "deactivate", true)?;
         set_grab(vm, Value::None)?;
-        vm.call_method(this, "set_style_prefix", vec![vm.types.new_str("hover_"), Value::Bool(true)])?;
-        let v = py::method_kw(vm, &adj, "round_value", vec![num(value)], vec![("release".into(), Value::Bool(true))])?;
+        vm.call_method(
+            this,
+            "set_style_prefix",
+            vec![vm.types.new_str("hover_"), Value::Bool(true)],
+        )?;
+        let v = py::method_kw(
+            vm,
+            &adj,
+            "round_value",
+            vec![num(value)],
+            vec![("release".into(), Value::Bool(true))],
+        )?;
         if !ops::eq(vm, &v, &old_v)? {
             let rv = vm.call_method(&adj, "change", vec![v])?;
             if !py::is_none(&rv) {
@@ -1358,7 +1755,13 @@ fn bar_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         return Err(ignore_event(vm));
     }
     if value != old_value {
-        let v = py::method_kw(vm, &adj, "round_value", vec![num(value)], vec![("release".into(), Value::Bool(false))])?;
+        let v = py::method_kw(
+            vm,
+            &adj,
+            "round_value",
+            vec![num(value)],
+            vec![("release".into(), Value::Bool(false))],
+        )?;
         let rv = vm.call_method(&adj, "change", vec![v])?;
         if !py::is_none(&rv) {
             return Ok(rv);
@@ -1389,7 +1792,11 @@ fn bar_set_style_prefix(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn bar_tts_all(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let value = py::get_or_none(vm, this, "value")?;
-    let alt = if py::is_none(&value) { vm.types.new_str("") } else { py::get_or_none(vm, &value, "alt")? };
+    let alt = if py::is_none(&value) {
+        vm.types.new_str("")
+    } else {
+        py::get_or_none(vm, &value, "alt")?
+    };
     let c = vm.call_method(this, "_tts_common", vec![alt])?;
     let tr = py::import_attr(vm, "renpy.minstore", "__")?;
     let b = vm.call(&tr, vec![vm.types.new_str("bar")], Vec::new())?;
@@ -1403,7 +1810,8 @@ fn empty_str(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 // Conditional, Timer, MouseArea, OnEvent ----------------------------------------------------------------
 
 fn store_eval(vm: &mut Vm, cond: &Value) -> PyResult<Value> {
-    let ns = crate::engine::module_namespace(vm, "store").ok_or_else(|| vm.runtime_error("store is not initialized"))?;
+    let ns = crate::engine::module_namespace(vm, "store")
+        .ok_or_else(|| vm.runtime_error("store is not initialized"))?;
     let ev = vm.builtins_module.clone();
     let f = py::get(vm, &Value::Obj(ev), "eval")?;
     vm.call(&f, vec![cond.clone(), Value::Obj(ns)], Vec::new())
@@ -1427,7 +1835,10 @@ fn cond_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn cond_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (w, h, st, at) = rargs(vm, args)?;
-    let state = { let v = py::get_or_none(vm, this, "state")?; ops::truthy(vm, &v)? };
+    let state = {
+        let v = py::get_or_none(vm, this, "state")?;
+        ops::truthy(vm, &v)?
+    };
     let d = py::get(vm, this, if state { "child" } else { "null" })?;
     render::render(vm, &d, w, h, st, at)
 }
@@ -1464,8 +1875,23 @@ fn timer_after_upgrade(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn timer_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let names = ["delay", "action", "repeat", "args", "kwargs", "replaces", "modal"];
-    let (v, props) = split(args, kw, &names, vec![Value::None, Value::None, Value::Bool(false), vm.types.new_tuple(Vec::new()), vm.types.new_dict(), Value::None, Value::None]);
+    let names = [
+        "delay", "action", "repeat", "args", "kwargs", "replaces", "modal",
+    ];
+    let (v, props) = split(
+        args,
+        kw,
+        &names,
+        vec![
+            Value::None,
+            Value::None,
+            Value::Bool(false),
+            vm.types.new_tuple(Vec::new()),
+            vm.types.new_dict(),
+            Value::None,
+            Value::None,
+        ],
+    );
     let null = py::import_attr(vm, "renpy.display.layout", "Null")?;
     let ni = py::get(vm, &null, "__init__")?;
     vm.call(&ni, vec![this.clone()], props)?;
@@ -1479,7 +1905,11 @@ fn timer_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     py::set(vm, this, "args", v[3].clone())?;
     py::set(vm, this, "kwargs", v[4].clone())?;
     py::set(vm, this, "started", Value::Bool(false))?;
-    let modal = if py::is_none(&v[6]) { py::config(vm, "modal_blocks_timer").unwrap_or(Value::Bool(false)) } else { v[6].clone() };
+    let modal = if py::is_none(&v[6]) {
+        py::config(vm, "modal_blocks_timer").unwrap_or(Value::Bool(false))
+    } else {
+        v[6].clone()
+    };
     py::set(vm, this, "modal", modal)?;
     let tc = mget(vm, "Timer")?;
     let state = if tc.obj().is_some_and(|c| ops::isinstance(vm, &v[5], c)) {
@@ -1496,7 +1926,10 @@ fn timer_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (w, h, st, at) = rargs(vm, args)?;
     let state = py::get(vm, this, "state")?;
-    let started = { let v = py::get_or_none(vm, &state, "started")?; ops::truthy(vm, &v)? };
+    let started = {
+        let v = py::get_or_none(vm, &state, "started")?;
+        ops::truthy(vm, &v)?
+    };
     if !started {
         let delay = fget(vm, this, "delay")?;
         py::set(vm, &state, "started", Value::Bool(true))?;
@@ -1505,7 +1938,17 @@ fn timer_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let null = py::import_attr(vm, "renpy.display.layout", "Null")?;
     let f = py::get(vm, &null, "render")?;
-    vm.call(&f, vec![this.clone(), Value::Float(w), Value::Float(h), Value::Float(st), Value::Float(at)], Vec::new())
+    vm.call(
+        &f,
+        vec![
+            this.clone(),
+            Value::Float(w),
+            Value::Float(h),
+            Value::Float(st),
+            Value::Float(at),
+        ],
+        Vec::new(),
+    )
 }
 
 fn timer_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -1520,7 +1963,10 @@ fn timer_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let state = py::get(vm, this, "state")?;
     let delay = fget(vm, this, "delay")?;
-    let started = { let v = py::get_or_none(vm, &state, "started")?; ops::truthy(vm, &v)? };
+    let started = {
+        let v = py::get_or_none(vm, &state, "started")?;
+        ops::truthy(vm, &v)?
+    };
     if !started {
         py::set(vm, &state, "started", Value::Bool(true))?;
         py::set(vm, &state, "next_event", Value::Float(st + delay))?;
@@ -1534,7 +1980,10 @@ fn timer_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         timeout(vm, ne - st)?;
         return Ok(Value::None);
     }
-    let repeat = { let v = py::get_or_none(vm, this, "repeat")?; ops::truthy(vm, &v)? };
+    let repeat = {
+        let v = py::get_or_none(vm, this, "repeat")?;
+        ops::truthy(vm, &v)?
+    };
     if !repeat {
         py::set(vm, &state, "next_event", Value::None)?;
     } else {
@@ -1554,7 +2003,12 @@ fn timer_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn mousearea_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let (v, props) = split(args, kw, &["hovered", "unhovered", "replaces"], vec![Value::None; 3]);
+    let (v, props) = split(
+        args,
+        kw,
+        &["hovered", "unhovered", "replaces"],
+        vec![Value::None; 3],
+    );
     super::core::d_init(vm, &[this.clone()], &props)?;
     py::set(vm, this, "hovered", v[0].clone())?;
     py::set(vm, this, "unhovered", v[1].clone())?;
@@ -1585,22 +2039,33 @@ fn mousearea_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     if ops::truthy(vm, &g)? {
         return Ok(Value::None);
     }
-    let pft = py::import_attr(vm, "renpy.display.focus", "pending_focus_type").unwrap_or(Value::None);
+    let pft =
+        py::import_attr(vm, "renpy.display.focus", "pending_focus_type").unwrap_or(Value::None);
     let (w, h) = (fget(vm, this, "width")?, fget(vm, this, "height")?);
     let fm = sty(vm, this, "focus_mask")?;
     let is_hovered = if pft.as_str() == Some("keyboard") {
         false
-    } else if events::is_type(vm, &ev, events::TIMEEVENT)? && { let m = py::get_or_none(vm, &ev, "modal")?; ops::truthy(vm, &m)? } {
+    } else if events::is_type(vm, &ev, events::TIMEEVENT)? && {
+        let m = py::get_or_none(vm, &ev, "modal")?;
+        ops::truthy(vm, &m)?
+    } {
         false
     } else if !py::is_none(&fm) {
         let off = fget(vm, this, "at_st_offset")?;
         let cr = render::render(vm, &fm, w, h, st, off + st)?;
-        let r = vm.call_method(&cr, "is_pixel_opaque", vec![Value::Float(x), Value::Float(y)])?;
+        let r = vm.call_method(
+            &cr,
+            "is_pixel_opaque",
+            vec![Value::Float(x), Value::Float(y)],
+        )?;
         ops::truthy(vm, &r)?
     } else {
         (0. ..w).contains(&x) && (0. ..h).contains(&y)
     };
-    let was = { let v = py::get_or_none(vm, this, "is_hovered")?; ops::truthy(vm, &v)? };
+    let was = {
+        let v = py::get_or_none(vm, this, "is_hovered")?;
+        ops::truthy(vm, &v)?
+    };
     if is_hovered && !was {
         py::set(vm, this, "is_hovered", Value::Bool(true))?;
         let hv = py::get_or_none(vm, this, "hovered")?;
@@ -1661,7 +2126,19 @@ fn zero_render(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 fn ap_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let names = ["rows", "cols", "position", "changed", "finished", "persist"];
-    let (v, props) = split(args, kw, &names, vec![Value::None, Value::None, Value::None, Value::None, Value::None, Value::Bool(false)]);
+    let (v, props) = split(
+        args,
+        kw,
+        &names,
+        vec![
+            Value::None,
+            Value::None,
+            Value::None,
+            Value::None,
+            Value::None,
+            Value::Bool(false),
+        ],
+    );
     super::layout::container_init(vm, &[this.clone()], &props)?;
     py::set(vm, this, "rows", v[0].clone())?;
     py::set(vm, this, "cols", v[1].clone())?;
@@ -1669,7 +2146,12 @@ fn ap_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     py::set(vm, this, "rect1", Value::None)?;
     py::set(vm, this, "width", Value::Int(1))?;
     py::set(vm, this, "height", Value::Int(1))?;
-    for (n, i) in [("position", 2), ("changed", 3), ("finished", 4), ("persist", 5)] {
+    for (n, i) in [
+        ("position", 2),
+        ("changed", 3),
+        ("finished", 4),
+        ("persist", 5),
+    ] {
         py::set(vm, this, n, v[i].clone())?;
     }
     Ok(Value::None)
@@ -1682,8 +2164,18 @@ fn ap_round(vm: &mut Vm, this: &Value, x: f64, y: f64, current: &Value) -> PyRes
     let rows = py::get_or_none(vm, this, "rows")?;
     let cols = py::get_or_none(vm, this, "cols")?;
     let (w, h) = (fget(vm, this, "width")?, fget(vm, this, "height")?);
-    let (xg, gw) = if py::is_none(&rows) { (1., 0.) } else { let g = w / py::f64_of(vm, &rows)?; (g, g) };
-    let (yg, gh) = if py::is_none(&cols) { (1., 0.) } else { let g = h / py::f64_of(vm, &cols)?; (g, g) };
+    let (xg, gw) = if py::is_none(&rows) {
+        (1., 0.)
+    } else {
+        let g = w / py::f64_of(vm, &rows)?;
+        (g, g)
+    };
+    let (yg, gh) = if py::is_none(&cols) {
+        (1., 0.)
+    } else {
+        let g = h / py::f64_of(vm, &cols)?;
+        (g, g)
+    };
     let mut px = xg * (x / xg).round();
     let mut pyy = yg * (y / yg).round();
     if x < px {
@@ -1692,7 +2184,12 @@ fn ap_round(vm: &mut Vm, this: &Value, x: f64, y: f64, current: &Value) -> PyRes
     if y < pyy {
         pyy -= yg;
     }
-    Ok(vm.types.new_tuple(vec![Value::Float(px), Value::Float(pyy), Value::Float(gw), Value::Float(gh)]))
+    Ok(vm.types.new_tuple(vec![
+        Value::Float(px),
+        Value::Float(pyy),
+        Value::Float(gw),
+        Value::Float(gh),
+    ]))
 }
 
 fn ap_round_to_grid(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -1718,7 +2215,9 @@ fn ap_rect(vm: &mut Vm, this: &Value) -> PyResult<Option<[i64; 4]>> {
 
 fn rect_value(vm: &Vm, r: Option<[i64; 4]>) -> Value {
     match r {
-        Some(r) => vm.types.new_tuple(r.iter().map(|v| Value::Int(*v)).collect()),
+        Some(r) => vm
+            .types
+            .new_tuple(r.iter().map(|v| Value::Int(*v)).collect()),
         None => Value::None,
     }
 }
@@ -1734,10 +2233,31 @@ fn ap_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     py::set(vm, this, "width", Value::Float(w))?;
     py::set(vm, this, "height", Value::Float(h))?;
     let rv = super::layout::new(vm, w, h);
-    vm.call_method(&rv, "add_focus", vec![this.clone(), Value::None, Value::Int(0), Value::Int(0), Value::Float(w), Value::Float(h)])?;
+    vm.call_method(
+        &rv,
+        "add_focus",
+        vec![
+            this.clone(),
+            Value::None,
+            Value::Int(0),
+            Value::Int(0),
+            Value::Float(w),
+            Value::Float(h),
+        ],
+    )?;
     if let Some(r) = ap_rect(vm, this)? {
         let c = py::get(vm, this, "child")?;
-        vm.call_method(&rv, "place", vec![c, Value::Int(r[0]), Value::Int(r[1]), Value::Int(r[2]), Value::Int(r[3])])?;
+        vm.call_method(
+            &rv,
+            "place",
+            vec![
+                c,
+                Value::Int(r[0]),
+                Value::Int(r[1]),
+                Value::Int(r[2]),
+                Value::Int(r[3]),
+            ],
+        )?;
     }
     Ok(rv)
 }
@@ -1746,8 +2266,14 @@ fn ap_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let (ev, x, y, _) = evargs(vm, args)?;
     let old = ap_rect(vm, this)?;
-    let grabbed = { let g = get_grab(vm)?; ops::truthy(vm, &g)? };
-    let persist = { let v = py::get_or_none(vm, this, "persist")?; ops::truthy(vm, &v)? };
+    let grabbed = {
+        let g = get_grab(vm)?;
+        ops::truthy(vm, &g)?
+    };
+    let persist = {
+        let v = py::get_or_none(vm, this, "persist")?;
+        ops::truthy(vm, &v)?
+    };
     let mut finished = false;
     let focused = vm.call_method(this, "is_focused", Vec::new())?;
     if ops::truthy(vm, &focused)? {
@@ -1807,7 +2333,18 @@ fn ap_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn webinput_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let names = ["prompt", "default", "allow", "exclude", "mask"];
-    let (v, props) = split(args, kw, &names, vec![Value::None, vm.types.new_str(""), Value::None, vm.types.new_str("{}"), Value::Bool(false)]);
+    let (v, props) = split(
+        args,
+        kw,
+        &names,
+        vec![
+            Value::None,
+            vm.types.new_str(""),
+            Value::None,
+            vm.types.new_str("{}"),
+            Value::Bool(false),
+        ],
+    );
     super::core::d_init(vm, &[this.clone()], &props)?;
     for (i, n) in names.iter().enumerate() {
         py::set(vm, this, n, v[i].clone())?;
@@ -1839,13 +2376,22 @@ pub fn create_part2(vm: &mut Vm, m: &ObjRef) -> PyResult<()> {
     let text = py::import_attr(vm, "renpy.text.text", "Text")?;
     let object = py::import_attr(vm, "renpy.object", "Object")?;
     let always = py::import_attr(vm, "renpy.python", "AlwaysRollback")?;
-    let c = |vm: &mut Vm, name: &str, bases: &[Value], methods: Methods, attrs: &[(&str, Value)]| -> PyResult<Value> {
+    let c = |vm: &mut Vm,
+             name: &str,
+             bases: &[Value],
+             methods: Methods,
+             attrs: &[(&str, Value)]|
+     -> PyResult<Value> {
         let cls = py::class(vm, MODULE, name, bases, methods, attrs)?;
         let v = Value::Obj(cls);
         crysirror_python::modules::set(vm, m, name, v.clone());
         Ok(v)
     };
-    for (n, v) in [("current_input_value", Value::None), ("input_value_active", Value::Bool(false)), ("default_input_value", Value::None)] {
+    for (n, v) in [
+        ("current_input_value", Value::None),
+        ("input_value_active", Value::Bool(false)),
+        ("default_input_value", Value::None),
+    ] {
         crysirror_python::modules::set(vm, m, n, v);
     }
     let l1 = vm.types.new_list(Vec::new());
@@ -1854,55 +2400,213 @@ pub fn create_part2(vm: &mut Vm, m: &ObjRef) -> PyResult<()> {
     crysirror_python::modules::set(vm, m, "inputs", l2);
     let reg = vm.types.new_dict();
     crysirror_python::modules::set(vm, m, "adj_registered", reg);
-    for (n, f) in [("input_pre_per_interact", f_input_pre as crysirror_python::object::NativeFn), ("input_post_per_interact", f_input_post)] {
+    for (n, f) in [
+        (
+            "input_pre_per_interact",
+            f_input_pre as crysirror_python::object::NativeFn,
+        ),
+        ("input_post_per_interact", f_input_post),
+    ] {
         let b = vm.types.new_builtin(n, f);
         crysirror_python::modules::set(vm, m, n, b);
     }
-    c(vm, "CaretBlink", &[d.clone()], &[("__init__", caret_init), ("get_placement", caret_get_placement), ("visit", caret_visit), ("render", caret_render)], &[])?;
+    c(
+        vm,
+        "CaretBlink",
+        &[d.clone()],
+        &[
+            ("__init__", caret_init),
+            ("get_placement", caret_get_placement),
+            ("visit", caret_visit),
+            ("render", caret_render),
+        ],
+        &[],
+    )?;
     let e = vm.types.new_str("");
-    c(vm, "Input", &[text], &[
-        ("__init__", input_init), ("update_text", input_update_text), ("set_style_prefix", input_set_style_prefix), ("enable", input_enable),
-        ("disable", input_disable), ("per_interact", input_per_interact), ("event", input_event), ("render", input_render),
-    ], &[
-        ("changed", Value::None), ("prefix", e.clone()), ("suffix", e.clone()), ("caret_pos", Value::Int(0)), ("old_caret_pos", Value::Int(0)),
-        ("pixel_width", Value::None), ("default", e.clone()), ("edit_text", e.clone()), ("value", Value::None), ("shown", Value::Bool(false)),
-        ("multiline", Value::Bool(false)), ("action", Value::None), ("st", Value::Int(0)),
-    ])?;
-    let adj = c(vm, "Adjustment", &[object], &[
-        ("__init__", adj_init), ("viewport_replaces", adj_viewport_replaces), ("round_value", adj_round_value), ("get_value", adj_get_value),
-        ("set_value", adj_set_value), ("get_range", adj_get_range), ("set_range", adj_set_range), ("get_page", adj_get_page),
-        ("set_page", adj_set_page), ("get_step", adj_get_step), ("set_step", adj_set_step), ("register", adj_register), ("change", adj_change),
-        ("update", adj_update), ("inertia_warper", adj_inertia_warper), ("animate", adj_animate), ("inertia", adj_inertia),
-        ("end_animation", adj_end_animation), ("periodic", adj_periodic),
-    ], &[
-        ("force_step", Value::Bool(false)), ("animation_amplitude", Value::None), ("animation_target", Value::None), ("animation_start", Value::None),
-        ("animation_delay", Value::None), ("animation_warper", Value::None), ("restart_interaction_at_limit", Value::Bool(false)),
-        ("restart_interaction_at_range", Value::Bool(false)), ("raw_changed", Value::None),
-    ])?;
+    c(
+        vm,
+        "Input",
+        &[text],
+        &[
+            ("__init__", input_init),
+            ("update_text", input_update_text),
+            ("set_style_prefix", input_set_style_prefix),
+            ("enable", input_enable),
+            ("disable", input_disable),
+            ("per_interact", input_per_interact),
+            ("event", input_event),
+            ("render", input_render),
+        ],
+        &[
+            ("changed", Value::None),
+            ("prefix", e.clone()),
+            ("suffix", e.clone()),
+            ("caret_pos", Value::Int(0)),
+            ("old_caret_pos", Value::Int(0)),
+            ("pixel_width", Value::None),
+            ("default", e.clone()),
+            ("edit_text", e.clone()),
+            ("value", Value::None),
+            ("shown", Value::Bool(false)),
+            ("multiline", Value::Bool(false)),
+            ("action", Value::None),
+            ("st", Value::Int(0)),
+        ],
+    )?;
+    let adj = c(
+        vm,
+        "Adjustment",
+        &[object],
+        &[
+            ("__init__", adj_init),
+            ("viewport_replaces", adj_viewport_replaces),
+            ("round_value", adj_round_value),
+            ("get_value", adj_get_value),
+            ("set_value", adj_set_value),
+            ("get_range", adj_get_range),
+            ("set_range", adj_set_range),
+            ("get_page", adj_get_page),
+            ("set_page", adj_set_page),
+            ("get_step", adj_get_step),
+            ("set_step", adj_set_step),
+            ("register", adj_register),
+            ("change", adj_change),
+            ("update", adj_update),
+            ("inertia_warper", adj_inertia_warper),
+            ("animate", adj_animate),
+            ("inertia", adj_inertia),
+            ("end_animation", adj_end_animation),
+            ("periodic", adj_periodic),
+        ],
+        &[
+            ("force_step", Value::Bool(false)),
+            ("animation_amplitude", Value::None),
+            ("animation_target", Value::None),
+            ("animation_start", Value::None),
+            ("animation_delay", Value::None),
+            ("animation_warper", Value::None),
+            ("restart_interaction_at_limit", Value::Bool(false)),
+            ("restart_interaction_at_range", Value::Bool(false)),
+            ("raw_changed", Value::None),
+        ],
+    )?;
     for n in ["value", "range", "page", "step"] {
         let g = py::get(vm, &adj, &format!("get_{n}"))?;
         let s = py::get(vm, &adj, &format!("set_{n}"))?;
         let p = py::property(vm, g, Some(s))?;
         py::set(vm, &adj, n, p)?;
     }
-    let bar = c(vm, "Bar", &[d.clone()], &[
-        ("after_upgrade", bar_after_upgrade), ("__init__", bar_init), ("per_interact", bar_per_interact), ("visit", bar_visit),
-        ("render", bar_render), ("focus", bar_focus), ("unfocus", bar_unfocus), ("event", bar_event), ("set_style_prefix", bar_set_style_prefix),
-        ("_tts", empty_str), ("_tts_all", bar_tts_all),
-    ], &[("_store_transform_event", Value::Bool(true)), ("__version__", Value::Int(2))])?;
+    let bar = c(
+        vm,
+        "Bar",
+        &[d.clone()],
+        &[
+            ("after_upgrade", bar_after_upgrade),
+            ("__init__", bar_init),
+            ("per_interact", bar_per_interact),
+            ("visit", bar_visit),
+            ("render", bar_render),
+            ("focus", bar_focus),
+            ("unfocus", bar_unfocus),
+            ("event", bar_event),
+            ("set_style_prefix", bar_set_style_prefix),
+            ("_tts", empty_str),
+            ("_tts_all", bar_tts_all),
+        ],
+        &[
+            ("_store_transform_event", Value::Bool(true)),
+            ("__version__", Value::Int(2)),
+        ],
+    )?;
     let g = vm.types.new_builtin("_draggable", bar_draggable);
     let p = py::property(vm, g, None)?;
     py::set(vm, &bar, "_draggable", p)?;
-    c(vm, "Conditional", &[container], &[("__init__", cond_init), ("render", cond_render), ("event", cond_event)], &[])?;
-    c(vm, "TimerState", &[always], &[], &[("started", Value::Bool(false)), ("next_event", Value::None)])?;
-    c(vm, "Timer", &[null], &[("after_upgrade", timer_after_upgrade), ("__init__", timer_init), ("render", timer_render), ("event", timer_event)], &[
-        ("__version__", Value::Int(1)), ("started", Value::Bool(false)), ("_box_skip", Value::Bool(true)), ("modal", Value::Bool(false)),
-    ])?;
-    c(vm, "MouseArea", &[d.clone()], &[("__init__", mousearea_init), ("render", mousearea_render), ("event", mousearea_event)], &[("at_st_offset", Value::Int(0))])?;
-    c(vm, "OnEvent", &[d.clone()], &[("__init__", onevent_init), ("is_event", onevent_is), ("_handles_event", onevent_is), ("set_transform_event", onevent_set), ("render", zero_render)], &[])?;
+    c(
+        vm,
+        "Conditional",
+        &[container],
+        &[
+            ("__init__", cond_init),
+            ("render", cond_render),
+            ("event", cond_event),
+        ],
+        &[],
+    )?;
+    c(
+        vm,
+        "TimerState",
+        &[always],
+        &[],
+        &[("started", Value::Bool(false)), ("next_event", Value::None)],
+    )?;
+    c(
+        vm,
+        "Timer",
+        &[null],
+        &[
+            ("after_upgrade", timer_after_upgrade),
+            ("__init__", timer_init),
+            ("render", timer_render),
+            ("event", timer_event),
+        ],
+        &[
+            ("__version__", Value::Int(1)),
+            ("started", Value::Bool(false)),
+            ("_box_skip", Value::Bool(true)),
+            ("modal", Value::Bool(false)),
+        ],
+    )?;
+    c(
+        vm,
+        "MouseArea",
+        &[d.clone()],
+        &[
+            ("__init__", mousearea_init),
+            ("render", mousearea_render),
+            ("event", mousearea_event),
+        ],
+        &[("at_st_offset", Value::Int(0))],
+    )?;
+    c(
+        vm,
+        "OnEvent",
+        &[d.clone()],
+        &[
+            ("__init__", onevent_init),
+            ("is_event", onevent_is),
+            ("_handles_event", onevent_is),
+            ("set_transform_event", onevent_set),
+            ("render", zero_render),
+        ],
+        &[],
+    )?;
     let container = py::import_attr(vm, "renpy.display.layout", "Container")?;
-    c(vm, "AreaPicker", &[container], &[("__init__", ap_init), ("round_to_grid", ap_round_to_grid), ("get_rect", ap_get_rect), ("render", ap_render), ("event", ap_event)], &[])?;
-    let wi = c(vm, "WebInput", &[d], &[("__init__", webinput_init), ("find_focusable", webinput_find_focusable), ("activate", none), ("event", none), ("render", zero_render)], &[("active", Value::None)])?;
+    c(
+        vm,
+        "AreaPicker",
+        &[container],
+        &[
+            ("__init__", ap_init),
+            ("round_to_grid", ap_round_to_grid),
+            ("get_rect", ap_get_rect),
+            ("render", ap_render),
+            ("event", ap_event),
+        ],
+        &[],
+    )?;
+    let wi = c(
+        vm,
+        "WebInput",
+        &[d],
+        &[
+            ("__init__", webinput_init),
+            ("find_focusable", webinput_find_focusable),
+            ("activate", none),
+            ("event", none),
+            ("render", zero_render),
+        ],
+        &[("active", Value::None)],
+    )?;
     let pre = vm.types.new_builtin("pre_find_focusable", webinput_pre);
     let post = vm.types.new_builtin("post_find_focusable", none);
     let pre = py::staticmethod(vm, pre);

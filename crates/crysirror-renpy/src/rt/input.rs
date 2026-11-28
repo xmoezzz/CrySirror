@@ -22,10 +22,36 @@ const EMULATOR: &str = "renpy.display.emulator";
 const JOYSTICK: &str = "renpy.display.joystick";
 
 /// SDL_GameControllerGetStringForAxis / ...ForButton.
-pub const AXES: &[&str] = &["leftx", "lefty", "rightx", "righty", "lefttrigger", "righttrigger"];
+pub const AXES: &[&str] = &[
+    "leftx",
+    "lefty",
+    "rightx",
+    "righty",
+    "lefttrigger",
+    "righttrigger",
+];
 pub const BUTTONS: &[&str] = &[
-    "a", "b", "x", "y", "back", "guide", "start", "leftstick", "rightstick", "leftshoulder", "rightshoulder", "dpup", "dpdown", "dpleft",
-    "dpright", "misc1", "paddle1", "paddle2", "paddle3", "paddle4", "touchpad",
+    "a",
+    "b",
+    "x",
+    "y",
+    "back",
+    "guide",
+    "start",
+    "leftstick",
+    "rightstick",
+    "leftshoulder",
+    "rightshoulder",
+    "dpup",
+    "dpdown",
+    "dpleft",
+    "dpright",
+    "misc1",
+    "paddle1",
+    "paddle2",
+    "paddle3",
+    "paddle4",
+    "touchpad",
 ];
 
 const THRESHOLD: i64 = 8192 + 4096;
@@ -50,10 +76,18 @@ fn ev_type(vm: &mut Vm, ev: &Value) -> PyResult<i64> {
 
 fn post_event(vm: &mut Vm, control: &str, state: &str, repeat: bool) -> PyResult<()> {
     let i = interface(vm)?;
-    if py::is_none(&i) || !{ let t__ = py::get(vm, &i, "keyboard_focused")?; py::truthy(vm, &t__) }? {
+    if py::is_none(&i)
+        || !{
+            let t__ = py::get(vm, &i, "keyboard_focused")?;
+            py::truthy(vm, &t__)
+        }?
+    {
         return Ok(());
     }
-    if { let t__ = py::import_attr(vm, CONTROLLER, "ignore")?; py::truthy(vm, &t__) }? {
+    if {
+        let t__ = py::import_attr(vm, CONTROLLER, "ignore")?;
+        py::truthy(vm, &t__)
+    }? {
         return Ok(());
     }
     let mut name = format!("pad_{control}_{state}");
@@ -173,7 +207,10 @@ fn f_exists(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 fn f_quit(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let c = py::import_attr(vm, CONTROLLER, "controllers")?;
     if ops::contains(vm, &c, &args[0])? {
-        let d = c.obj().cloned().ok_or_else(|| vm.type_error("controllers"))?;
+        let d = c
+            .obj()
+            .cloned()
+            .ok_or_else(|| vm.type_error("controllers"))?;
         if let Some(ctl) = ops::dict_pop(vm, &d, &args[0])? {
             py::method(vm, &ctl, "quit", Vec::new())?;
         }
@@ -194,13 +231,21 @@ fn none(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn f_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let ev = args[0].clone();
-    let rv = if py::config_bool(vm, "pass_controller_events")? { ev.clone() } else { Value::None };
+    let rv = if py::config_bool(vm, "pass_controller_events")? {
+        ev.clone()
+    } else {
+        Value::None
+    };
     let ty = ev_type(vm, &ev)?;
     match ty {
         events::CONTROLLERDEVICEADDED | events::CONTROLLERDEVICEREMOVED => Ok(rv),
         events::CONTROLLERAXISMOTION => {
             let get = py::import_attr(vm, "pygame_sdl2.event", "get")?;
-            let more = vm.call(&get, vec![Value::Int(events::CONTROLLERAXISMOTION)], Vec::new())?;
+            let more = vm.call(
+                &get,
+                vec![Value::Int(events::CONTROLLERAXISMOTION)],
+                Vec::new(),
+            )?;
             let mut all = vec![ev];
             all.extend(ops::collect(vm, &more)?);
             let positions = py::import_attr(vm, CONTROLLER, "axis_positions")?;
@@ -232,40 +277,72 @@ fn f_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             Ok(rv)
         }
         events::CONTROLLERBUTTONDOWN | events::CONTROLLERBUTTONUP => {
-            let pr = if ty == events::CONTROLLERBUTTONDOWN { "press" } else { "release" };
+            let pr = if ty == events::CONTROLLERBUTTONDOWN {
+                "press"
+            } else {
+                "release"
+            };
             let b = py::get(vm, &ev, "button")?;
             let b = py::int(vm, &b)?;
             let name = BUTTONS.get(b as usize).copied().unwrap_or("invalid");
             controller_event(vm, name, pr)?;
             Ok(rv)
         }
-        events::JOYAXISMOTION | events::JOYHATMOTION | events::JOYBALLMOTION | events::JOYBUTTONDOWN | events::JOYBUTTONUP
-        | events::JOYDEVICEADDED | events::JOYDEVICEREMOVED => {
-            if py::config_bool(vm, "pass_joystick_events")? { Ok(ev) } else { Ok(Value::None) }
+        events::JOYAXISMOTION
+        | events::JOYHATMOTION
+        | events::JOYBALLMOTION
+        | events::JOYBUTTONDOWN
+        | events::JOYBUTTONUP
+        | events::JOYDEVICEADDED
+        | events::JOYDEVICEREMOVED => {
+            if py::config_bool(vm, "pass_joystick_events")? {
+                Ok(ev)
+            } else {
+                Ok(Value::None)
+            }
         }
         _ => Ok(ev),
     }
 }
 
 fn init_controller(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, CONTROLLER, &[
-        ("load_mappings", none),
-        ("init", none),
-        ("post_event", |vm, a, _| {
-            let c = py::string(vm, &a[0])?;
-            let s = py::string(vm, &a[1])?;
-            let r = a.get(2).map(|v| py::truthy(vm, v)).transpose()?.unwrap_or(false);
-            post_event(vm, &c, &s, r)?;
-            Ok(Value::None)
-        }),
-        ("exists", f_exists),
-        ("quit", f_quit),
-        ("start", f_start),
-        ("controller_event", f_controller_event),
-        ("periodic", f_periodic),
-        ("event", f_event),
-    ]);
-    let pe = py::class(vm, CONTROLLER, "PadEvent", &[], &[("__init__", pe_init), ("event", pe_event), ("repeat", pe_repeat)], &[])?;
+    let m = crysirror_python::modules::module_with(
+        vm,
+        CONTROLLER,
+        &[
+            ("load_mappings", none),
+            ("init", none),
+            ("post_event", |vm, a, _| {
+                let c = py::string(vm, &a[0])?;
+                let s = py::string(vm, &a[1])?;
+                let r = a
+                    .get(2)
+                    .map(|v| py::truthy(vm, v))
+                    .transpose()?
+                    .unwrap_or(false);
+                post_event(vm, &c, &s, r)?;
+                Ok(Value::None)
+            }),
+            ("exists", f_exists),
+            ("quit", f_quit),
+            ("start", f_start),
+            ("controller_event", f_controller_event),
+            ("periodic", f_periodic),
+            ("event", f_event),
+        ],
+    );
+    let pe = py::class(
+        vm,
+        CONTROLLER,
+        "PadEvent",
+        &[],
+        &[
+            ("__init__", pe_init),
+            ("event", pe_event),
+            ("repeat", pe_repeat),
+        ],
+        &[],
+    )?;
     let set = |vm: &Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     set(vm, "PadEvent", Value::Obj(pe));
     for n in ["controllers", "axis_positions", "pad_events"] {
@@ -289,7 +366,11 @@ fn f_dispatch_gesture(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         vm.call(&q, vec![e], Vec::new())?;
         let ie = py::import_attr(vm, "renpy.display.core", "IgnoreEvent")?;
         let ex = vm.call(&ie, Vec::new(), Vec::new())?;
-        return Err(crysirror_python::PyErr::Exc(ex.obj().cloned().ok_or_else(|| vm.type_error("IgnoreEvent"))?));
+        return Err(crysirror_python::PyErr::Exc(
+            ex.obj()
+                .cloned()
+                .ok_or_else(|| vm.type_error("IgnoreEvent"))?,
+        ));
     }
     Ok(Value::None)
 }
@@ -413,17 +494,30 @@ fn gr_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn init_gesture(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, GESTURE, &[("dispatch_gesture", f_dispatch_gesture)]);
-    let gr = py::class(vm, GESTURE, "GestureRecognizer", &[], &[
-        ("__init__", gr_init),
-        ("start", gr_start),
-        ("take_point", gr_take_point),
-        ("finish", gr_finish),
-        ("cancel", gr_cancel),
-        ("event", gr_event),
-    ], &[])?;
+    let m = crysirror_python::modules::module_with(
+        vm,
+        GESTURE,
+        &[("dispatch_gesture", f_dispatch_gesture)],
+    );
+    let gr = py::class(
+        vm,
+        GESTURE,
+        "GestureRecognizer",
+        &[],
+        &[
+            ("__init__", gr_init),
+            ("start", gr_start),
+            ("take_point", gr_take_point),
+            ("finish", gr_finish),
+            ("cancel", gr_cancel),
+            ("event", gr_event),
+        ],
+        &[],
+    )?;
     let r = vm.call(&Value::Obj(gr.clone()), Vec::new(), Vec::new())?;
-    let dirs = vm.types.new_list(DIRECTIONS.iter().map(|d| vm.types.new_str(d)).collect());
+    let dirs = vm
+        .types
+        .new_list(DIRECTIONS.iter().map(|d| vm.types.new_str(d)).collect());
     crysirror_python::modules::set(vm, &m, "DIRECTIONS", dirs);
     crysirror_python::modules::set(vm, &m, "GestureRecognizer", Value::Obj(gr));
     crysirror_python::modules::set(vm, &m, "recognizer", r);
@@ -437,13 +531,21 @@ fn triple(vm: &Vm, ev: Value, x: Value, y: Value) -> Value {
 }
 
 fn f_null_emulator(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    Ok(triple(vm, args[0].clone(), args[1].clone(), args[2].clone()))
+    Ok(triple(
+        vm,
+        args[0].clone(),
+        args[1].clone(),
+        args[2].clone(),
+    ))
 }
 
 fn key_of(vm: &mut Vm, ev: &Value) -> PyResult<(i64, i64)> {
     let k = py::get(vm, ev, "key")?;
     let m = py::get_or_none(vm, ev, "mod")?;
-    Ok((py::int(vm, &k)?, if py::is_none(&m) { 0 } else { py::int(vm, &m)? }))
+    Ok((
+        py::int(vm, &k)?,
+        if py::is_none(&m) { 0 } else { py::int(vm, &m)? },
+    ))
 }
 
 fn keysym(vm: &mut Vm, name: &str) -> PyResult<i64> {
@@ -454,10 +556,16 @@ fn keysym(vm: &mut Vm, name: &str) -> PyResult<i64> {
 fn f_touch_emulator(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (ev, mut x, mut y) = (args[0].clone(), args[1].clone(), args[2].clone());
     let i = interface(vm)?;
-    if { let t__ = py::get(vm, &i, "text_rect")?; py::truthy(vm, &t__) }? {
+    if {
+        let t__ = py::get(vm, &i, "text_rect")?;
+        py::truthy(vm, &t__)
+    }? {
         return Ok(triple(vm, ev, x, y));
     }
-    let ios = { let t__ = py::import_attr(vm, EMULATOR, "ios")?; py::truthy(vm, &t__) }?;
+    let ios = {
+        let t__ = py::import_attr(vm, EMULATOR, "ios")?;
+        py::truthy(vm, &t__)
+    }?;
     let ty = ev_type(vm, &ev)?;
     let touch_keys = [keysym(vm, "K_ESCAPE")?, keysym(vm, "K_PAGEUP")?];
     let shift = keysym(vm, "KMOD_SHIFT")?;
@@ -471,7 +579,9 @@ fn f_touch_emulator(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             let z = vm.types.new_tuple(vec![Value::Int(0), Value::Int(0)]);
             py::dict_set(vm, &d, "pos", z.clone())?;
             py::dict_set(vm, &d, "rel", z)?;
-            let bs = vm.types.new_tuple(vec![Value::Int(0), Value::Int(0), Value::Int(0)]);
+            let bs = vm
+                .types
+                .new_tuple(vec![Value::Int(0), Value::Int(0), Value::Int(0)]);
             py::dict_set(vm, &d, "buttons", bs)?;
             let cls = py::import_attr(vm, "pygame_sdl2.event", "Event")?;
             let mv = vm.call(&cls, vec![Value::Int(events::MOUSEMOTION), d], Vec::new())?;
@@ -506,7 +616,9 @@ fn f_tv_emulator(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     if ty == events::KEYDOWN {
         let mut keys = Vec::new();
-        for k in ["K_LEFT", "K_RIGHT", "K_UP", "K_DOWN", "K_RETURN", "K_ESCAPE", "K_PAGEUP"] {
+        for k in [
+            "K_LEFT", "K_RIGHT", "K_UP", "K_DOWN", "K_RETURN", "K_ESCAPE", "K_PAGEUP",
+        ] {
             keys.push(keysym(vm, k)?);
         }
         let (key, _) = key_of(vm, &ev)?;
@@ -524,10 +636,18 @@ fn f_dynamic_keyboard(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
         let k = |s: &str, v: Value| (Rc::<str>::from(s), v);
         let solid = py::get(vm, &store, "Solid")?;
         let shade = py::s(vm, "#0008");
-        let s = vm.call(&solid, vec![shade], vec![k("yalign", py::f(1.0)), k("ymaximum", py::f(0.625))])?;
+        let s = vm.call(
+            &solid,
+            vec![shade],
+            vec![k("yalign", py::f(1.0)), k("ymaximum", py::f(0.625))],
+        )?;
         let text = py::get(vm, &store, "Text")?;
         let label = py::s(vm, "On-Screen Keyboard");
-        let t = vm.call(&text, vec![label], vec![k("xalign", py::f(0.5)), k("yalign", py::f(0.75))])?;
+        let t = vm.call(
+            &text,
+            vec![label],
+            vec![k("xalign", py::f(0.5)), k("yalign", py::f(0.75))],
+        )?;
         let fixed = py::get(vm, &store, "Fixed")?;
         let kb = vm.call(&fixed, vec![s, t], Vec::new())?;
         py::set(vm, &m, "keyboard", kb)?;
@@ -537,7 +657,11 @@ fn f_dynamic_keyboard(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     }
     let i = interface(vm)?;
     let old = py::get(vm, &i, "old_text_rect")?;
-    let which = if py::truthy(vm, &old)? { "keyboard" } else { "null" };
+    let which = if py::truthy(vm, &old)? {
+        "keyboard"
+    } else {
+        "null"
+    };
     let rv = py::get(vm, &m, which)?;
     Ok(vm.types.new_tuple(vec![rv, py::f(0.33)]))
 }
@@ -552,14 +676,18 @@ fn f_init_emulator(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn init_emulator(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, EMULATOR, &[
-        ("null_emulator", f_null_emulator),
-        ("touch_emulator", f_touch_emulator),
-        ("tv_emulator", f_tv_emulator),
-        ("dynamic_keyboard", f_dynamic_keyboard),
-        ("init_emulator", f_init_emulator),
-        ("early_init_emulator", none),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        EMULATOR,
+        &[
+            ("null_emulator", f_null_emulator),
+            ("touch_emulator", f_touch_emulator),
+            ("tv_emulator", f_tv_emulator),
+            ("dynamic_keyboard", f_dynamic_keyboard),
+            ("init_emulator", f_init_emulator),
+            ("early_init_emulator", none),
+        ],
+    );
     let ne = py::get_raw(&m, "null_emulator");
     let set = |vm: &Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     set(vm, "emulator", ne);
@@ -586,7 +714,8 @@ fn f_get(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn init_joystick(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, JOYSTICK, &[("count", f_count), ("get", f_get)]);
+    let m =
+        crysirror_python::modules::module_with(vm, JOYSTICK, &[("count", f_count), ("get", f_get)]);
     let null = py::import_attr(vm, "renpy.display.layout", "Null")?;
     let jb = py::class(vm, JOYSTICK, "JoyBehavior", &[null], &[], &[])?;
     crysirror_python::modules::set(vm, &m, "JoyBehavior", Value::Obj(jb));

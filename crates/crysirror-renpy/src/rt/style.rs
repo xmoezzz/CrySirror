@@ -36,36 +36,152 @@ enum Conv {
 use Conv as C;
 
 const STYLE_PROPERTIES: &[(&str, Conv)] = &[
-    ("activate_sound", C::None), ("adjust_spacing", C::None), ("aft_bar", C::NoneIsNull), ("aft_gutter", C::None), ("alt", C::None),
-    ("altruby_style", C::None), ("antialias", C::None), ("axis", C::None), ("background", C::Displayable), ("bar_invert", C::None),
-    ("bar_resizing", C::None), ("bar_vertical", C::None), ("black_color", C::Color), ("bold", C::None), ("bottom_margin", C::None),
-    ("bottom_padding", C::None), ("box_align", C::None), ("box_justify", C::None), ("box_layout", C::None), ("box_reverse", C::None),
-    ("box_wrap", C::None), ("box_wrap_spacing", C::None), ("caret", C::Displayable), ("child", C::Displayable), ("clipping", C::None),
-    ("color", C::Color), ("debug", C::None), ("drop_shadow", C::None), ("drop_shadow_color", C::Color), ("emoji_font", C::None),
-    ("extra_alt", C::None), ("first_indent", C::None), ("first_spacing", C::None), ("fit_first", C::None), ("focus_mask", C::FocusMask),
-    ("focus_rect", C::None), ("font", C::None), ("font_features", C::None), ("fore_bar", C::NoneIsNull), ("fore_gutter", C::None),
-    ("foreground", C::Displayable), ("group_alt", C::None), ("hinting", C::None), ("hover_sound", C::None), ("hyperlink_functions", C::None),
-    ("instance", C::None), ("italic", C::None), ("justify", C::None), ("kerning", C::None), ("key_events", C::None),
-    ("keyboard_focus", C::None), ("keyboard_focus_insets", C::None), ("language", C::None), ("layout", C::None), ("left_margin", C::None),
-    ("left_padding", C::None), ("line_leading", C::None), ("line_overlap_split", C::None), ("line_spacing", C::None), ("min_width", C::None),
-    ("mipmap", C::None), ("modal", C::None), ("mouse", C::None), ("newline_indent", C::None), ("order_reverse", C::None),
-    ("outline_scaling", C::None), ("outlines", C::Outlines), ("prefer_emoji", C::None), ("reading_order", C::None), ("rest_indent", C::None),
-    ("right_margin", C::None), ("right_padding", C::None), ("ruby_line_leading", C::None), ("ruby_style", C::None), ("shaper", C::None),
-    ("size", C::None), ("size_group", C::None), ("slow_abortable", C::None), ("slow_cps", C::None), ("slow_cps_multiplier", C::None),
-    ("spacing", C::None), ("strikethrough", C::None), ("subpixel", C::None), ("subtitle_width", C::None), ("text_align", C::None),
-    ("text_y_fudge", C::None), ("textshader", C::None), ("thumb", C::NoneIsNull), ("thumb_align", C::None), ("thumb_offset", C::None),
-    ("thumb_shadow", C::NoneIsNull), ("time_policy", C::None), ("top_margin", C::None), ("top_padding", C::None), ("underline", C::None),
-    ("unscrollable", C::None), ("vertical", C::None), ("xanchor", C::Anchor), ("xfill", C::None), ("xfit", C::None),
-    ("xmaximum", C::None), ("xminimum", C::NoneIs0), ("xoffset", C::None), ("xpos", C::None), ("xspacing", C::None),
-    ("yanchor", C::Anchor), ("yfill", C::None), ("yfit", C::None), ("ymaximum", C::None), ("yminimum", C::NoneIs0),
-    ("yoffset", C::None), ("ypos", C::None), ("yspacing", C::None),
+    ("activate_sound", C::None),
+    ("adjust_spacing", C::None),
+    ("aft_bar", C::NoneIsNull),
+    ("aft_gutter", C::None),
+    ("alt", C::None),
+    ("altruby_style", C::None),
+    ("antialias", C::None),
+    ("axis", C::None),
+    ("background", C::Displayable),
+    ("bar_invert", C::None),
+    ("bar_resizing", C::None),
+    ("bar_vertical", C::None),
+    ("black_color", C::Color),
+    ("bold", C::None),
+    ("bottom_margin", C::None),
+    ("bottom_padding", C::None),
+    ("box_align", C::None),
+    ("box_justify", C::None),
+    ("box_layout", C::None),
+    ("box_reverse", C::None),
+    ("box_wrap", C::None),
+    ("box_wrap_spacing", C::None),
+    ("caret", C::Displayable),
+    ("child", C::Displayable),
+    ("clipping", C::None),
+    ("color", C::Color),
+    ("debug", C::None),
+    ("drop_shadow", C::None),
+    ("drop_shadow_color", C::Color),
+    ("emoji_font", C::None),
+    ("extra_alt", C::None),
+    ("first_indent", C::None),
+    ("first_spacing", C::None),
+    ("fit_first", C::None),
+    ("focus_mask", C::FocusMask),
+    ("focus_rect", C::None),
+    ("font", C::None),
+    ("font_features", C::None),
+    ("fore_bar", C::NoneIsNull),
+    ("fore_gutter", C::None),
+    ("foreground", C::Displayable),
+    ("group_alt", C::None),
+    ("hinting", C::None),
+    ("hover_sound", C::None),
+    ("hyperlink_functions", C::None),
+    ("instance", C::None),
+    ("italic", C::None),
+    ("justify", C::None),
+    ("kerning", C::None),
+    ("key_events", C::None),
+    ("keyboard_focus", C::None),
+    ("keyboard_focus_insets", C::None),
+    ("language", C::None),
+    ("layout", C::None),
+    ("left_margin", C::None),
+    ("left_padding", C::None),
+    ("line_leading", C::None),
+    ("line_overlap_split", C::None),
+    ("line_spacing", C::None),
+    ("min_width", C::None),
+    ("mipmap", C::None),
+    ("modal", C::None),
+    ("mouse", C::None),
+    ("newline_indent", C::None),
+    ("order_reverse", C::None),
+    ("outline_scaling", C::None),
+    ("outlines", C::Outlines),
+    ("prefer_emoji", C::None),
+    ("reading_order", C::None),
+    ("rest_indent", C::None),
+    ("right_margin", C::None),
+    ("right_padding", C::None),
+    ("ruby_line_leading", C::None),
+    ("ruby_style", C::None),
+    ("shaper", C::None),
+    ("size", C::None),
+    ("size_group", C::None),
+    ("slow_abortable", C::None),
+    ("slow_cps", C::None),
+    ("slow_cps_multiplier", C::None),
+    ("spacing", C::None),
+    ("strikethrough", C::None),
+    ("subpixel", C::None),
+    ("subtitle_width", C::None),
+    ("text_align", C::None),
+    ("text_y_fudge", C::None),
+    ("textshader", C::None),
+    ("thumb", C::NoneIsNull),
+    ("thumb_align", C::None),
+    ("thumb_offset", C::None),
+    ("thumb_shadow", C::NoneIsNull),
+    ("time_policy", C::None),
+    ("top_margin", C::None),
+    ("top_padding", C::None),
+    ("underline", C::None),
+    ("unscrollable", C::None),
+    ("vertical", C::None),
+    ("xanchor", C::Anchor),
+    ("xfill", C::None),
+    ("xfit", C::None),
+    ("xmaximum", C::None),
+    ("xminimum", C::NoneIs0),
+    ("xoffset", C::None),
+    ("xpos", C::None),
+    ("xspacing", C::None),
+    ("yanchor", C::Anchor),
+    ("yfill", C::None),
+    ("yfit", C::None),
+    ("ymaximum", C::None),
+    ("yminimum", C::NoneIs0),
+    ("yoffset", C::None),
+    ("ypos", C::None),
+    ("yspacing", C::None),
 ];
 
-const DISPLAYABLE_PROPERTIES: &[&str] = &["background", "foreground", "child", "fore_bar", "aft_bar", "thumb", "thumb_shadow"];
+const DISPLAYABLE_PROPERTIES: &[&str] = &[
+    "background",
+    "foreground",
+    "child",
+    "fore_bar",
+    "aft_bar",
+    "thumb",
+    "thumb_shadow",
+];
 
 const PROPERTY_PRIORITY: &[&str] = &[
-    "left_margin", "top_margin", "right_margin", "bottom_margin", "xpos", "xanchor", "ypos", "yanchor", "left_padding", "top_padding",
-    "right_padding", "bottom_padding", "xoffset", "yoffset", "xminimum", "yminimum", "xmaximum", "ymaximum", "xfill", "yfill",
+    "left_margin",
+    "top_margin",
+    "right_margin",
+    "bottom_margin",
+    "xpos",
+    "xanchor",
+    "ypos",
+    "yanchor",
+    "left_padding",
+    "top_padding",
+    "right_padding",
+    "bottom_padding",
+    "xoffset",
+    "yoffset",
+    "xminimum",
+    "yminimum",
+    "xmaximum",
+    "ymaximum",
+    "xfill",
+    "yfill",
 ];
 
 /// How a synthetic property derives each target's value.
@@ -83,15 +199,46 @@ enum Pick {
 use Pick as P;
 
 const SYNTHETIC: &[(&str, &[(&str, Pick)])] = &[
-    ("margin", &[("left_margin", P::Index(0)), ("top_margin", P::Index(1)), ("right_margin", P::IndexOr(2, 0)), ("bottom_margin", P::IndexOr(3, 1))]),
-    ("xmargin", &[("left_margin", P::Same), ("right_margin", P::Same)]),
-    ("ymargin", &[("top_margin", P::Same), ("bottom_margin", P::Same)]),
+    (
+        "margin",
+        &[
+            ("left_margin", P::Index(0)),
+            ("top_margin", P::Index(1)),
+            ("right_margin", P::IndexOr(2, 0)),
+            ("bottom_margin", P::IndexOr(3, 1)),
+        ],
+    ),
+    (
+        "xmargin",
+        &[("left_margin", P::Same), ("right_margin", P::Same)],
+    ),
+    (
+        "ymargin",
+        &[("top_margin", P::Same), ("bottom_margin", P::Same)],
+    ),
     ("xalign", &[("xpos", P::Same), ("xanchor", P::Same)]),
     ("yalign", &[("ypos", P::Same), ("yanchor", P::Same)]),
-    ("padding", &[("left_padding", P::Index(0)), ("top_padding", P::Index(1)), ("right_padding", P::IndexOr(2, 0)), ("bottom_padding", P::IndexOr(3, 1))]),
-    ("xpadding", &[("left_padding", P::Same), ("right_padding", P::Same)]),
-    ("ypadding", &[("top_padding", P::Same), ("bottom_padding", P::Same)]),
+    (
+        "padding",
+        &[
+            ("left_padding", P::Index(0)),
+            ("top_padding", P::Index(1)),
+            ("right_padding", P::IndexOr(2, 0)),
+            ("bottom_padding", P::IndexOr(3, 1)),
+        ],
+    ),
+    (
+        "xpadding",
+        &[("left_padding", P::Same), ("right_padding", P::Same)],
+    ),
+    (
+        "ypadding",
+        &[("top_padding", P::Same), ("bottom_padding", P::Same)],
+    ),
     ("minwidth", &[("min_width", P::Same)]),
+    // Through 6.16 `sound` is the base property whose hover_ and activate_
+    // forms the button behaviour plays (6.17 made those two properties).
+    ("sound", &[("hover_sound", P::Same), ("activate_sound", P::Same)]),
     ("textalign", &[("text_align", P::Same)]),
     ("slow_speed", &[("slow_cps", P::Same)]),
     ("enable_hover", &[]),
@@ -107,21 +254,68 @@ const SYNTHETIC: &[(&str, &[(&str, Pick)])] = &[
     ("box_spacing", &[("spacing", P::Same)]),
     ("box_first_spacing", &[("first_spacing", P::Same)]),
     ("pos", &[("xpos", P::Index(0)), ("ypos", P::Index(1))]),
-    ("anchor", &[("xanchor", P::Index(0)), ("yanchor", P::Index(1))]),
-    ("offset", &[("xoffset", P::Index(0)), ("yoffset", P::Index(1))]),
-    ("align", &[("xpos", P::Index(0)), ("ypos", P::Index(1)), ("xanchor", P::Index(0)), ("yanchor", P::Index(1))]),
-    ("maximum", &[("xmaximum", P::Index(0)), ("ymaximum", P::Index(1))]),
-    ("minimum", &[("xminimum", P::Index(0)), ("yminimum", P::Index(1))]),
+    (
+        "anchor",
+        &[("xanchor", P::Index(0)), ("yanchor", P::Index(1))],
+    ),
+    (
+        "offset",
+        &[("xoffset", P::Index(0)), ("yoffset", P::Index(1))],
+    ),
+    (
+        "align",
+        &[
+            ("xpos", P::Index(0)),
+            ("ypos", P::Index(1)),
+            ("xanchor", P::Index(0)),
+            ("yanchor", P::Index(1)),
+        ],
+    ),
+    (
+        "maximum",
+        &[("xmaximum", P::Index(0)), ("ymaximum", P::Index(1))],
+    ),
+    (
+        "minimum",
+        &[("xminimum", P::Index(0)), ("yminimum", P::Index(1))],
+    ),
     ("xsize", &[("xminimum", P::Same), ("xmaximum", P::Same)]),
     ("ysize", &[("yminimum", P::Same), ("ymaximum", P::Same)]),
-    ("xysize", &[("xminimum", P::Index(0)), ("xmaximum", P::Index(0)), ("yminimum", P::Index(1)), ("ymaximum", P::Index(1))]),
-    ("area", &[
-        ("xpos", P::Index(0)), ("ypos", P::Index(1)), ("xanchor", P::Int(0)), ("yanchor", P::Int(0)), ("xfill", P::True), ("yfill", P::True),
-        ("xmaximum", P::Index(2)), ("ymaximum", P::Index(3)), ("xminimum", P::Index(2)), ("yminimum", P::Index(3)),
-    ]),
+    (
+        "xysize",
+        &[
+            ("xminimum", P::Index(0)),
+            ("xmaximum", P::Index(0)),
+            ("yminimum", P::Index(1)),
+            ("ymaximum", P::Index(1)),
+        ],
+    ),
+    (
+        "area",
+        &[
+            ("xpos", P::Index(0)),
+            ("ypos", P::Index(1)),
+            ("xanchor", P::Int(0)),
+            ("yanchor", P::Int(0)),
+            ("xfill", P::True),
+            ("yfill", P::True),
+            ("xmaximum", P::Index(2)),
+            ("ymaximum", P::Index(3)),
+            ("xminimum", P::Index(2)),
+            ("yminimum", P::Index(3)),
+        ],
+    ),
     ("xcenter", &[("xpos", P::Same), ("xanchor", P::Float(0.5))]),
     ("ycenter", &[("ypos", P::Same), ("yanchor", P::Float(0.5))]),
-    ("xycenter", &[("xpos", P::Index(0)), ("ypos", P::Index(1)), ("xanchor", P::Float(0.5)), ("yanchor", P::Float(0.5))]),
+    (
+        "xycenter",
+        &[
+            ("xpos", P::Index(0)),
+            ("ypos", P::Index(1)),
+            ("xanchor", P::Float(0.5)),
+            ("yanchor", P::Float(0.5)),
+        ],
+    ),
 ];
 
 /// (name, cache index or negative, priority level, alternate names).
@@ -129,11 +323,28 @@ const PREFIXES: &[(&str, i32, i32, &[&str])] = &[
     ("selected_hover_", 5, 3, &[]),
     ("selected_idle_", 4, 3, &[]),
     ("selected_insensitive_", 3, 3, &[]),
-    ("selected_", -3, 2, &["selected_hover_", "selected_idle_", "selected_insensitive_"]),
+    (
+        "selected_",
+        -3,
+        2,
+        &["selected_hover_", "selected_idle_", "selected_insensitive_"],
+    ),
     ("hover_", 2, 1, &["selected_hover_"]),
     ("idle_", 1, 1, &["selected_idle_"]),
     ("insensitive_", 0, 1, &["selected_insensitive_"]),
-    ("", -4, 0, &["selected_hover_", "selected_idle_", "selected_insensitive_", "idle_", "hover_", "insensitive_"]),
+    (
+        "",
+        -4,
+        0,
+        &[
+            "selected_hover_",
+            "selected_idle_",
+            "selected_insensitive_",
+            "idle_",
+            "hover_",
+            "insensitive_",
+        ],
+    ),
     ("activate_", -2, 0, &[]),
     ("selected_activate_", -1, 0, &[]),
 ];
@@ -142,9 +353,25 @@ const PREFIX_SEARCH: &[(&str, &[&str])] = &[
     ("idle_", &["idle_", ""]),
     ("hover_", &["hover_", ""]),
     ("insensitive_", &["insensitive_", "", "idle_"]),
-    ("selected_idle_", &["selected_idle_", "selected_", "", "idle_"]),
-    ("selected_hover_", &["selected_hover_", "hover_", "selected_", ""]),
-    ("selected_insensitive_", &["selected_insensitive_", "insensitive_", "selected_", "", "selected_idle_", "idle_"]),
+    (
+        "selected_idle_",
+        &["selected_idle_", "selected_", "", "idle_"],
+    ),
+    (
+        "selected_hover_",
+        &["selected_hover_", "hover_", "selected_", ""],
+    ),
+    (
+        "selected_insensitive_",
+        &[
+            "selected_insensitive_",
+            "insensitive_",
+            "selected_",
+            "",
+            "selected_idle_",
+            "idle_",
+        ],
+    ),
     ("", &[""]),
 ];
 
@@ -170,7 +397,11 @@ struct Tables {
 fn tables() -> &'static Tables {
     static T: OnceLock<Tables> = OnceLock::new();
     T.get_or_init(|| {
-        let index: HashMap<_, _> = STYLE_PROPERTIES.iter().enumerate().map(|(i, (n, _))| (*n, i)).collect();
+        let index: HashMap<_, _> = STYLE_PROPERTIES
+            .iter()
+            .enumerate()
+            .map(|(i, (n, _))| (*n, i))
+            .collect();
         let slot = |n: &str| PREFIXES.iter().find(|p| p.0 == n).map(|p| p.1).unwrap();
         let prefixes: Vec<Prefix> = PREFIXES
             .iter()
@@ -182,20 +413,38 @@ fn tables() -> &'static Tables {
                 for n in *alts {
                     a.push((slot(n) as usize, *n));
                 }
-                Prefix { name, priority: pri * 2, alts: a }
+                Prefix {
+                    name,
+                    priority: pri * 2,
+                    alts: a,
+                }
             })
             .collect();
-        let mut all: Vec<(&'static str, Vec<(&'static str, Pick)>)> = STYLE_PROPERTIES.iter().map(|(n, _)| (*n, vec![(*n, P::Same)])).collect();
+        let mut all: Vec<(&'static str, Vec<(&'static str, Pick)>)> = STYLE_PROPERTIES
+            .iter()
+            .map(|(n, _)| (*n, vec![(*n, P::Same)]))
+            .collect();
         for (n, l) in SYNTHETIC {
             all.push((n, l.to_vec()));
         }
         let mut full = HashMap::new();
+        // Unprefixed names first: a property such as `hover_sound` is not
+        // the hover_ form of the pre-6.17 `sound`.
+        let bare = prefixes.iter().position(|p| p.name.is_empty()).unwrap();
+        for (n, _) in &all {
+            full.insert(n.to_string(), (bare, *n));
+        }
         for (pi, p) in prefixes.iter().enumerate() {
             for (n, _) in &all {
                 full.entry(format!("{}{}", p.name, n)).or_insert((pi, *n));
             }
         }
-        Tables { index, prefixes, full, all }
+        Tables {
+            index,
+            prefixes,
+            full,
+            all,
+        }
     })
 }
 
@@ -205,11 +454,19 @@ pub fn index(name: &str) -> Option<usize> {
 }
 
 pub fn prefix_offset(prefix: &str) -> Option<usize> {
-    PREFIXES.iter().find(|p| p.0 == prefix && p.1 >= 0).map(|p| p.1 as usize * COUNT)
+    PREFIXES
+        .iter()
+        .find(|p| p.0 == prefix && p.1 >= 0)
+        .map(|p| p.1 as usize * COUNT)
 }
 
 fn targets(name: &str) -> &'static [(&'static str, Pick)] {
-    tables().all.iter().find(|(n, _)| *n == name).map(|(_, v)| v.as_slice()).unwrap_or(&[])
+    tables()
+        .all
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, v)| v.as_slice())
+        .unwrap_or(&[])
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +504,9 @@ fn ensure(vm: &mut Vm) -> PyResult<Rc<Classes>> {
 }
 
 fn core(vm: &Vm, s: &Value) -> PyResult<CoreRef> {
-    let Some(o) = s.obj() else { return Err(vm.type_error("not a style")) };
+    let Some(o) = s.obj() else {
+        return Err(vm.type_error("not a style"));
+    };
     if let Some(c) = ops::get_raw_attr(o, CORE) {
         if let Some(r) = py::native::<CoreRef, _>(&c, |r| r.clone()) {
             return Ok(r);
@@ -268,7 +527,9 @@ pub fn is_style(vm: &mut Vm, v: &Value) -> bool {
 }
 
 fn field(s: &Value, name: &str) -> Value {
-    s.obj().and_then(|o| ops::get_raw_attr(o, name)).unwrap_or(Value::None)
+    s.obj()
+        .and_then(|o| ops::get_raw_attr(o, name))
+        .unwrap_or(Value::None)
 }
 
 fn set_field(vm: &Vm, s: &Value, name: &str, v: Value) {
@@ -317,6 +578,16 @@ pub fn get_style(vm: &mut Vm, name: &str) -> PyResult<Value> {
     if let Some(rv) = styles_get(vm, &key)? {
         return Ok(rv);
     }
+    if std::env::var_os("CRYSIRROR_RENPY_TRACE").is_some() {
+        let d = classes(vm).styles.clone();
+        let n = ops::len(vm, &d).unwrap_or(0);
+        let k = name1(vm, "main_menu_text");
+        let has = styles_get(vm, &k)?.is_some();
+        super::link::diagnostic(
+            vm,
+            format!("trace: get_style({name}) missing; {n} styles; main_menu_text={has}"),
+        );
+    }
     let missing = |vm: &Vm| py::error(vm, format!("Style {} does not exist.", quote(name)));
     let (start, end) = name.split_once('_').unwrap_or((name, ""));
     let end = if start.is_empty() {
@@ -364,7 +635,9 @@ pub fn get_full_style(vm: &mut Vm, name: &Value) -> PyResult<Value> {
         return Ok(rv);
     }
     let parts = py::items(vm, name)?;
-    let Some(first) = parts.first() else { return Err(py::error(vm, "Empty style name.")) };
+    let Some(first) = parts.first() else {
+        return Err(py::error(vm, "Empty style name."));
+    };
     let first = py::string(vm, first)?;
     let mut rv = get_style(vm, &first)?;
     for i in &parts[1..] {
@@ -425,7 +698,11 @@ fn expand_focus_mask(vm: &mut Vm, v: &Value) -> PyResult<Value> {
 }
 
 fn expand_outlines(vm: &mut Vm, l: &Value) -> PyResult<Value> {
-    let color = if profile_at_least(vm, 8, 6) { py::import_attr(vm, "renpy.color", "Color")? } else { py::import_attr(vm, "renpy.easy", "color")? };
+    let color = if profile_at_least(vm, 8, 6) {
+        py::import_attr(vm, "renpy.color", "Color")?
+    } else {
+        py::import_attr(vm, "renpy.easy", "color")?
+    };
     let mut rv = Vec::new();
     for i in py::items(vm, l)? {
         let parts = py::items(vm, &i)?;
@@ -434,19 +711,37 @@ fn expand_outlines(vm: &mut Vm, l: &Value) -> PyResult<Value> {
         }
         let c = vm.call(&color, vec![parts[1].clone()], Vec::new())?;
         if parts.len() == 2 {
-            rv.push(vm.types.new_tuple(vec![parts[0].clone(), c, Value::Int(0), Value::Int(0)]));
+            rv.push(
+                vm.types
+                    .new_tuple(vec![parts[0].clone(), c, Value::Int(0), Value::Int(0)]),
+            );
         } else {
-            rv.push(vm.types.new_tuple(vec![parts[0].clone(), c, parts[2].clone(), parts[3].clone()]));
+            rv.push(vm.types.new_tuple(vec![
+                parts[0].clone(),
+                c,
+                parts[2].clone(),
+                parts[3].clone(),
+            ]));
         }
     }
     Ok(vm.types.new_list(rv))
 }
 
-const ANCHORS: &[(&str, f64)] = &[("left", 0.0), ("right", 1.0), ("center", 0.5), ("top", 0.0), ("bottom", 1.0)];
+const ANCHORS: &[(&str, f64)] = &[
+    ("left", 0.0),
+    ("right", 1.0),
+    ("center", 0.5),
+    ("top", 0.0),
+    ("bottom", 1.0),
+];
 
 fn expand_anchor(vm: &mut Vm, v: &Value) -> PyResult<Value> {
     if let Some(s) = v.as_str() {
-        return Ok(ANCHORS.iter().find(|(n, _)| *n == s).map(|(_, f)| Value::Float(*f)).unwrap_or_else(|| v.clone()));
+        return Ok(ANCHORS
+            .iter()
+            .find(|(n, _)| *n == s)
+            .map(|(_, f)| Value::Float(*f))
+            .unwrap_or_else(|| v.clone()));
     }
     // Unhashable values: compare against the store's position objects.
     if matches!(v, Value::Obj(_)) && ops::hash(vm, v).is_err() {
@@ -461,7 +756,9 @@ fn expand_anchor(vm: &mut Vm, v: &Value) -> PyResult<Value> {
 }
 
 fn profile_at_least(vm: &Vm, major: u32, minor: u32) -> bool {
-    super::state::try_rt(vm).map(|r| r.profile.at_least(major, minor)).unwrap_or(true)
+    super::state::try_rt(vm)
+        .map(|r| r.profile.at_least(major, minor))
+        .unwrap_or(true)
 }
 
 fn convert(vm: &mut Vm, c: Conv, v: Value) -> PyResult<Value> {
@@ -508,7 +805,14 @@ fn assign(c: &mut Cache, index: usize, priority: i32, v: Value) {
     c.priorities[index] = priority;
 }
 
-fn assign_prefixed(vm: &mut Vm, c: &mut Cache, index: usize, priority: i32, d: &Value, prefix: &str) -> PyResult<()> {
+fn assign_prefixed(
+    vm: &mut Vm,
+    c: &mut Cache,
+    index: usize,
+    priority: i32,
+    d: &Value,
+    prefix: &str,
+) -> PyResult<()> {
     if priority < c.priorities[index] {
         return Ok(());
     }
@@ -528,11 +832,25 @@ fn assign_prefixed(vm: &mut Vm, c: &mut Cache, index: usize, priority: i32, d: &
     Ok(())
 }
 
-fn apply_property(vm: &mut Vm, c: &mut Cache, priority: i32, key: &str, value: &Value) -> PyResult<()> {
+fn apply_property(
+    vm: &mut Vm,
+    c: &mut Cache,
+    priority: i32,
+    key: &str,
+    value: &Value,
+) -> PyResult<()> {
     let t = tables();
-    let Some(&(pi, prop)) = t.full.get(key) else { return Ok(()) };
+    let Some(&(pi, prop)) = t.full.get(key) else {
+        return Ok(());
+    };
     let prefix = &t.prefixes[pi];
-    let priority = priority + prefix.priority + if PROPERTY_PRIORITY.contains(&prop) { 1 } else { 0 };
+    let priority = priority
+        + prefix.priority
+        + if PROPERTY_PRIORITY.contains(&prop) {
+            1
+        } else {
+            0
+        };
     for (target, p) in targets(prop) {
         let v = pick(vm, value, *p)?;
         let i = t.index[target];
@@ -559,7 +877,10 @@ pub fn build_style(vm: &mut Vm, s: &Value) -> PyResult<()> {
     let name = field(s, "name");
     if core.borrow().building && !py::is_none(&name) {
         let n = style_name_to_string(vm, &name)?;
-        return Err(py::error(vm, format!("{n} is part of a loop of recursive styles (is one of its own parents).")));
+        return Err(py::error(
+            vm,
+            format!("{n} is part of a loop of recursive styles (is one of its own parents)."),
+        ));
     }
     core.borrow_mut().building = true;
     let r = build_inner(vm, s, &core, &name);
@@ -590,14 +911,21 @@ fn build_inner(vm: &mut Vm, s: &Value, core: &CoreRef, name: &Value) -> PyResult
         c.built = true;
         return Ok(());
     }
-    let mut cache = Cache { values: vec![None; PREFIX_COUNT * COUNT], priorities: vec![0; PREFIX_COUNT * COUNT] };
+    let mut cache = Cache {
+        values: vec![None; PREFIX_COUNT * COUNT],
+        priorities: vec![0; PREFIX_COUNT * COUNT],
+    };
     let mut priority = 1;
     for d in dicts {
         for (k, v) in ops::mapping_items(vm, &d)? {
-            let Some(k) = k.as_str().map(str::to_owned) else { continue };
+            let Some(k) = k.as_str().map(str::to_owned) else {
+                continue;
+            };
             if let Err(e) = apply_property(vm, &mut cache, priority, &k, &v) {
                 let n = style_name_to_string(vm, name)?;
-                let info = vm.types.new_str(&format!("While processing the {k} property of {n}:"));
+                let info = vm
+                    .types
+                    .new_str(&format!("While processing the {k} property of {n}:"));
                 if let Ok(g) = py::import(vm, "renpy.game") {
                     let _ = py::set(vm, &g, "exception_info", info);
                 }
@@ -662,7 +990,10 @@ pub fn get_unoffset(vm: &mut Vm, s: &Value, index: usize) -> PyResult<Value> {
         };
     }
     let r = ops::repr(vm, s)?;
-    Err(py::error(vm, format!("{r} is too complex. Check for loops in style inheritance.")))
+    Err(py::error(
+        vm,
+        format!("{r} is too complex. Check for loops in style inheritance."),
+    ))
 }
 
 /// Reads a named (unprefixed) property of a style.
@@ -686,7 +1017,11 @@ fn s_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     core(vm, this)?.borrow_mut().prefix_offset = 0;
     let mut list = Vec::new();
     if py::truthy(vm, &properties)? {
-        let p = if matches!(properties.payload(), Some(crysirror_python::Payload::Dict(_))) && Rc::ptr_eq(&ops::type_of(vm, &properties), &vm.types.dict) {
+        let p = if matches!(
+            properties.payload(),
+            Some(crysirror_python::Payload::Dict(_))
+        ) && Rc::ptr_eq(&ops::type_of(vm, &properties), &vm.types.dict)
+        {
             properties
         } else {
             let d = Value::Obj(vm.types.dict.clone());
@@ -740,7 +1075,12 @@ fn s_ne(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn s_hash(_: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    Ok(Value::Int(args[0].obj().map(|o| Rc::as_ptr(o) as usize as i64 >> 4).unwrap_or(0)))
+    Ok(Value::Int(
+        args[0]
+            .obj()
+            .map(|o| Rc::as_ptr(o) as usize as i64 >> 4)
+            .unwrap_or(0),
+    ))
 }
 
 fn s_getstate(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -790,7 +1130,11 @@ fn s_getitem(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         return Ok(rv);
     }
     let parent = field(this, "parent");
-    let parent = if py::is_none(&parent) { Value::None } else { concat(vm, &parent, &args[1])? };
+    let parent = if py::is_none(&parent) {
+        Value::None
+    } else {
+        concat(vm, &parent, &args[1])?
+    };
     let rv = new_style(vm, parent, tname.clone())?;
     styles_set(vm, tname, rv.clone())?;
     Ok(rv)
@@ -843,7 +1187,10 @@ fn s_setattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         set_field(vm, this, &n, value);
         return Ok(Value::None);
     }
-    if !tables().full.contains_key(n.as_str()) {
+    let old_only = n.ends_with("sound")
+        && tables().full.get(n.as_str()).is_some_and(|(_, base)| *base == "sound")
+        && profile_at_least(vm, 6, 17);
+    if !tables().full.contains_key(n.as_str()) || old_only {
         return Err(py::error(vm, format!("Style property {n} is not known.")));
     }
     append_property(vm, this, name, value)?;
@@ -936,12 +1283,16 @@ fn s_set_prefix(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn s_get_offset(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    Ok(Value::Int(core(vm, &args[0])?.borrow().prefix_offset as i64))
+    Ok(Value::Int(
+        core(vm, &args[0])?.borrow().prefix_offset as i64,
+    ))
 }
 
 fn s_get_placement(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let mut out = Vec::new();
-    for n in ["xpos", "ypos", "xanchor", "yanchor", "xoffset", "yoffset", "subpixel"] {
+    for n in [
+        "xpos", "ypos", "xanchor", "yanchor", "xoffset", "yoffset", "subpixel",
+    ] {
         out.push(get(vm, &args[0], index(n).unwrap())?);
     }
     Ok(vm.types.new_tuple(out))
@@ -989,9 +1340,16 @@ fn s_hover_alt(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 /// (`init_inspect`).
 fn inspect_info(name: &str) -> (i32, Vec<String>) {
     let t = tables();
-    let Some(&(pi, prop)) = t.full.get(name) else { return (100, Vec::new()) };
+    let Some(&(pi, prop)) = t.full.get(name) else {
+        return (100, Vec::new());
+    };
     let p = &t.prefixes[pi];
-    let pri = p.priority + if PROPERTY_PRIORITY.contains(&prop) { 1 } else { 0 };
+    let pri = p.priority
+        + if PROPERTY_PRIORITY.contains(&prop) {
+            1
+        } else {
+            0
+        };
     let mut affects = Vec::new();
     for (_, alt) in &p.alts {
         for (target, _) in targets(prop) {
@@ -1163,7 +1521,11 @@ fn f_get_tuple_name(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 /// `get_text_style(style, default)`.
 pub fn get_text_style(vm: &mut Vm, style: &Value, default: &Value) -> PyResult<Value> {
-    let style = if py::is_none(style) { default.clone() } else { style.clone() };
+    let style = if py::is_none(style) {
+        default.clone()
+    } else {
+        style.clone()
+    };
     let style = get_tuple_name(vm, &style)?;
     let parts = py::items(vm, &style)?;
     let start = py::string(vm, &parts[0])?;
@@ -1351,7 +1713,14 @@ fn stylesets(vm: &mut Vm, m: &ObjRef) -> PyResult<()> {
     for n in PROPERTY_PRIORITY {
         py::dict_set(vm, &pp, n, Value::Int(1))?;
     }
-    for (n, v) in [("all_properties", all), ("proxy_properties", proxy), ("prefix_priority", pri), ("prefix_alts", alts), ("prefix_search", search), ("property_priority", pp)] {
+    for (n, v) in [
+        ("all_properties", all),
+        ("proxy_properties", proxy),
+        ("prefix_priority", pri),
+        ("prefix_alts", alts),
+        ("prefix_search", search),
+        ("property_priority", pp),
+    ] {
         crysirror_python::modules::set(vm, m, n, v);
     }
     Ok(())
@@ -1379,12 +1748,24 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
             ("restore", f_restore),
         ],
     );
-    let holder = vm.types.new_builtin_type("StyleCache", &vm.types.object.clone(), crysirror_python::object::BaseKind::Native, true);
+    let holder = vm.types.new_builtin_type(
+        "StyleCache",
+        &vm.types.object.clone(),
+        crysirror_python::object::BaseKind::Native,
+        true,
+    );
     let n = vm.types.new_builtin("__new__", no_new);
     let n = py::staticmethod(vm, n);
     vm.types.set_attr(&holder, "__new__", n);
     let core = py::class(vm, MODULE, "StyleCore", &[], CORE_METHODS, &[])?;
-    let style = py::class(vm, "renpy.styledata.styleclass", "Style", &[Value::Obj(core.clone())], &[("__getattr__", s_getattr)], &[])?;
+    let style = py::class(
+        vm,
+        "renpy.styledata.styleclass",
+        "Style",
+        &[Value::Obj(core.clone())],
+        &[("__getattr__", s_getattr)],
+        &[],
+    )?;
     let manager = py::class(
         vm,
         MODULE,
@@ -1403,7 +1784,12 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
         &[],
     )?;
     let styles = py::dict(vm);
-    vm.ext_set(Rc::new(Classes { core: core.clone(), style: style.clone(), holder, styles: styles.clone() }));
+    vm.ext_set(Rc::new(Classes {
+        core: core.clone(),
+        style: style.clone(),
+        holder,
+        styles: styles.clone(),
+    }));
     let set = |vm: &Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     set(vm, "StyleCore", Value::Obj(core));
     set(vm, "Style", Value::Obj(style));
@@ -1439,7 +1825,11 @@ fn u_none_is_null(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn u_none_is_0(_: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    Ok(if py::is_none(&args[0]) { Value::Int(0) } else { args[0].clone() })
+    Ok(if py::is_none(&args[0]) {
+        Value::Int(0)
+    } else {
+        args[0].clone()
+    })
 }
 
 fn u_expand_focus_mask(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {

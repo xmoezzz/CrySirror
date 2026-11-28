@@ -14,7 +14,10 @@ use crysirror_core::{
     state::ClientId,
 };
 use crysirror_tasks::{Task, TaskPool};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Button {
@@ -134,10 +137,30 @@ struct Layer {
     surface: Surface,
     size: [u32; 2],
     published: Option<String>,
+    clear_rgb: [u8; 3],
     items: BTreeMap<u8, Button>,
 }
+impl Layer {
+    fn publish(
+        &mut self,
+        h: &mut dyn HostServices,
+        c: ClientId,
+        image: Arc<dyn crysirror_core::image_processing::ImageResource>,
+    ) -> Result<()> {
+        let upload = h.publish_image_resource(c, 256 + u32::from(self.surface.slot), image)?;
+        let path = upload.path.relative();
+        if let Err(e) = self.surface.put(h, c, self.size, path) {
+            h.release_image_resource(c, path)?;
+            return Err(e);
+        }
+        if let Some(old) = self.published.replace(path.to_owned()) {
+            h.release_image_resource(c, &old)?;
+        }
+        Ok(())
+    }
+}
 enum Pending {
-    Preparing(Task<(ImageJob, [u32; 2])>),
+    Preparing(Task<(ImageJob, [u32; 2], [u8; 3])>),
     Composing(ImageJob),
 }
 #[derive(Default)]
@@ -146,6 +169,7 @@ pub(super) struct Panels {
     character_layers: Vec<Option<u8>>,
     input_blocks: BTreeMap<u8, i32>,
     pending: Option<(Button, Pending)>,
+    erase: VecDeque<(u8, Vec<u8>, ImageJob)>,
 }
 impl Panels {
     fn hit(&self, group: u8, point: [i32; 2]) -> Option<(u8, u8)> {
@@ -221,12 +245,69 @@ impl Panels {
     pub fn is_bound(&self, slot: u8) -> bool {
         self.layers.contains_key(&slot)
     }
-    pub fn exit_group(&mut self, group: u8) {
-        // cmdExitSelectItem destroys the group's objects. Image binding copies
-        // into the parent bitmap, which lives until the later billboard removal.
-        for layer in self.layers.values_mut() {
-            layer.items.retain(|_, button| button.group != group);
+    pub fn erase_items(
+        &mut self,
+        h: &mut dyn HostServices,
+        c: ClientId,
+        group: i32,
+        layer: Option<i32>,
+        first: i32,
+        last: i32,
+    ) -> Result<()> {
+        // 0x792e0 bounds the inclusive item range before deleting matches
+        // from this group's list. Only opcode 0x5d selects every parent.
+        let first = first.max(0);
+        let last = if (0..=255).contains(&last) { last } else { 255 };
+        let mut jobs = VecDeque::new();
+        for (&slot, parent) in &self.layers {
+            if layer.is_some_and(|v| v != i32::from(slot)) {
+                continue;
+            }
+            let mut ids = Vec::new();
+            let mut fills = Vec::new();
+            for (&id, item) in &parent.items {
+                if i32::from(item.group) != group || !(first..=last).contains(&i32::from(id)) {
+                    continue;
+                }
+                // The admitted unmasked kind-1 destructor hides the button
+                // through 0xb1b40/0xb0f80. 0x98940 fills its colour plane
+                // with the parent's clear index, leaving alpha intact.
+                let [r, g, b] = parent.clear_rgb;
+                let [w, height] = item.extent;
+                ids.push(id);
+                fills.push(ImageCompositeLayer {
+                    input: Box::new(ImageInput::Solid {
+                        size: item.extent,
+                        color: [r, g, b, 255],
+                    }),
+                    source: [0, 0, w as i32, height as i32],
+                    destination: item.pos,
+                    clip: None,
+                    opacity: 255,
+                    math: ImageCompositeMath::CopyRgb,
+                });
+            }
+            if ids.is_empty() {
+                continue;
+            }
+            let name = parent
+                .published
+                .as_deref()
+                .context("ExHibit select parent not published")?;
+            let image = h
+                .published_image_resource(c, name)?
+                .context("missing ExHibit select parent pixels")?;
+            let input = ImageInput::Composite {
+                base: Box::new(ImageInput::Resource(image)),
+                layers: fills,
+            };
+            let job = h
+                .image_metadata(c)?
+                .begin_process(input, Arc::from(&b"[]"[..]))?;
+            jobs.push_back((slot, ids, job));
         }
+        self.erase = jobs;
+        Ok(())
     }
     pub fn remove(
         &mut self,
@@ -324,7 +405,7 @@ impl Panels {
     }
 
     pub fn pending(&self) -> bool {
-        self.pending.is_some()
+        self.pending.is_some() || !self.erase.is_empty()
     }
     pub fn define(
         &mut self,
@@ -332,23 +413,37 @@ impl Panels {
         c: ClientId,
         surface: Surface,
     ) -> Result<()> {
+        let size = h.image_size(c, &surface.asset)?;
+        self.define_sized(h, c, surface, size)
+    }
+
+    pub fn define_sized(
+        &mut self,
+        h: &mut dyn HostServices,
+        c: ClientId,
+        surface: Surface,
+        size: [u32; 2],
+    ) -> Result<()> {
         ensure!(
             self.layers
                 .get(&surface.slot)
                 .is_none_or(|p| p.items.is_empty()),
             "unsupported ExHibit rebind of attached controls"
         );
-        let size = h.image_size(c, &surface.asset)?;
         surface.put(h, c, size, &surface.asset)?;
-        self.layers.insert(
+        let previous = self.layers.insert(
             surface.slot,
             Layer {
                 surface,
                 size,
                 published: None,
+                clear_rgb: [0; 3],
                 items: BTreeMap::new(),
             },
         );
+        if let Some(path) = previous.and_then(|layer| layer.published) {
+            h.release_image_resource(c, &path)?;
+        }
         Ok(())
     }
     pub fn bind(
@@ -428,19 +523,41 @@ impl Panels {
             Ok((
                 meta.begin_process(base.with_composite_layer(cell), Arc::from(&b"[]"[..]))?,
                 [size[0] / 3, size[1]],
+                [parent_palette[2], parent_palette[1], parent_palette[0]],
             ))
         })?;
         self.pending = Some((button, Pending::Preparing(task)));
         Ok(())
     }
     pub fn poll(&mut self, h: &mut dyn HostServices, c: ClientId) -> Result<bool> {
+        if let Some((slot, ids, job)) = self.erase.front_mut() {
+            let image = match job.poll()? {
+                ImageProcessState::Pending => return Ok(false),
+                ImageProcessState::Failed(e) => bail!("ExHibit select erase: {e}"),
+                ImageProcessState::Ready(image) => image,
+            };
+            let parent = self
+                .layers
+                .get_mut(slot)
+                .context("lost ExHibit select parent")?;
+            parent.publish(h, c, image)?;
+            for id in ids.iter() {
+                parent.items.remove(id);
+            }
+            self.erase.pop_front();
+            return Ok(self.erase.is_empty());
+        }
         let Some((button, pending)) = &mut self.pending else {
             return Ok(true);
         };
         if let Pending::Preparing(task) = pending {
-            let Some((job, extent)) = task.try_take()? else {
+            let Some((job, extent, clear_rgb)) = task.try_take()? else {
                 return Ok(false);
             };
+            self.layers
+                .get_mut(&button.parent)
+                .context("lost ExHibit select parent")?
+                .clear_rgb = clear_rgb;
             button.extent = extent;
             *pending = Pending::Composing(job);
         }
@@ -456,15 +573,7 @@ impl Panels {
             .layers
             .get_mut(&button.parent)
             .context("lost ExHibit select item parent")?;
-        let upload = h.publish_image_resource(c, 256 + u32::from(button.parent), image)?;
-        let path = upload.path.relative();
-        if let Err(e) = parent.surface.put(h, c, parent.size, path) {
-            h.release_image_resource(c, path)?;
-            return Err(e);
-        }
-        if let Some(old) = parent.published.replace(path.to_owned()) {
-            h.release_image_resource(c, &old)?;
-        }
+        parent.publish(h, c, image)?;
         let (button, _) = self.pending.take().expect("completed button job");
         parent.items.insert(button.id, button);
         Ok(true)
@@ -676,12 +785,30 @@ pub(super) mod tests {
             assert_eq!(panels.values(42, Kind::Fade)?, [0, 0]);
             assert!(!panels.is_bound(44));
             assert!(panels.remove(&mut rt.host, c, 42).is_err());
-            panels.exit_group(7);
-            assert_eq!(panels.layers[&42].items.len(), 2);
-            let published = panels.layers[&42].published.clone().unwrap();
-            panels.exit_group(0);
+            panels.erase_items(&mut rt.host, c, 7, None, 0, 255)?;
+            assert!(!panels.pending());
+            panels.erase_items(&mut rt.host, c, 0, Some(42), 11, -1)?;
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !panels.poll(&mut rt.host, c)? {
+                ensure!(Instant::now() < deadline, "range erase did not complete");
+                std::thread::yield_now();
+            }
+            let layer = &panels.layers[&42];
+            assert_eq!(layer.items.keys().copied().collect::<Vec<_>>(), vec![10]);
+            let image = rt
+                .host
+                .published_image_resource(c, layer.published.as_deref().unwrap())?
+                .unwrap();
+            assert_eq!(
+                &*image.rgba(),
+                &[4, 2, 1, 9, 5, 2, 1, 15, 0, 2, 1, 80, 0, 2, 1, 255]
+            );
+            panels.erase_items(&mut rt.host, c, 0, None, 0, 255)?;
+            while !panels.poll(&mut rt.host, c)? {
+                ensure!(Instant::now() < deadline, "group erase did not complete");
+                std::thread::yield_now();
+            }
             assert!(panels.layers[&42].items.is_empty());
-            assert_eq!(panels.layers[&42].published.as_deref(), Some(published.as_str()));
             panels.remove(&mut rt.host, c, 42)?;
             panels.remove(&mut rt.host, c, 42)?;
             assert!(!panels.is_bound(42));

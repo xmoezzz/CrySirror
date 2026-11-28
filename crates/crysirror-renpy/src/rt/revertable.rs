@@ -103,7 +103,12 @@ fn wrap(vm: &mut Vm, base: &Value, name: &str, f: crysirror_python::object::Nati
 
 /// `mutator(f)` for script use: a decorator journalling `self`.
 fn f_mutator(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    Ok(py::closure(vm, "mutator", decorated_mutator, args[0].clone()))
+    Ok(py::closure(
+        vm,
+        "mutator",
+        decorated_mutator,
+        args[0].clone(),
+    ))
 }
 
 fn decorated_mutator(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -113,7 +118,12 @@ fn decorated_mutator(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 /// `checkpointing(f)`: forces a checkpoint before calling `f`.
 fn f_checkpointing(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    Ok(py::closure(vm, "checkpointing", decorated_checkpointing, args[0].clone()))
+    Ok(py::closure(
+        vm,
+        "checkpointing",
+        decorated_checkpointing,
+        args[0].clone(),
+    ))
 }
 
 fn decorated_checkpointing(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -128,7 +138,12 @@ fn force_checkpoint(vm: &mut Vm) -> PyResult<()> {
 }
 
 fn f_list_wrapper(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    Ok(py::closure(vm, "list_wrapper", decorated_list, args[0].clone()))
+    Ok(py::closure(
+        vm,
+        "list_wrapper",
+        decorated_list,
+        args[0].clone(),
+    ))
 }
 
 fn decorated_list(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -167,7 +182,9 @@ fn cl_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             break;
         }
     }
-    let Some(oc) = old_center else { return empty(vm, old) };
+    let Some(oc) = old_center else {
+        return empty(vm, old);
+    };
     let (mut ns, mut ne, mut os, mut oe) = (new_center, new_center + 1, oc, oc + 1);
     while ns > 0 && os > 0 && new[ns - 1].is(&old[os - 1]) {
         ns -= 1;
@@ -203,7 +220,13 @@ fn cl_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let v = py::get(vm, this, n)?;
         parts.push(ops::str(vm, &v)?);
     }
-    Ok(py::s(vm, &format!("<CompressedList {} [{}:{}] {}>", parts[0], parts[1], parts[2], parts[3])))
+    Ok(py::s(
+        vm,
+        &format!(
+            "<CompressedList {} [{}:{}] {}>",
+            parts[0], parts[1], parts[2], parts[3]
+        ),
+    ))
 }
 
 // RevertableList ---------------------------------------------------------------------------------------
@@ -223,7 +246,10 @@ fn rl_getitem(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let lt = list_t(vm);
     let f = py::get(vm, &lt, "__getitem__")?;
     let rv = vm.call(&f, args.to_vec(), Vec::new())?;
-    if matches!(args[1].payload(), Some(crysirror_python::Payload::Slice { .. })) {
+    if matches!(
+        args[1].payload(),
+        Some(crysirror_python::Payload::Slice { .. })
+    ) {
         let c = mget(vm, "RevertableList")?;
         return vm.call(&c, vec![rv], Vec::new());
     }
@@ -279,7 +305,11 @@ fn rl_rollback(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let clear = py::get(vm, &lt, "clear")?;
     vm.call(&clear, vec![this.clone()], Vec::new())?;
     let extend = py::get(vm, &lt, "extend")?;
-    vm.call(&extend, vec![this.clone(), vm.types.new_list(items)], Vec::new())?;
+    vm.call(
+        &extend,
+        vec![this.clone(), vm.types.new_list(items)],
+        Vec::new(),
+    )?;
     Ok(Value::None)
 }
 
@@ -364,7 +394,11 @@ fn rd_rollback(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let set = py::get(vm, &dt, "__setitem__")?;
     for kv in py::items(vm, &args[1])? {
         let p = py::items(vm, &kv)?;
-        vm.call(&set, vec![this.clone(), p[0].clone(), p[1].clone()], Vec::new())?;
+        vm.call(
+            &set,
+            vec![this.clone(), p[0].clone(), p[1].clone()],
+            Vec::new(),
+        )?;
     }
     Ok(Value::None)
 }
@@ -377,8 +411,14 @@ fn rdd_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let df = arg_or(args, kw, 1, "default_factory", Value::None);
     py::set(vm, this, "default_factory", df)?;
-    let rest: Vec<Value> = std::iter::once(this.clone()).chain(args.iter().skip(2).cloned()).collect();
-    let kw: Vec<(Rc<str>, Value)> = kw.iter().filter(|(k, _)| &**k != "default_factory").cloned().collect();
+    let rest: Vec<Value> = std::iter::once(this.clone())
+        .chain(args.iter().skip(2).cloned())
+        .collect();
+    let kw: Vec<(Rc<str>, Value)> = kw
+        .iter()
+        .filter(|(k, _)| &**k != "default_factory")
+        .cloned()
+        .collect();
     rd_init(vm, &rest, &kw)
 }
 
@@ -670,111 +710,218 @@ fn reconstructor(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("mutator", f_mutator),
-        ("checkpointing", f_checkpointing),
-        ("list_wrapper", f_list_wrapper),
-        ("revertable_range", f_revertable_range),
-        ("revertable_sorted", f_revertable_sorted),
-        ("_reconstructor", reconstructor),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("mutator", f_mutator),
+            ("checkpointing", f_checkpointing),
+            ("list_wrapper", f_list_wrapper),
+            ("revertable_range", f_revertable_range),
+            ("revertable_sorted", f_revertable_sorted),
+            ("_reconstructor", reconstructor),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
     set(vm, "mutate_flag", Value::Bool(true));
     set(vm, "FUTURE_FLAGS", Value::Int(0x2000 | 0x8000));
     let obj = Value::Obj(vm.types.object.clone());
-    let cl = py::class(vm, MODULE, "CompressedList", &[obj.clone()], &[("__init__", cl_init), ("decompress", cl_decompress), ("__repr__", cl_repr)], &[])?;
+    let cl = py::class(
+        vm,
+        MODULE,
+        "CompressedList",
+        &[obj.clone()],
+        &[
+            ("__init__", cl_init),
+            ("decompress", cl_decompress),
+            ("__repr__", cl_repr),
+        ],
+        &[],
+    )?;
     set(vm, "CompressedList", Value::Obj(cl));
 
     let lt = list_t(vm);
     let mut attrs: Vec<(String, Value)> = Vec::new();
-    for n in ["__delitem__", "__setitem__", "__iadd__", "__imul__", "append", "extend", "insert", "pop", "remove", "reverse", "sort"] {
+    for n in [
+        "__delitem__",
+        "__setitem__",
+        "__iadd__",
+        "__imul__",
+        "append",
+        "extend",
+        "insert",
+        "pop",
+        "remove",
+        "reverse",
+        "sort",
+    ] {
         attrs.push((n.into(), wrap(vm, &lt, n, mutator_call)));
     }
     for n in ["__add__", "__mul__", "__rmul__"] {
         attrs.push((n.into(), wrap(vm, &lt, n, list_result_call)));
     }
-    let attrs_ref: Vec<(&str, Value)> = attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-    let rl = py::class(vm, MODULE, "RevertableList", &[lt.clone()], &[
-        ("__init__", rl_init),
-        ("__getitem__", rl_getitem),
-        ("copy", rl_copy),
-        ("clear", rl_clear),
-        ("_clean", rl_clean),
-        ("_compress", rl_compress),
-        ("_rollback", rl_rollback),
-    ], &attrs_ref)?;
+    let attrs_ref: Vec<(&str, Value)> =
+        attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    let rl = py::class(
+        vm,
+        MODULE,
+        "RevertableList",
+        &[lt.clone()],
+        &[
+            ("__init__", rl_init),
+            ("__getitem__", rl_getitem),
+            ("copy", rl_copy),
+            ("clear", rl_clear),
+            ("_clean", rl_clean),
+            ("_compress", rl_compress),
+            ("_rollback", rl_rollback),
+        ],
+        &attrs_ref,
+    )?;
     set(vm, "RevertableList", Value::Obj(rl));
 
     let dt = dict_t(vm);
     let mut attrs: Vec<(String, Value)> = Vec::new();
-    for n in ["__delitem__", "__setitem__", "clear", "pop", "popitem", "setdefault", "update"] {
+    for n in [
+        "__delitem__",
+        "__setitem__",
+        "clear",
+        "pop",
+        "popitem",
+        "setdefault",
+        "update",
+    ] {
         attrs.push((n.into(), wrap(vm, &dt, n, mutator_call)));
     }
     for n in ["values", "keys", "items"] {
         let f = py::get(vm, &dt, n)?;
         attrs.push((format!("iter{n}"), f));
     }
-    let attrs_ref: Vec<(&str, Value)> = attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-    let rd = py::class(vm, MODULE, "RevertableDict", &[dt], &[
-        ("__init__", rd_init),
-        ("has_key", rd_has_key),
-        ("__or__", rd_or),
-        ("__ror__", rd_ror),
-        ("__ior__", rd_ior),
-        ("copy", rd_copy),
-        ("_clean", rd_clean),
-        ("_compress", identity),
-        ("_rollback", rd_rollback),
-    ], &attrs_ref)?;
+    let attrs_ref: Vec<(&str, Value)> =
+        attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    let rd = py::class(
+        vm,
+        MODULE,
+        "RevertableDict",
+        &[dt],
+        &[
+            ("__init__", rd_init),
+            ("has_key", rd_has_key),
+            ("__or__", rd_or),
+            ("__ror__", rd_ror),
+            ("__ior__", rd_ior),
+            ("copy", rd_copy),
+            ("_clean", rd_clean),
+            ("_compress", identity),
+            ("_rollback", rd_rollback),
+        ],
+        &attrs_ref,
+    )?;
     let rd = Value::Obj(rd);
     set(vm, "RevertableDict", rd.clone());
-    let rdd = py::class(vm, MODULE, "RevertableDefaultDict", &[rd], &[("__init__", rdd_init), ("__missing__", rdd_missing)], &[])?;
+    let rdd = py::class(
+        vm,
+        MODULE,
+        "RevertableDefaultDict",
+        &[rd],
+        &[("__init__", rdd_init), ("__missing__", rdd_missing)],
+        &[],
+    )?;
     set(vm, "RevertableDefaultDict", Value::Obj(rdd));
 
     let stt = set_t(vm);
     let mut attrs: Vec<(String, Value)> = Vec::new();
-    for n in ["__iand__", "__ior__", "__isub__", "__ixor__", "add", "clear", "difference_update", "discard", "intersection_update", "pop", "remove", "symmetric_difference_update", "update"] {
+    for n in [
+        "__iand__",
+        "__ior__",
+        "__isub__",
+        "__ixor__",
+        "add",
+        "clear",
+        "difference_update",
+        "discard",
+        "intersection_update",
+        "pop",
+        "remove",
+        "symmetric_difference_update",
+        "update",
+    ] {
         attrs.push((n.into(), wrap(vm, &stt, n, mutator_call)));
     }
-    attrs.push(("union_update".into(), wrap(vm, &stt, "update", mutator_call)));
-    for n in ["__and__", "__sub__", "__xor__", "__or__", "copy", "difference", "intersection", "symmetric_difference", "union"] {
+    attrs.push((
+        "union_update".into(),
+        wrap(vm, &stt, "update", mutator_call),
+    ));
+    for n in [
+        "__and__",
+        "__sub__",
+        "__xor__",
+        "__or__",
+        "copy",
+        "difference",
+        "intersection",
+        "symmetric_difference",
+        "union",
+    ] {
         attrs.push((n.into(), wrap(vm, &stt, n, set_result_call)));
     }
     let object_reduce = py::get(vm, &obj, "__reduce__")?;
     let object_reduce_ex = py::get(vm, &obj, "__reduce_ex__")?;
     attrs.push(("__reduce__".into(), object_reduce));
     attrs.push(("__reduce_ex__".into(), object_reduce_ex));
-    let attrs_ref: Vec<(&str, Value)> = attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-    let rs = py::class(vm, MODULE, "RevertableSet", &[stt], &[
-        ("__init__", rs_init),
-        ("__setstate__", rs_setstate),
-        ("__getstate__", rs_getstate),
-        ("_clean", rs_clean),
-        ("_compress", identity),
-        ("_rollback", rs_rollback),
-    ], &attrs_ref)?;
+    let attrs_ref: Vec<(&str, Value)> =
+        attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    let rs = py::class(
+        vm,
+        MODULE,
+        "RevertableSet",
+        &[stt],
+        &[
+            ("__init__", rs_init),
+            ("__setstate__", rs_setstate),
+            ("__getstate__", rs_getstate),
+            ("_clean", rs_clean),
+            ("_compress", identity),
+            ("_rollback", rs_rollback),
+        ],
+        &attrs_ref,
+    )?;
     set(vm, "RevertableSet", Value::Obj(rs));
 
     let rn = vm.types.new_builtin("__new__", ro_new);
     let rn = py::staticmethod(vm, rn);
     let ris = vm.types.new_builtin("__init_subclass__", ro_init_subclass);
     let ris = py::classmethod(vm, ris);
-    let ro = py::class(vm, MODULE, "RevertableObject", &[obj.clone()], &[
-        ("__init__", ro_init),
-        ("__setattr__", ro_setattr),
-        ("__delattr__", ro_delattr),
-        ("_clean", ro_clean),
-        ("_compress", identity),
-        ("_rollback", ro_rollback),
-    ], &[("__new__", rn), ("__init_subclass__", ris)])?;
+    let ro = py::class(
+        vm,
+        MODULE,
+        "RevertableObject",
+        &[obj.clone()],
+        &[
+            ("__init__", ro_init),
+            ("__setattr__", ro_setattr),
+            ("__delattr__", ro_delattr),
+            ("_clean", ro_clean),
+            ("_compress", identity),
+            ("_rollback", ro_rollback),
+        ],
+        &[("__new__", rn), ("__init_subclass__", ris)],
+    )?;
     set(vm, "RevertableObject", Value::Obj(ro));
 
-    let mr = py::class(vm, MODULE, "MultiRevertable", &[obj], &[
-        ("_rollback_types", mr_rollback_types),
-        ("_clean", mr_clean),
-        ("_compress", mr_compress),
-        ("_rollback", mr_rollback),
-    ], &[])?;
+    let mr = py::class(
+        vm,
+        MODULE,
+        "MultiRevertable",
+        &[obj],
+        &[
+            ("_rollback_types", mr_rollback_types),
+            ("_clean", mr_clean),
+            ("_compress", mr_compress),
+            ("_rollback", mr_rollback),
+        ],
+        &[],
+    )?;
     set(vm, "MultiRevertable", Value::Obj(mr));
 
     let rt = random_t(vm)?;
@@ -787,14 +934,22 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
             attrs.push((n.into(), wrap(vm, &rt, n, list_result_call)));
         }
     }
-    let attrs_ref: Vec<(&str, Value)> = attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-    let rr = py::class(vm, MODULE, "RollbackRandom", &[rt.clone()], &[
-        ("__init__", rr_init),
-        ("_clean", rr_clean),
-        ("_compress", identity),
-        ("_rollback", rr_rollback),
-        ("Random", rr_random_factory),
-    ], &attrs_ref)?;
+    let attrs_ref: Vec<(&str, Value)> =
+        attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    let rr = py::class(
+        vm,
+        MODULE,
+        "RollbackRandom",
+        &[rt.clone()],
+        &[
+            ("__init__", rr_init),
+            ("_clean", rr_clean),
+            ("_compress", identity),
+            ("_rollback", rr_rollback),
+            ("Random", rr_random_factory),
+        ],
+        &attrs_ref,
+    )?;
     set(vm, "RollbackRandom", Value::Obj(rr));
     let mut attrs: Vec<(String, Value)> = Vec::new();
     for n in ["choices", "sample"] {
@@ -802,17 +957,27 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
             attrs.push((n.into(), wrap(vm, &rt, n, list_result_call)));
         }
     }
-    let attrs_ref: Vec<(&str, Value)> = attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-    let dr = py::class(vm, MODULE, "DetRandom", &[rt], &[
-        ("__init__", dr_init),
-        ("random", dr_random),
-        ("pushback", dr_pushback),
-        ("reset", dr_reset),
-        ("Random", rr_random_factory),
-    ], &attrs_ref)?;
+    let attrs_ref: Vec<(&str, Value)> =
+        attrs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    let dr = py::class(
+        vm,
+        MODULE,
+        "DetRandom",
+        &[rt],
+        &[
+            ("__init__", dr_init),
+            ("random", dr_random),
+            ("pushback", dr_pushback),
+            ("reset", dr_reset),
+            ("Random", rr_random_factory),
+        ],
+        &attrs_ref,
+    )?;
     set(vm, "DetRandom", Value::Obj(dr));
     // `copyreg._reconstructor = _reconstructor`.
-    let recon = py::import_attr(vm, MODULE, "_reconstructor").or_else(|_| Ok::<Value, crysirror_python::PyErr>(vm.types.new_builtin("_reconstructor", reconstructor)))?;
+    let recon = py::import_attr(vm, MODULE, "_reconstructor").or_else(|_| {
+        Ok::<Value, crysirror_python::PyErr>(vm.types.new_builtin("_reconstructor", reconstructor))
+    })?;
     if let Ok(cr) = py::import(vm, "copyreg") {
         py::set(vm, &cr, "_reconstructor", recon)?;
     }

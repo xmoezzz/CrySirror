@@ -34,8 +34,18 @@ pub(super) struct Label {
     size: u16,
     align: f32,
     vertical: f32,
+    // ClampContent restricts the printed text to the authored region.
+    clamp_lines: Option<usize>,
+    spacing_y: f32,
     measured_width: Option<f32>,
-    ready: Option<Vec<([f32; 4], serde_json::Value)>>,
+    ready: Option<LabelLayers>,
+}
+
+#[derive(Clone)]
+struct LabelLayers {
+    rect: [f32; 4],
+    tint: [u8; 4],
+    lines: Vec<([f32; 4], serde_json::Value)>,
 }
 
 impl Label {
@@ -83,7 +93,7 @@ impl Label {
         rect: [f32; 4],
         tint: [u8; 4],
     ) -> Result<&[([f32; 4], serde_json::Value)]> {
-        if self.ready.is_none() {
+        if self.ready.as_ref().is_none_or(|cached| cached.rect != rect || cached.tint != tint) {
             let Some(font) = self.font.alias(host, client)? else { return Ok(&[]) };
             let measure = host.text_measurement(client)?;
             let size = f32::from(self.size);
@@ -93,20 +103,26 @@ impl Label {
                     .map(|m| m.advance)
                     .unwrap_or(0.)
             };
-            let lines = crate::ngui::wrap(&self.text, rect[2], advance);
-            let y = rect[1] + (rect[3] - size * lines.len() as f32) * self.vertical;
+            let mut lines = crate::ngui::wrap(&self.text, rect[2], advance);
+            let step = (size + self.spacing_y).max(1.);
+            if let Some(limit) = self.clamp_lines {
+                let by_height = ((rect[3] + self.spacing_y + 0.5) / step).floor() as usize;
+                lines.truncate(if limit == 0 { by_height } else { by_height.min(limit) });
+            }
+            let block = (step * lines.len() as f32 - self.spacing_y).max(0.);
+            let y = rect[1] + (rect[3] - block) * self.vertical;
             let mut out = Vec::new();
             for (i, text) in lines.iter().enumerate() {
                 if text.is_empty() {
                     continue;
                 }
                 let width = measure.measure_simple(&font, size, text)?.advance;
-                out.push(([rect[0]+(rect[2]-width)*self.align, y + i as f32 * size, width.max(1.)+size, size*1.5],
+                out.push(([rect[0]+(rect[2]-width)*self.align, y + i as f32 * step, width.max(1.)+size, size*1.5],
                     json!({"kind":"text","font":font,"size":self.size,"text":text,"color":tint,"layout":crysirror_core::service::SIMPLE_TEXT_LAYOUT})));
             }
-            self.ready = Some(out);
+            self.ready = Some(LabelLayers { rect, tint, lines: out });
         }
-        Ok(self.ready.as_deref().unwrap_or_default())
+        Ok(&self.ready.as_ref().unwrap().lines)
     }
 }
 
@@ -188,12 +204,17 @@ pub(super) struct Toggle {
 
 pub(super) struct Assets {
     pub slot_table: super::slots::TableLayout,
+    pub guest_slot_table: super::slots::TableLayout,
+    pub guest_slot_comment_limit: usize,
     pub shop_layout: super::shop::Layout,
     pub operations_layout: super::business::Layout,
     schedule_icons: HashMap<String,String>,
     schedule_portraits: HashMap<usize, (std::sync::Weak<dyn crysirror_core::image_processing::ImageResource>, String)>,
     pub daily_buttons: super::daily::Bindings,
     pub profile_limits: [usize; 3],
+    pub guest_comment_limit: usize,
+    pub free_skill_layout: super::leisure::FreeSkillLayout,
+    pub vip_layout: super::leisure::VipLayout,
     pub credits_pad_y: f32,
     pub costume_layout: super::stock_editor::costume::Layout,
     pub stock_grids: [super::stock_editor::Grid;3],
@@ -240,11 +261,16 @@ impl Assets {
             levels,
             daily_buttons: Default::default(),
             slot_table: Default::default(),
+            guest_slot_table: Default::default(),
+            guest_slot_comment_limit: 0,
             shop_layout: Default::default(),
             operations_layout: Default::default(),
             schedule_icons: Default::default(),
             schedule_portraits: Default::default(),
             profile_limits: [0; 3],
+            guest_comment_limit: 0,
+            free_skill_layout: Default::default(),
+            vip_layout: Default::default(),
             stock_grids: Default::default(),
             costume_layout: Default::default(),
             credits_pad_y: 0.,
@@ -366,7 +392,7 @@ impl Assets {
         bail!("missing costume empty icon")
     }
 
-    fn sprite(&mut self, op: &mut Opener, key: ObjectKey) -> Result<(ObjectKey, [f32; 4])> {
+    pub(super) fn sprite(&mut self, op: &mut Opener, key: ObjectKey) -> Result<(ObjectKey, [f32; 4])> {
         let (class, data) = self.unity.bytes(op, &key)?;
         ensure!(class == 213, "expected a Unity Sprite");
         let mut r = Reader::new(&data);
@@ -447,9 +473,19 @@ impl Assets {
             name if name.starts_with("TrophyInfo/") => Some("SceneTrophy/Prefab/TrophyInfo"),
             "DeskItemPlate" => Some("ScenePhotoMode/WindowListItemBig"),
             "DanceSongPlate" => Some("SceneDanceSelect/Prefab/SongPlate"),
+            "RecollectionRow" => Some("SceneFreeModeSelect/FreeModeItemButton"),
+            "VipTaskRow" => Some("SceneDaily/Schedule/Prefab/NightTaskUnit"),
+            "VipCondition" => Some("SceneDaily/Schedule/Prefab/ConditionUnit"),
+            "StageSelectionRow" => Some("SceneYotogi/StageSelect/Prefab/StageUnit"),
+            "StageSelectionOldRow" => Some("SceneYotogi/StageSelect/Prefab/Old/StageUnit"),
+            "FreeSkillOldPanel" => Some("SceneFreeModeSelect/Prefab/FreeSkillSelect"),
+            "FreeSkillCategory" => Some("SceneYotogi/SkillSelect/Prefab/CategoryBtn"),
+            "FreeSkillRow" => Some("SceneYotogi/FreeMode/FreeSkillButton"),
             "ScenarioPlate" => Some("SceneScenarioSelect/Prefab/ScenarioPlate"),
             "ScenarioCondition" => Some("SceneScenarioSelect/Prefab/PlayableText"),
             "ShopItem" => Some("SceneShop/Prefab/ShopItem"),
+            "CasinoShopItem" => Some("SceneCasinoShop/Prefab/CasinoShopItem"),
+            "CasinoShopCategory" => Some("SceneCasinoShop/Prefab/CategoryUI"),
             "TrainingCategory" => Some("SceneShop/Prefab/CategoryButton"),
             "WorkUnit" => Some("SceneDaily/Schedule/Prefab/WorkTaskUnit"),
             "TrainingUnit" => Some("SceneDaily/Schedule/Prefab/DaytimeTaskUnit"),
@@ -465,7 +501,7 @@ impl Assets {
         } else { None };
         let file = match &prefab {
             Some(key)=>key.file.to_string(),
-            None=>self.scene_file(if matches!(scene, "SystemDialog" | "YesNoDialog" | "StandaloneConfig") || scene.starts_with("Trophy/") { "_cm3d21" } else if scene=="StandaloneLoadPanel" { "SceneTitle" } else if matches!(scene,"DailySlotPanel"|"SchedulePanel"|"ResultWorkPanel"|"ResultIncomePanel") { "SceneDaily" } else { scene })?,
+            None=>self.scene_file(if matches!(scene, "SystemDialog" | "YesNoDialog" | "StandaloneConfig" | "StandaloneShortcuts") || scene.starts_with("Trophy/") { "_cm3d21" } else if scene=="StandaloneLoadPanel" { "SceneTitle" } else if scene=="GuestSlotPanel" { "SceneKasizukiMainMenu" } else if scene=="SlotHelpShortcut" { "SceneCasinoSlot" } else if matches!(scene,"DailySlotPanel"|"SchedulePanel"|"ResultWorkPanel"|"ResultIncomePanel") { "SceneDaily" } else { scene })?,
         };
         let sf = self.unity.file(op, &file)?;
         let mut pending:Vec<_>=match &prefab {
@@ -504,7 +540,12 @@ impl Assets {
         if scene == "SceneDaily" { self.daily_buttons.clear(); }
         if scene == "SceneNetorareCheck" { self.check_ok = None; }
         if scene == "SceneUserEdit" { self.editor_layout = Default::default(); }
+        if matches!(scene, "SceneYotogi" | "SceneYotogiOld") {
+            self.free_skill_layout = Default::default();
+        }
         let mut widgets = Vec::new();
+        let mut guest_page_step = 0.;
+        let mut guest_page_sprites = Vec::new();
         for (name, parent, pos, comps) in nodes.values() {
             let mut path = name.clone();
             let mut offset = *pos;
@@ -531,11 +572,22 @@ impl Assets {
                 "SceneDanceSelect" => path=="UI Root/Manager/Main" || path.starts_with("UI Root/Parent/ButtonParent/") || (path.starts_with("UI Root/Parent/MusicSelect/") && !path.contains("/DanceShowMusicInfo")) || (path.starts_with("UI Root/Parent/DanceModeSelect/") && !path.contains("/TouchMode")) || (path.starts_with("UI Root/Parent/CharaSelect/CharacterSelectPanel/") && !path.contains("/BigThumbnail")),
                 "SceneMaidManagement" => path=="UI Root/Manager/Main" || (path.starts_with("UI Root/Parent/ButtonParent/") && !path.ends_with("/View")) || (path.starts_with("UI Root/Parent/CharacterSelectPanel/") && !path.contains("/BigThumbnail")),
                 "DanceSongPlate" => true,
+                "SceneFreeModeSelect" => ["MenuSelect", "MenuStory", "MenuEveryday", "MenuVip"].iter()
+                    .any(|name| path.starts_with(&format!("UI Root/{name}/")))
+                    && !path.contains("/FluctuationOfParameterParent/")
+                    && (!path.contains("/TaskViewer/") || super::leisure::VipLayout::wanted(&path)),
+                "SceneKasizukiMainMenu" => ["Window Main Menu", "Window Select Man", "Window Select Club", "MaidMiniManagement", "Window Play Info"].iter()
+                    .any(|name| path.starts_with(&format!("UI Root/{name}/"))),
+                "SceneYotogi" | "SceneYotogiOld" => (path.starts_with("UI Root/StageSelectPanel/")
+                    || path.starts_with("UI Root/FreeSkillSelectPanel/")
+                    || (path.starts_with("UI Root/SubCharacterSelectPanel/") && !path.contains("/BigThumbnail")))
+                    && !path.ends_with("/Ok/SelectCursor"),
                 "SceneScenarioSelect" => (path.starts_with("UI Root/Parent/") && !path.contains("/BigThumbnail")) || path=="UI Root/Manager/Main",
                 "SceneTrophy" => path.starts_with("UI Root/Parent/"),
-                "SceneShop" => path.starts_with("UI Root/Parent/"),
+                "SceneShop" | "SceneCasinoShop" => path.starts_with("UI Root/Parent/"),
                 "SceneADV" => path == "__SceneADV__" || path.starts_with("UI Root/Root/TitleBar/"),
                 "StandaloneDataUnit" | "StandaloneEmptyUnit" => true,
+                "GuestSlotPanel" => path.starts_with("UI Root/SaveAndLoadPanel/"),
                 "DailySlotPanel" => path.starts_with("UI Root/SaveAndLoadPanel/") && !path.contains("/DataUnitParent/"),
                 "StandaloneLoadPanel" => path.starts_with("UI Root/SaveAndLoadPanel/") && !path.contains("/TitleSave") && !path.contains("/DisplayButtonGroup") && !path.contains("/DataUnitParent/"),
                 "SceneCharacterSelect" | "PickerPlate" | "StaffPlate" | "TrainingCategory" | "WorkUnit" | "TrainingUnit" | "ResultMaidUnit" | "SchedulePanel" | "ResultWorkPanel" | "ResultIncomePanel" => super::business::wanted(scene,&path),
@@ -544,6 +596,10 @@ impl Assets {
                     && !path.contains("/MainBusiness/ChangeBtn"),
                 "SceneStartDaily" => path.starts_with("UI Root/StartDailyPanel/"),
                 "_cm3d21" if path.ends_with("/SelectorViewer/Contents") || path.ends_with("/SelectorViewer/Contents/SelectButtonParent") => true,
+                "StandaloneShortcuts" => matches!(path.as_str(),
+                    "SystemUI Root/SystemShortcut/Gear" | "SystemUI Root/SystemShortcut/Base/Grid/Config"),
+                "SlotHelpShortcut" => path == "SystemUI Root/SystemShortcut/Base/Grid/Help",
+                "_cm3d21" if path.ends_with("/MsgParent/Buttons/Auto") || path.ends_with("/MsgParent/Buttons/Config") => true,
                 "_cm3d21" => path
                     .strip_prefix("SystemUI Root/MessageWindowPanel/MessageViewer/MsgParent/")
                     .is_some_and(|child| {
@@ -620,6 +676,17 @@ impl Assets {
                 if matches!(scene,"StandaloneLoadPanel"|"DailySlotPanel") && path.ends_with("/DataViewer/DataUnitParent") && class=="UITable" {
                     self.slot_table.read(offset,&body)?;
                 }
+                if scene == "GuestSlotPanel" {
+                    if class == "UITable" && path.ends_with("/DataViewer/DataUnitParent") {
+                        self.guest_slot_table.read(offset, &body)?;
+                    } else if class == "UIGrid" && path.ends_with("/PageButtonParent") {
+                        r.seek(48)?;
+                        guest_page_step = r.f32()?;
+                    } else if class=="UIInput" && path.ends_with("/DataUnit/Content/Comment/InputField") {
+                        r.seek(64)?;
+                        self.guest_slot_comment_limit = usize::try_from(r.i32()?)?;
+                    }
+                }
                 if scene == "SceneDaily" && class == "DailyCtrl" {
                     self.daily_buttons = super::daily::bindings(&body)?;
                 }
@@ -655,6 +722,14 @@ impl Assets {
                     ensure!((1..=4096).contains(&limit), "invalid stock profile character limit");
                     self.profile_limits[field.index()] = limit as usize;
                 }
+                if scene == "SceneKasizukiMainMenu" && class == "UIInput"
+                    && path.ends_with("/MaidMiniStatusPanel/FreeCommentWindow/FreeComment")
+                {
+                    r.seek(64)?;
+                    let limit = r.i32()?;
+                    ensure!((1..=4096).contains(&limit), "invalid guest comment character limit");
+                    self.guest_comment_limit = limit as usize;
+                }
                 if scene == "SceneUserEdit" {
                     self.editor_layout.read(&class, &path, offset, &mut r)?;
                 }
@@ -666,9 +741,13 @@ impl Assets {
                 }
                 if scene=="SceneDeskCustomize" && path.contains("/ListParent/") {self.desk_grid.read(&class,&path,offset,&body)?;}
                 if scene=="SceneDanceSelect" {self.dance_layout.read(&class,&path,offset,&body)?;}
+                if scene=="SceneFreeModeSelect" {self.vip_layout.read(&class,&path,offset,&body)?;}
                 if scene=="SceneMaidManagement" {self.personnel_layout.read(&class,&path,offset,&body)?;}
                 if scene=="SceneScenarioSelect" {self.scenario_layout.read(&class,&path,offset,&body)?;}
                 if scene=="SceneTrophy" { self.trophy_layout.read(&class,&path,offset,&body)?; }
+                if path.contains("FreeSkillSelect/") && matches!(scene, "SceneYotogi" | "FreeSkillOldPanel") {
+                    self.free_skill_layout.read(&class, &path, offset, &mut r, scene == "FreeSkillOldPanel")?;
+                }
                 if class=="TrophyAchieveEffect" {
                     r.seek(32)?;
                     self.trophy_timing=Some(((r.f32()?*1000.).round() as u64,r.i32()? as f32,r.i32()?.try_into()?));
@@ -712,8 +791,12 @@ impl Assets {
                 if class == "UIButton" {
                     button = Some(k);
                 }
-                let hit_only=class=="UIWidget" && ((matches!(scene,"StaffPlate"|"PickerPlate") && name=="Button") || (scene=="StandaloneConfig" && path.ends_with("/Slider/Foreground")));
-                let dynamic_texture = (scene=="SceneDanceSelect" && class=="UI2DSprite" && path.ends_with("/MujicInfo/BG/Image")) || (scene=="ScenarioPlate" && class=="UI2DSprite" && name=="Icon") || (class=="UI2DSprite" && ((scene.starts_with("TrophyInfo/") && name=="Tex") || (scene=="SceneTrophy" && name=="CartSprite"))) || (scene=="SceneStaffRoll" && class=="UITexture") || (scene=="SceneEdit" && class=="UITexture" && super::stock_editor::costume::wanted(&path)) || (scene=="SceneShop" && path.ends_with("/Window-ItemInfo/Base/Icon") && class=="UI2DSprite") || (scene=="ShopItem" && name=="ItemIcon" && class=="UI2DSprite") || (class=="UITexture" && matches!(scene,"SchedulePanel"|"ResultMaidUnit"|"ResultStamp"|"WorkUnit"|"TrainingUnit")) || hit_only || (matches!(scene,"StaffPlate"|"PickerPlate") && name=="Thum" && class=="UI2DSprite");
+                let hit_only=class=="UIWidget" && ((matches!(scene,"StaffPlate"|"PickerPlate") && name=="Button")
+                    || (scene=="StandaloneConfig" && path.ends_with("/Slider/Foreground"))
+                    || (scene=="SceneKasizukiMainMenu"
+                        && (path.ends_with("/LockPlayCount/仕事回数") || path.ends_with("/LockLikability/好感度"))));
+                let dynamic_texture = (class == "UI2DSprite" && ((scene == "CasinoShopItem" && name == "ItemIcon") || (scene == "SceneCasinoShop" && path.ends_with("/Window-ItemInfo/Base/Icon")))) || (scene=="SceneDanceSelect" && class=="UI2DSprite" && path.ends_with("/MujicInfo/BG/Image")) || (matches!(scene, "StageSelectionRow" | "StageSelectionOldRow" | "ScenarioPlate") && class=="UI2DSprite" && name=="Icon") || (class=="UI2DSprite" && ((scene.starts_with("TrophyInfo/") && name=="Tex") || (scene=="SceneTrophy" && name=="CartSprite"))) || (scene=="SceneStaffRoll" && class=="UITexture") || (scene=="SceneEdit" && class=="UITexture" && super::stock_editor::costume::wanted(&path)) || (scene=="SceneShop" && path.ends_with("/Window-ItemInfo/Base/Icon") && class=="UI2DSprite") || (scene=="ShopItem" && name=="ItemIcon" && class=="UI2DSprite") || (class=="UITexture" && matches!(scene,"SchedulePanel"|"ResultMaidUnit"|"ResultStamp"|"WorkUnit"|"TrainingUnit")) || hit_only || (matches!(scene,"StaffPlate"|"PickerPlate") && name=="Thum" && class=="UI2DSprite");
+                let dynamic_texture = dynamic_texture || (scene == "VipTaskRow" && class == "UITexture" && name == "Main");
                 if !dynamic_texture && !matches!(class.as_str(), "UISprite" | "UI2DSprite" | "UILabel") {
                     continue;
                 }
@@ -743,6 +826,7 @@ impl Assets {
                     let font_key = self.reference(op, &file, &mut r)?;
                     r.pptr64()?;
                     let text = crate::ngui::strip_markup(&r.string()?).replace("\r", "");
+                    let font_fields = r.position();
                     let size = r.i32()?.clamp(1, 512) as u16;
                     r.i32()?;
                     let align = match r.i32()? {
@@ -751,12 +835,27 @@ impl Assets {
                         3 => 1.,
                         _ => 0.,
                     };
+                    r.seek(font_fields + 16)?;
+                    let max_lines = r.i32()?.max(0) as usize;
+                    r.seek(font_fields + 52)?;
+                    let clamp_lines = (r.i32()? == 1).then_some(max_lines);
+                    r.seek(font_fields + 108)?;
+                    let integer_spacing = r.i32()? as f32;
+                    let spacing_y = if r.bool()? {
+                        r.seek(font_fields + 120)?;
+                        r.f32()?
+                    } else {
+                        integer_spacing
+                    };
+                    ensure!(spacing_y.is_finite(), "invalid UILabel line spacing");
                     let label = Label {
                         font: self.font(op, host, client, font_key)?,
                         text,
                         size,
                         align,
                         vertical: (pivot / 3) as f32 * 0.5,
+                        clamp_lines,
+                        spacing_y,
                         measured_width: None,
                         ready: None,
                     };
@@ -812,11 +911,23 @@ impl Assets {
                         ("YesNoDialog", "Ok") => "cm3d2_dialog_buttom_yes",
                         ("YesNoDialog", "Cancel") => "cm3d2_dialog_buttom_no",
                         ("SystemDialog", "Ok") => "cm3d2_dialog_buttom_ok",
+                        ("SceneYotogi" | "SceneYotogiOld", "Next")
+                            if path.starts_with("UI Root/FreeSkillSelectPanel/") => "cm3d2_common_okbuttom",
                         ("SystemDialog", "Cancel") => "cm3d2_dialog_buttom_cancel",
                         _ => serialized.as_str(),
                     };
                     if sprite_name.is_empty() {
                         continue;
+                    }
+                    if scene == "GuestSlotPanel" && name == "Page_1" {
+                        for page in 2..=5 {
+                            let (texture, [x, y, w, h], _) = self.atlas(
+                                op, key.clone(), &format!("cm3d2_save_load_page{page:02}")
+                            )?;
+                            let (asset, tw, th) = self.texture(op, host, client, texture)?;
+                            guest_page_sprites.push((asset, [x / tw as f32, y / th as f32,
+                                (x + w) / tw as f32, (y + h) / th as f32]));
+                        }
                     }
                     self.atlas(op, key, &sprite_name)?
                 } else {
@@ -861,6 +972,28 @@ impl Assets {
                 widget.button = button;
             }
         }
+        if scene == "GuestSlotPanel" {
+            ensure!(guest_page_step.is_finite() && guest_page_step > 0.
+                && guest_page_sprites.len() == 4, "invalid guest slot page list");
+            let prefab: Vec<_> = widgets.iter().filter(|w| {
+                w.path.ends_with("/Page_1") || w.path.contains("/Page_1/")
+            }).cloned().collect();
+            for (i, (asset, uv)) in guest_page_sprites.into_iter().enumerate() {
+                for mut widget in prefab.iter().cloned() {
+                    if widget.path.ends_with("/Page_1") {
+                        widget.asset.clone_from(&asset);
+                        widget.uv = uv;
+                    }
+                    widget.path = widget.path.replace("/Page_1", &format!("/Page_{}", i + 2));
+                    let dx = (i + 1) as f32 * guest_page_step;
+                    widget.rect[0] += dx;
+                    if let Some(hit) = &mut widget.collider {
+                        hit[0] += dx;
+                    }
+                    widgets.push(widget);
+                }
+            }
+        }
         ensure!(!widgets.is_empty(), "no confirmed widgets in {scene}");
         widgets.sort_by(|a, b| (a.depth, &a.path).cmp(&(b.depth, &b.path)));
         Ok(widgets)
@@ -882,12 +1015,17 @@ impl Assets {
     }
 
     pub fn schedule_icon(&mut self, op:&Opener, host:&mut dyn HostServices, client:ClientId, files:&GameFiles, name:&str) -> Result<String> {
+        self.archive_icon(op, host, client, files, name, false)
+    }
+
+    pub(super) fn archive_icon(&mut self, op:&Opener, host:&mut dyn HostServices, client:ClientId, files:&GameFiles, name:&str, legacy:bool) -> Result<String> {
         let file=format!("{}.tex", name.to_lowercase());
-        if let Some(asset)=self.schedule_icons.get(&file) { return Ok(asset.clone()); }
+        let key=if legacy { format!("linked/{file}") } else { file.clone() };
+        if let Some(asset)=self.schedule_icons.get(&key) { return Ok(asset.clone()); }
         let image=crysirror_image::kiss_tex::decode_texture(&files.read(op.storage.as_ref(),&file)?)?;
         let id=0x46000000u32.checked_add(self.schedule_icons.len().try_into()?).context("too many schedule icons")?;
         let asset=host.upload_rgba(client,id,image.width,image.height,&image.rgba)?.relative().to_owned();
-        self.schedule_icons.insert(file,asset.clone());
+        self.schedule_icons.insert(key,asset.clone());
         Ok(asset)
     }
 

@@ -5,6 +5,9 @@ import collections
 import _crysirror_renpy
 
 exec("from renpy._profiles.%s import *" % _crysirror_renpy.config_profile())
+# Variables the release lacks, valued as upstream runs a game of this
+# release on its newest version (tools/gen_absent_config.py).
+exec("from renpy._profiles.%s import *" % _crysirror_renpy.config_profile().replace("config_", "absent_"))
 
 language_callbacks = collections.defaultdict(list)
 basedir = "/"
@@ -40,6 +43,19 @@ def init():
         gl_blend_func["multiply"] = (FUNC_ADD, DST_COLOR, ONE_MINUS_SRC_ALPHA, FUNC_ADD, ZERO, ONE)
         gl_blend_func["min"] = (MIN, ONE, ONE, MIN, ONE, ONE)
         gl_blend_func["max"] = (MAX, ONE, ONE, MAX, ONE, ONE)
+    if _crysirror_renpy.version() >= (8, 4):
+        # 8.4+ `error_suggestion_handlers`. The LabelNotFound /
+        # ScreenNotFound / ImageNotFound handlers are bound when the
+        # runtime defines those classes.
+        import renpy.error
+        handlers = g.setdefault("error_suggestion_handlers", {})
+        handlers[AttributeError] = renpy.error.handle_attribute_error
+        handlers[NameError] = renpy.error.handle_name_error
+        handlers[ImportError] = renpy.error.handle_import_error
+        for module, name in (("renpy.script", "LabelNotFound"), ("renpy.display.screen", "ScreenNotFound"), ("renpy.display.image", "ImageNotFound")):
+            cls = getattr(__import__(module, fromlist=[name]), name, None)
+            if cls is not None and hasattr(cls, "get_suggestion"):
+                handlers[cls] = cls.get_suggestion
 
 
 def post_init():

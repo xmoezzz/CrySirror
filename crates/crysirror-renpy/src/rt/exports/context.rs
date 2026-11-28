@@ -62,7 +62,13 @@ fn dynamic(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn context_dynamic(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let c = ctx(vm)?;
     let l = vm.types.new_tuple(args.to_vec());
-    py::method_kw(vm, &c, "make_dynamic", vec![l], vec![("context".into(), Value::Bool(true))])?;
+    py::method_kw(
+        vm,
+        &c,
+        "make_dynamic",
+        vec![l],
+        vec![("context".into(), Value::Bool(true))],
+    )?;
     Ok(Value::None)
 }
 
@@ -191,7 +197,10 @@ pub(crate) fn is_init_phase(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> 
 fn add_to_all_stores(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let ip = is_init_phase(vm, &[], &[])?;
     if !py::truthy(vm, &ip)? {
-        return Err(py::error(vm, "add_to_all_stores is only allowed in init code."));
+        return Err(py::error(
+            vm,
+            "add_to_all_stores is only allowed in init code.",
+        ));
     }
     let sds = py::import_attr(vm, "renpy.python", "store_dicts")?;
     for (_, ns) in ops::mapping_items(vm, &sds)? {
@@ -252,7 +261,11 @@ pub fn functions() -> Vec<(&'static str, NativeFn)> {
 /// `call_in_new_context` and the other names that alias `renpy.game`.
 pub fn values(vm: &mut Vm, set: &mut dyn FnMut(&mut Vm, &str, Value)) -> PyResult<()> {
     let curry = py::import_attr(vm, "renpy.curry", "curry")?;
-    for n in ["call_in_new_context", "invoke_in_new_context", "call_replay"] {
+    for n in [
+        "call_in_new_context",
+        "invoke_in_new_context",
+        "call_replay",
+    ] {
         let f = py::import_attr(vm, "renpy.game", n)?;
         set(vm, n, f.clone());
         if n != "call_replay" {

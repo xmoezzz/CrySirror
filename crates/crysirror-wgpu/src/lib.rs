@@ -151,6 +151,7 @@ impl Gpu {
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("CrySirror"),
                 required_features: profile::features(&adapter)
+                    | (adapter.features() & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)
                     | if rt {
                         wgpu::Features::EXPERIMENTAL_RAY_QUERY
                     } else {
@@ -879,8 +880,25 @@ impl Renderer {
         let _span = self
             .profiler
             .span(self.profile_frame, "renderer.scene_pipelines");
-        if scene.is_some() && self.pbr.is_none() {
-            self.pbr = Some(pbr::PbrRenderer::new(self.gpu.clone(), self.format)?);
+        if let Some(scene) = &scene {
+            let mut quality = scene.environment.raster_quality.unwrap_or_default();
+            let features = |format: wgpu::TextureFormat| {
+                if self.gpu.device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
+                    self.gpu.adapter.get_texture_format_features(format)
+                } else {
+                    format.guaranteed_format_features(self.gpu.device.features())
+                }
+            };
+            let color = features(pbr::HDR).flags;
+            let depth = features(pbr::DEPTH).flags;
+            quality.samples = [8, 4, 2, 1].into_iter().find(|&samples| {
+                samples <= quality.samples && color.sample_count_supported(samples)
+                    && depth.sample_count_supported(samples)
+                    && (samples == 1 || color.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE))
+            }).unwrap_or(1);
+            if self.pbr.as_ref().is_none_or(|p| p.quality != quality) {
+                self.pbr = Some(pbr::PbrRenderer::new(self.gpu.clone(), self.format, quality)?);
+            }
         }
         if let Some(p) = &mut self.pbr {
             p.set_profiler(self.profiler.clone(), self.profile_frame);
@@ -2279,24 +2297,33 @@ impl Renderer {
         canvas: [u32; 2],
         background: [u8; 4],
     ) -> Result<image::RgbaImage> {
+        self.capture_scaled(scene, assets, canvas, background, 1)
+    }
+
+    pub fn capture_scaled(
+        &mut self,
+        scene: &SceneState,
+        assets: &mut Assets,
+        canvas: [u32; 2],
+        background: [u8; 4],
+        scale: u32,
+    ) -> Result<image::RgbaImage> {
         ensure!(
-            matches!(
-                self.format,
-                wgpu::TextureFormat::Rgba8UnormSrgb | wgpu::TextureFormat::Bgra8UnormSrgb
-            ),
+            matches!(self.format, wgpu::TextureFormat::Rgba8UnormSrgb | wgpu::TextureFormat::Bgra8UnormSrgb),
             "capture renderer must use RGBA8 or BGRA8 sRGB"
         );
-        // Developer diagnostic: CRYSIRROR_CAPTURE_TARGET=WxH renders into a
-        // target of another size (as a HiDPI window surface does).
+        ensure!(matches!(scale, 1 | 2 | 4), "capture scale");
+        let scaled = (canvas[0].saturating_mul(scale), canvas[1].saturating_mul(scale));
         let (width, height) = std::env::var("CRYSIRROR_CAPTURE_TARGET")
             .ok()
-            .and_then(|v| {
-                let (w, h) = v.split_once('x')?;
+            .and_then(|value| {
+                let (w, h) = value.split_once('x')?;
                 Some((w.parse().ok()?, h.parse().ok()?))
             })
-            .unwrap_or((canvas[0], canvas[1]));
+            .unwrap_or(scaled);
+        let limit = self.gpu.device.limits().max_texture_dimension_2d.min(8192);
         ensure!(
-            width > 0 && height > 0 && width <= 8192 && height <= 8192,
+            width > 0 && height > 0 && width <= limit && height <= limit,
             "capture size"
         );
         let texture = self.gpu.device.create_texture(&wgpu::TextureDescriptor {

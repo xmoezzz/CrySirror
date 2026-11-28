@@ -23,7 +23,12 @@ fn revertable_dict(vm: &mut Vm) -> PyResult<Value> {
 }
 
 /// `ArgumentInfo.evaluate(scope)` -> (tuple, RevertableDict).
-pub fn evaluate(vm: &mut Vm, info: &ArgumentInfo, loc: &Loc, scope: &Value) -> PyResult<(Value, Value)> {
+pub fn evaluate(
+    vm: &mut Vm,
+    info: &ArgumentInfo,
+    loc: &Loc,
+    scope: &Value,
+) -> PyResult<(Value, Value)> {
     let mut args = Vec::new();
     let kwargs = revertable_dict(vm)?;
     for (i, (k, v)) in info.arguments.iter().enumerate() {
@@ -47,12 +52,23 @@ const KW_ONLY: u8 = 3;
 const VAR_KW: u8 = 4;
 
 /// `Signature.apply(args, kwargs, ignore_errors)`: the callee scope dict.
-pub fn apply(vm: &mut Vm, sig: &Signature, loc: &Loc, args: &[Value], kwargs: &[(Rc<str>, Value)], mut ignore_errors: bool) -> PyResult<Value> {
+pub fn apply(
+    vm: &mut Vm,
+    sig: &Signature,
+    loc: &Loc,
+    args: &[Value],
+    kwargs: &[(Rc<str>, Value)],
+    mut ignore_errors: bool,
+) -> PyResult<Value> {
     if !py::config_bool(vm, "developer").unwrap_or(false) {
         ignore_errors = true;
     }
     let mut kwargs: Vec<(Rc<str>, Value)> = kwargs.to_vec();
-    let take = |kw: &mut Vec<(Rc<str>, Value)>, n: &str| kw.iter().position(|(k, _)| &**k == n).map(|i| kw.remove(i).1);
+    let take = |kw: &mut Vec<(Rc<str>, Value)>, n: &str| {
+        kw.iter()
+            .position(|(k, _)| &**k == n)
+            .map(|i| kw.remove(i).1)
+    };
     let has = |kw: &Vec<(Rc<str>, Value)>, n: &str| kw.iter().any(|(k, _)| &**k == n);
     let out = vm.types.new_dict();
     let params = &sig.parameters;
@@ -112,7 +128,13 @@ pub fn apply(vm: &mut Vm, sig: &Signature, loc: &Loc, args: &[Value], kwargs: &[
             Some(v) => {
                 if p.kind == POS_ONLY {
                     if !ignore_errors {
-                        return fail(vm, format!("{:?} parameter is positional only, but was passed as a keyword", p.name));
+                        return fail(
+                            vm,
+                            format!(
+                                "{:?} parameter is positional only, but was passed as a keyword",
+                                p.name
+                            ),
+                        );
                     }
                     continue;
                 }
@@ -134,7 +156,10 @@ pub fn apply(vm: &mut Vm, sig: &Signature, loc: &Loc, args: &[Value], kwargs: &[
                 None => false,
             };
             if !(ignore_errors || ignore_extra) {
-                return fail(vm, format!("got an unexpected keyword argument {:?}", kwargs[0].0));
+                return fail(
+                    vm,
+                    format!("got an unexpected keyword argument {:?}", kwargs[0].0),
+                );
             }
         }
     }
@@ -164,7 +189,14 @@ pub fn apply_defaults(vm: &mut Vm, sig: &Signature, loc: &Loc, out: &Value) -> P
 }
 
 /// `renpy.ast.apply_arguments(parameters, args, kwargs, ignore_errors)`.
-pub fn apply_arguments(vm: &mut Vm, sig: Option<&Signature>, loc: &Loc, args: &[Value], kwargs: &[(Rc<str>, Value)], mut ignore_errors: bool) -> PyResult<Value> {
+pub fn apply_arguments(
+    vm: &mut Vm,
+    sig: Option<&Signature>,
+    loc: &Loc,
+    args: &[Value],
+    kwargs: &[(Rc<str>, Value)],
+    mut ignore_errors: bool,
+) -> PyResult<Value> {
     if !py::config_bool(vm, "developer").unwrap_or(false) {
         ignore_errors = true;
     }
@@ -172,7 +204,10 @@ pub fn apply_arguments(vm: &mut Vm, sig: Option<&Signature>, loc: &Loc, args: &[
         Some(s) => apply(vm, s, loc, args, kwargs, ignore_errors),
         None => {
             if (!args.is_empty() || !kwargs.is_empty()) && !ignore_errors {
-                return Err(py::error(vm, "Arguments supplied, but parameter list not present"));
+                return Err(py::error(
+                    vm,
+                    "Arguments supplied, but parameter list not present",
+                ));
             }
             Ok(vm.types.new_dict())
         }
@@ -180,8 +215,20 @@ pub fn apply_arguments(vm: &mut Vm, sig: Option<&Signature>, loc: &Loc, args: &[
 }
 
 /// Splits a Python (tuple, mapping) pair into Rust argument vectors.
-pub fn split(vm: &mut Vm, args: &Value, kwargs: &Value) -> PyResult<(Vec<Value>, Vec<(Rc<str>, Value)>)> {
-    let a = if py::is_none(args) { Vec::new() } else { py::items(vm, args)? };
-    let k = if py::is_none(kwargs) { Vec::new() } else { py::str_items(vm, kwargs)? };
+pub fn split(
+    vm: &mut Vm,
+    args: &Value,
+    kwargs: &Value,
+) -> PyResult<(Vec<Value>, Vec<(Rc<str>, Value)>)> {
+    let a = if py::is_none(args) {
+        Vec::new()
+    } else {
+        py::items(vm, args)?
+    };
+    let k = if py::is_none(kwargs) {
+        Vec::new()
+    } else {
+        py::str_items(vm, kwargs)?
+    };
     Ok((a, k))
 }

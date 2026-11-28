@@ -21,6 +21,10 @@ impl Default for Lane {
 }
 
 impl Lane {
+    pub fn set_levels(&mut self, levels: [i32; 2]) {
+        self.levels = levels;
+    }
+
     pub fn music(id: i32, levels: [i32; 2]) -> Self {
         Self {
             id,
@@ -67,6 +71,15 @@ pub(super) struct SoundCapture {
 }
 
 impl SoundCapture {
+    pub fn late_initial() -> Self {
+        // Late storeScene (0xd5da0/0xd5e40) writes nine version-1
+        // SoundInfo rows. The constructor leaves the four extra fields zero.
+        Self {
+            normal: (61, 0x83_0000),
+            text: (204, format!("9{}", ";1,-1,2.214.214,0,0,4.0.0.0.0".repeat(9))),
+        }
+    }
+
     pub fn from_owners(music: &Music, ambience: &Ambient) -> Option<Self> {
         // Native initScenario (0x143470) chooses R61. The writer (0x68750)
         // stores five SoundInfo lanes at T204 in their fixed layout. Loop SE,

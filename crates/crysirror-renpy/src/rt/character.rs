@@ -25,7 +25,9 @@ use std::rc::Rc;
 const MODULE: &str = "renpy.character";
 
 fn at_least(vm: &Vm, major: u32, minor: u32) -> bool {
-    super::state::try_rt(vm).map(|r| r.profile.at_least(major, minor)).unwrap_or(true)
+    super::state::try_rt(vm)
+        .map(|r| r.profile.at_least(major, minor))
+        .unwrap_or(true)
 }
 
 /// Before 7.0.
@@ -49,7 +51,10 @@ fn cfg_true(vm: &mut Vm, name: &str) -> PyResult<bool> {
 }
 
 fn has_cfg(vm: &mut Vm, name: &str) -> bool {
-    py::import(vm, "renpy.config").ok().and_then(|m| py::get_opt(vm, &m, name).ok().flatten()).is_some()
+    py::import(vm, "renpy.config")
+        .ok()
+        .and_then(|m| py::get_opt(vm, &m, name).ok().flatten())
+        .is_some()
 }
 
 fn call_list(vm: &mut Vm, name: &str) -> PyResult<()> {
@@ -64,7 +69,10 @@ fn call_list(vm: &mut Vm, name: &str) -> PyResult<()> {
 }
 
 fn kw_of(items: &[(&str, Value)]) -> Vec<(Rc<str>, Value)> {
-    items.iter().map(|(k, v)| (Rc::from(*k), v.clone())).collect()
+    items
+        .iter()
+        .map(|(k, v)| (Rc::from(*k), v.clone()))
+        .collect()
 }
 
 fn dict_get(vm: &mut Vm, d: &Value, k: &str) -> PyResult<Value> {
@@ -82,7 +90,11 @@ fn is_str(v: &Value) -> bool {
 
 fn substitute(vm: &mut Vm, s: &Value, translate: bool) -> PyResult<Value> {
     let f = py::import_attr(vm, "renpy.substitutions", "substitute")?;
-    let r = vm.call(&f, vec![s.clone()], kw_of(&[("translate", Value::Bool(translate))]))?;
+    let r = vm.call(
+        &f,
+        vec![s.clone()],
+        kw_of(&[("translate", Value::Bool(translate))]),
+    )?;
     ops::getitem(vm, &r, Value::Int(0))
 }
 
@@ -126,7 +138,11 @@ pub struct Dtt {
 enum Piece<'a> {
     Text(&'a str),
     Quoted,
-    Tag { full: &'a str, tag: &'a str, value: Option<&'a str> },
+    Tag {
+        full: &'a str,
+        tag: &'a str,
+        value: Option<&'a str>,
+    },
 }
 
 /// `TAG_RE.split(s)`: `{{` and `{p}`, `{w}`, `{nw}`, `{fast}` (and
@@ -153,7 +169,9 @@ fn split_tags(s: &str, done: bool) -> Vec<Piece<'_>> {
             if tag == "done" && !done {
                 continue;
             }
-            let Some(after) = rest.strip_prefix(tag) else { continue };
+            let Some(after) = rest.strip_prefix(tag) else {
+                continue;
+            };
             if let Some(after) = after.strip_prefix('}') {
                 let _ = after;
                 matched = Some((tag, None, 1 + tag.len() + 1));
@@ -169,7 +187,11 @@ fn split_tags(s: &str, done: bool) -> Vec<Piece<'_>> {
         match matched {
             Some((tag, value, len)) => {
                 out.push(Piece::Text(&s[start..i]));
-                out.push(Piece::Tag { full: &s[i..i + len], tag, value });
+                out.push(Piece::Tag {
+                    full: &s[i..i + len],
+                    tag,
+                    value,
+                });
                 i += len;
                 start = i;
             }
@@ -187,7 +209,15 @@ fn clen(s: &str) -> usize {
 pub fn parse_dtt(vm: &mut Vm, s: &str) -> PyResult<Dtt> {
     let done = at_least(vm, 7, 4);
     let nw_value = at_least(vm, 8, 2);
-    let mut d = Dtt { text: String::new(), pause_start: vec![0], pause_end: Vec::new(), pause_delay: Vec::new(), no_wait: false, has_done: false, fast: false };
+    let mut d = Dtt {
+        text: String::new(),
+        pause_start: vec![0],
+        pause_end: Vec::new(),
+        pause_delay: Vec::new(),
+        no_wait: false,
+        has_done: false,
+        fast: false,
+    };
     let mut n = 0usize;
     let mut push = |d: &mut Dtt, n: &mut usize, t: &str| {
         d.text.push_str(t);
@@ -202,7 +232,12 @@ pub fn parse_dtt(vm: &mut Vm, s: &str) -> PyResult<Dtt> {
             Piece::Quoted => push(&mut d, &mut n, "{{"),
             Piece::Tag { full, tag, value } => {
                 let value = match value {
-                    Some(v) => Some(v.trim().parse::<f64>().map_err(|_| vm.exc_msg("ValueError", format!("could not convert string to float: '{v}'")))?),
+                    Some(v) => Some(v.trim().parse::<f64>().map_err(|_| {
+                        vm.exc_msg(
+                            "ValueError",
+                            format!("could not convert string to float: '{v}'"),
+                        )
+                    })?),
                     None => None,
                 };
                 match tag {
@@ -259,11 +294,16 @@ fn dtt_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let s = py::string(vm, &args[1])?;
     let d = parse_dtt(vm, &s)?;
-    let ints = |vm: &Vm, v: &[usize]| vm.types.new_list(v.iter().map(|i| Value::Int(*i as i64)).collect());
+    let ints = |vm: &Vm, v: &[usize]| {
+        vm.types
+            .new_list(v.iter().map(|i| Value::Int(*i as i64)).collect())
+    };
     py::set(vm, this, "text", vm.types.new_str(&d.text))?;
     py::set(vm, this, "pause_start", ints(vm, &d.pause_start))?;
     py::set(vm, this, "pause_end", ints(vm, &d.pause_end))?;
-    let delays = vm.types.new_list(d.pause_delay.iter().map(|v| opt_f(*v)).collect());
+    let delays = vm
+        .types
+        .new_list(d.pause_delay.iter().map(|v| opt_f(*v)).collect());
     py::set(vm, this, "pause_delay", delays)?;
     py::set(vm, this, "no_wait", Value::Bool(d.no_wait))?;
     if !e6(vm) {
@@ -286,7 +326,10 @@ fn new_dtt(vm: &mut Vm, what: &Value) -> PyResult<Value> {
 /// and the character's `cb_args` only.
 fn cb_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    for (i, n) in ["callbacks", "interact", "type", "cb_args", "multiple"].iter().enumerate() {
+    for (i, n) in ["callbacks", "interact", "type", "cb_args", "multiple"]
+        .iter()
+        .enumerate()
+    {
         py::set(vm, this, n, args.get(i + 1).cloned().unwrap_or(Value::None))?;
     }
     for n in ["what", "start", "end", "delay", "last_segment"] {
@@ -315,7 +358,10 @@ fn cb_call(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
                     kwargs.push((n.into(), v));
                 }
             }
-            kwargs.push(("please_ignore_unknown_keyword_arguments".into(), Value::None));
+            kwargs.push((
+                "please_ignore_unknown_keyword_arguments".into(),
+                Value::None,
+            ));
         }
     }
     let cba = py::get(vm, this, "cb_args")?;
@@ -342,9 +388,20 @@ fn cb_copy(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     Ok(rv)
 }
 
-fn new_callbacks(vm: &mut Vm, callbacks: Value, interact: Value, type_: Value, cb_args: Value, multiple: Value) -> PyResult<Value> {
+fn new_callbacks(
+    vm: &mut Vm,
+    callbacks: Value,
+    interact: Value,
+    type_: Value,
+    cb_args: Value,
+    multiple: Value,
+) -> PyResult<Value> {
     let c = py::import_attr(vm, MODULE, "Callbacks")?;
-    vm.call(&c, vec![callbacks, interact, type_, cb_args, multiple], Vec::new())
+    vm.call(
+        &c,
+        vec![callbacks, interact, type_, cb_args, multiple],
+        Vec::new(),
+    )
 }
 
 fn fire(vm: &mut Vm, cb: &Value, event: &str) -> PyResult<()> {
@@ -357,15 +414,34 @@ fn fire(vm: &mut Vm, cb: &Value, event: &str) -> PyResult<()> {
 
 /// `predict_show_display_say(...)`.
 fn f_predict_show_display_say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let names = ["who", "what", "who_args", "what_args", "window_args", "image", "two_window", "side_image", "screen", "properties"];
-    let mut v: Vec<Value> = names.iter().enumerate().map(|(i, n)| arg_or(args, kw, i, n, Value::None)).collect();
+    let names = [
+        "who",
+        "what",
+        "who_args",
+        "what_args",
+        "window_args",
+        "image",
+        "two_window",
+        "side_image",
+        "screen",
+        "properties",
+    ];
+    let mut v: Vec<Value> = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| arg_or(args, kw, i, n, Value::None))
+        .collect();
     if py::is_none(&v[5]) {
         v[5] = Value::Bool(false);
     }
     if py::is_none(&v[6]) {
         v[6] = Value::Bool(false);
     }
-    let mut extra: Vec<(Rc<str>, Value)> = kw.iter().filter(|(k, _)| !names.contains(&&**k)).cloned().collect();
+    let mut extra: Vec<(Rc<str>, Value)> = kw
+        .iter()
+        .filter(|(k, _)| !names.contains(&&**k))
+        .cloned()
+        .collect();
     let predict = py::import_attr(vm, "renpy.easy", "predict")?;
     if py::truthy(vm, &v[7])? {
         vm.call(&predict, vec![v[7].clone()], Vec::new())?;
@@ -386,7 +462,8 @@ fn f_predict_show_display_say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<V
         extra.push(("image".into(), v[5].clone()));
     }
     if py::truthy(vm, &v[8])? {
-        let props = compute_widget_properties(vm, &v[2], &v[3], &v[4], &v[9], &Value::None, &Value::None)?;
+        let props =
+            compute_widget_properties(vm, &v[2], &v[3], &v[4], &v[9], &Value::None, &Value::None)?;
         let ps = py::import_attr(vm, "renpy.display.predict", "screen")?;
         let mut kwargs = vec![
             ("_widget_properties".into(), props),
@@ -403,7 +480,15 @@ fn f_predict_show_display_say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<V
 
 /// `compute_widget_properties(who_args, what_args, window_args,
 /// properties, variant=None, multiple=None)`.
-fn compute_widget_properties(vm: &mut Vm, who_args: &Value, what_args: &Value, window_args: &Value, properties: &Value, variant: &Value, multiple: &Value) -> PyResult<Value> {
+fn compute_widget_properties(
+    vm: &mut Vm,
+    who_args: &Value,
+    what_args: &Value,
+    window_args: &Value,
+    properties: &Value,
+    variant: &Value,
+    multiple: &Value,
+) -> PyResult<Value> {
     let style_args = |vm: &mut Vm, d: &Value, name: &str| -> PyResult<Value> {
         let mut style = dict_get(vm, d, "style")?;
         if py::is_none(&style) {
@@ -440,7 +525,9 @@ fn compute_widget_properties(vm: &mut Vm, who_args: &Value, what_args: &Value, w
     let who = style_args(vm, who_args, "who")?;
     let what = style_args(vm, what_args, "what")?;
     let window = style_args(vm, window_args, "window")?;
-    let rv = if py::is_none(properties) { py::dict(vm) } else {
+    let rv = if py::is_none(properties) {
+        py::dict(vm)
+    } else {
         let d = Value::Obj(vm.types.dict.clone());
         vm.call(&d, vec![properties.clone()], Vec::new())?
     };
@@ -466,22 +553,62 @@ fn f_compute_widget_properties(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<
     let get = |i: usize, n: &str| arg_or(args, kw, i, n, Value::None);
     // 6.x: (who_args, what_args, window_args, variant=None).
     if e6(vm) {
-        return compute_widget_properties(vm, &get(0, "who_args"), &get(1, "what_args"), &get(2, "window_args"), &Value::None, &get(3, "variant"), &Value::None);
+        return compute_widget_properties(
+            vm,
+            &get(0, "who_args"),
+            &get(1, "what_args"),
+            &get(2, "window_args"),
+            &Value::None,
+            &get(3, "variant"),
+            &Value::None,
+        );
     }
-    compute_widget_properties(vm, &get(0, "who_args"), &get(1, "what_args"), &get(2, "window_args"), &get(3, "properties"), &get(4, "variant"), &get(5, "multiple"))
+    compute_widget_properties(
+        vm,
+        &get(0, "who_args"),
+        &get(1, "what_args"),
+        &get(2, "window_args"),
+        &get(3, "properties"),
+        &get(4, "variant"),
+        &get(5, "multiple"),
+    )
 }
 
 const SDS_NAMES: &[&str] = &[
-    "who", "what", "who_args", "what_args", "window_args", "image", "side_image", "two_window", "two_window_vbox_properties", "who_window_properties",
-    "say_vbox_properties", "transform", "variant", "screen", "layer", "properties", "multiple", "retain",
+    "who",
+    "what",
+    "who_args",
+    "what_args",
+    "window_args",
+    "image",
+    "side_image",
+    "two_window",
+    "two_window_vbox_properties",
+    "who_window_properties",
+    "say_vbox_properties",
+    "transform",
+    "variant",
+    "screen",
+    "layer",
+    "properties",
+    "multiple",
+    "retain",
 ];
 
 /// `show_display_say(who, what, ...)`: shows the say screen (or builds
 /// the legacy window) and returns the `what` widget, or from 7.0 the
 /// `(tag, "what", layer)` that names it.
 fn f_show_display_say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let mut v: Vec<Value> = SDS_NAMES.iter().enumerate().map(|(i, n)| arg_or(args, kw, i, n, Value::None)).collect();
-    let mut extra: Vec<(Rc<str>, Value)> = kw.iter().filter(|(k, _)| !SDS_NAMES.contains(&&**k)).cloned().collect();
+    let mut v: Vec<Value> = SDS_NAMES
+        .iter()
+        .enumerate()
+        .map(|(i, n)| arg_or(args, kw, i, n, Value::None))
+        .collect();
+    let mut extra: Vec<(Rc<str>, Value)> = kw
+        .iter()
+        .filter(|(k, _)| !SDS_NAMES.contains(&&**k))
+        .cloned()
+        .collect();
     for i in [2, 3, 4, 8, 9, 10, 15] {
         if py::is_none(&v[i]) {
             v[i] = py::dict(vm);
@@ -494,9 +621,23 @@ fn f_show_display_say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let (who, what, who_args) = (v[0].clone(), v[1].clone(), v[2].clone());
     let (image, side_image, two_window) = (v[5].clone(), v[6].clone(), v[7].clone());
-    let (variant, screen, mut layer, multiple, retain) = (v[12].clone(), v[13].clone(), v[14].clone(), v[16].clone(), v[17].clone());
+    let (variant, screen, mut layer, multiple, retain) = (
+        v[12].clone(),
+        v[13].clone(),
+        v[14].clone(),
+        v[16].clone(),
+        v[17].clone(),
+    );
     let props = if e6(vm) {
-        compute_widget_properties(vm, &v[2], &v[3], &v[4], &Value::None, &variant, &Value::None)?
+        compute_widget_properties(
+            vm,
+            &v[2],
+            &v[3],
+            &v[4],
+            &Value::None,
+            &variant,
+            &Value::None,
+        )?
     } else {
         compute_widget_properties(vm, &v[2], &v[3], &v[4], &v[15], &variant, &multiple)?
     };
@@ -546,7 +687,11 @@ fn f_show_display_say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         if py::truthy(vm, &two_window)? || old_args {
             extra.push(("two_window".into(), two_window.clone()));
         }
-        let transient = if e6(vm) { true } else { !py::truthy(vm, &retain)? };
+        let transient = if e6(vm) {
+            true
+        } else {
+            !py::truthy(vm, &retain)?
+        };
         let mut kwargs: Vec<(Rc<str>, Value)> = vec![
             ("_widget_properties".into(), props),
             ("_transient".into(), Value::Bool(transient)),
@@ -565,23 +710,24 @@ fn f_show_display_say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         }
         return Ok(vm.types.new_tuple(vec![tag, py::s(vm, "what"), layer]));
     }
-    let merge_style = |vm: &mut Vm, style: &str, properties: &Value| -> PyResult<Vec<(Rc<str>, Value)>> {
-        let mgr = py::import_attr(vm, "store", "style")?;
-        let mut s = py::get(vm, &mgr, style)?;
-        if !py::is_none(&variant) {
-            s = ops::getitem(vm, &s, variant.clone())?;
-        }
-        let ir = ex(vm, "in_rollback", Vec::new(), Vec::new())?;
-        if py::truthy(vm, &ir)? {
-            s = ops::getitem(vm, &s, py::s(vm, "rollback"))?;
-        }
-        let mut rv: Vec<(Rc<str>, Value)> = vec![("style".into(), s)];
-        for (k, v) in py::str_items(vm, properties)? {
-            rv.retain(|(n, _)| *n != k);
-            rv.push((k, v));
-        }
-        Ok(rv)
-    };
+    let merge_style =
+        |vm: &mut Vm, style: &str, properties: &Value| -> PyResult<Vec<(Rc<str>, Value)>> {
+            let mgr = py::import_attr(vm, "store", "style")?;
+            let mut s = py::get(vm, &mgr, style)?;
+            if !py::is_none(&variant) {
+                s = ops::getitem(vm, &s, variant.clone())?;
+            }
+            let ir = ex(vm, "in_rollback", Vec::new(), Vec::new())?;
+            if py::truthy(vm, &ir)? {
+                s = ops::getitem(vm, &s, py::s(vm, "rollback"))?;
+            }
+            let mut rv: Vec<(Rc<str>, Value)> = vec![("style".into(), s)];
+            for (k, v) in py::str_items(vm, properties)? {
+                rv.retain(|(n, _)| *n != k);
+                rv.push((k, v));
+            }
+            Ok(rv)
+        };
     let handle_who = |vm: &mut Vm| -> PyResult<()> {
         if !py::truthy(vm, &who)? {
             return Ok(());
@@ -636,7 +782,18 @@ fn f_show_display_say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 // ---------------------------------------------------------------------------
 // SlowDone.
 
-const SD_NAMES: &[&str] = &["ctc", "ctc_position", "callback", "interact", "type", "cb_args", "delay", "ctc_kwargs", "last_pause", "no_wait"];
+const SD_NAMES: &[&str] = &[
+    "ctc",
+    "ctc_position",
+    "callback",
+    "interact",
+    "type",
+    "cb_args",
+    "delay",
+    "ctc_kwargs",
+    "last_pause",
+    "no_wait",
+];
 
 fn sd_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
@@ -656,10 +813,19 @@ fn sd_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn sd_call(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let g = |vm: &mut Vm, n: &str| py::get(vm, this, n);
-    let (ctc, pos, interact, delay) = (g(vm, "ctc")?, g(vm, "ctc_position")?, g(vm, "interact")?, g(vm, "delay")?);
+    let (ctc, pos, interact, delay) = (
+        g(vm, "ctc")?,
+        g(vm, "ctc_position")?,
+        g(vm, "interact")?,
+        g(vm, "delay")?,
+    );
     let old = e6(vm);
     let zero_delay = matches!(delay, Value::Int(0)) || matches!(delay, Value::Float(f) if f == 0.0);
-    let show_ctc = if old { true } else { py::truthy(vm, &interact)? && !zero_delay };
+    let show_ctc = if old {
+        true
+    } else {
+        py::truthy(vm, &interact)? && !zero_delay
+    };
     if show_ctc {
         let has_screen = py::import_attr(vm, "renpy.display.screen", "has_screen")?;
         let r = vm.call(&has_screen, vec![py::s(vm, "ctc")], Vec::new())?;
@@ -678,7 +844,11 @@ fn sd_call(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             vm.call(&ss, a, kwargs)?;
             ex(vm, "restart_interaction", Vec::new(), Vec::new())?;
         } else if py::truthy(vm, &ctc)? && pos.as_str() == Some("fixed") {
-            vm.call(&ss, vec![py::s(vm, "_ctc")], kw_of(&[("_transient", Value::Bool(true)), ("ctc", ctc.clone())]))?;
+            vm.call(
+                &ss,
+                vec![py::s(vm, "_ctc")],
+                kw_of(&[("_transient", Value::Bool(true)), ("ctc", ctc.clone())]),
+            )?;
             ex(vm, "restart_interaction", Vec::new(), Vec::new())?;
         }
     }
@@ -696,7 +866,10 @@ fn sd_call(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     let cb = g(vm, "callback")?;
     if old {
-        let mut kwargs = vec![("interact".into(), interact), ("type".into(), g(vm, "type")?)];
+        let mut kwargs = vec![
+            ("interact".into(), interact),
+            ("type".into(), g(vm, "type")?),
+        ];
         let cba = g(vm, "cb_args")?;
         kwargs.extend(py::str_items(vm, &cba)?);
         for c in py::items(vm, &cb)? {
@@ -717,8 +890,27 @@ fn new_slow_done(vm: &mut Vm, values: Vec<Value>) -> PyResult<Value> {
 // display_say.
 
 const DS_NAMES: &[&str] = &[
-    "who", "what", "show_function", "interact", "slow", "afm", "ctc", "ctc_pause", "ctc_position", "all_at_once", "cb_args", "with_none", "callback",
-    "type", "checkpoint", "ctc_timedpause", "ctc_force", "advance", "multiple", "dtt", "retain",
+    "who",
+    "what",
+    "show_function",
+    "interact",
+    "slow",
+    "afm",
+    "ctc",
+    "ctc_pause",
+    "ctc_position",
+    "all_at_once",
+    "cb_args",
+    "with_none",
+    "callback",
+    "type",
+    "checkpoint",
+    "ctc_timedpause",
+    "ctc_force",
+    "advance",
+    "multiple",
+    "dtt",
+    "retain",
 ];
 
 struct Say {
@@ -747,10 +939,22 @@ struct Say {
 
 fn say_args(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Say> {
     if let Some((k, _)) = kw.iter().find(|(k, _)| !DS_NAMES.contains(&&**k)) {
-        return Err(vm.type_error(format!("display_say() got an unexpected keyword argument '{k}'")));
+        return Err(vm.type_error(format!(
+            "display_say() got an unexpected keyword argument '{k}'"
+        )));
     }
-    let v: Vec<Value> = DS_NAMES.iter().enumerate().map(|(i, n)| arg_or(args, kw, i, n, Value::None)).collect();
-    let b = |vm: &mut Vm, i: usize, d: bool| -> PyResult<bool> { if py::is_none(&v[i]) && DS_NAMES[i] != "interact" { Ok(d) } else { py::truthy(vm, &v[i]) } };
+    let v: Vec<Value> = DS_NAMES
+        .iter()
+        .enumerate()
+        .map(|(i, n)| arg_or(args, kw, i, n, Value::None))
+        .collect();
+    let b = |vm: &mut Vm, i: usize, d: bool| -> PyResult<bool> {
+        if py::is_none(&v[i]) && DS_NAMES[i] != "interact" {
+            Ok(d)
+        } else {
+            py::truthy(vm, &v[i])
+        }
+    };
     Ok(Say {
         who: v[0].clone(),
         what: v[1].clone(),
@@ -762,14 +966,26 @@ fn say_args(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Say> {
         ctc_pause: v[7].clone(),
         ctc_position: v[8].clone(),
         all_at_once: b(vm, 9, false)?,
-        cb_args: if py::is_none(&v[10]) { py::dict(vm) } else { v[10].clone() },
+        cb_args: if py::is_none(&v[10]) {
+            py::dict(vm)
+        } else {
+            v[10].clone()
+        },
         with_none: v[11].clone(),
         callback: v[12].clone(),
         type_: v[13].clone(),
-        checkpoint: if kw.iter().any(|(k, _)| &**k == "checkpoint") || args.len() > 14 { v[14].clone() } else { Value::Bool(true) },
+        checkpoint: if kw.iter().any(|(k, _)| &**k == "checkpoint") || args.len() > 14 {
+            v[14].clone()
+        } else {
+            Value::Bool(true)
+        },
         ctc_timedpause: v[15].clone(),
         ctc_force: b(vm, 16, false)?,
-        advance: if kw.iter().any(|(k, _)| &**k == "advance") || args.len() > 17 { py::truthy(vm, &v[17])? } else { true },
+        advance: if kw.iter().any(|(k, _)| &**k == "advance") || args.len() > 17 {
+            py::truthy(vm, &v[17])?
+        } else {
+            true
+        },
         multiple: v[18].clone(),
         dtt: v[19].clone(),
         retain: b(vm, 20, false)?,
@@ -780,13 +996,21 @@ fn callback_list(vm: &mut Vm, callback: &Value) -> PyResult<Value> {
     let mut cb = callback.clone();
     if py::is_none(&cb) {
         let c = cfg(vm, "character_callback", Value::None);
-        cb = if py::truthy(vm, &c)? { vm.types.new_list(vec![c]) } else { vm.types.new_list(Vec::new()) };
+        cb = if py::truthy(vm, &c)? {
+            vm.types.new_list(vec![c])
+        } else {
+            vm.types.new_list(Vec::new())
+        };
     }
     if !matches!(cb.payload(), Some(crysirror_python::Payload::List(_))) {
         cb = vm.types.new_list(vec![cb]);
     }
     let all = cfg(vm, "all_character_callbacks", Value::None);
-    let mut items = if py::is_none(&all) { Vec::new() } else { py::items(vm, &all)? };
+    let mut items = if py::is_none(&all) {
+        Vec::new()
+    } else {
+        py::items(vm, &all)?
+    };
     items.extend(py::items(vm, &cb)?);
     Ok(vm.types.new_list(items))
 }
@@ -821,7 +1045,11 @@ fn checkpoint(vm: &mut Vm, data: Value, hard: Option<Value>) -> PyResult<()> {
 }
 
 fn with_none_end(vm: &mut Vm, with_none: &Value) -> PyResult<()> {
-    let wn = if py::is_none(with_none) { cfg(vm, "implicit_with_none", Value::Bool(true)) } else { with_none.clone() };
+    let wn = if py::is_none(with_none) {
+        cfg(vm, "implicit_with_none", Value::Bool(true))
+    } else {
+        with_none.clone()
+    };
     if py::truthy(vm, &wn)? {
         let iface = py::import_attr(vm, "renpy.game", "interface")?;
         vm.call_method(&iface, "do_with", vec![Value::None, Value::None])?;
@@ -829,7 +1057,13 @@ fn with_none_end(vm: &mut Vm, with_none: &Value) -> PyResult<()> {
     Ok(())
 }
 
-fn ctc_set(vm: &mut Vm, what_text: &Value, method: &str, ctc: &Value, position: &str) -> PyResult<()> {
+fn ctc_set(
+    vm: &mut Vm,
+    what_text: &Value,
+    method: &str,
+    ctc: &Value,
+    position: &str,
+) -> PyResult<()> {
     match position {
         "nestled" => {
             vm.call_method(what_text, method, vec![ctc.clone()])?;
@@ -846,7 +1080,11 @@ fn ctc_set(vm: &mut Vm, what_text: &Value, method: &str, ctc: &Value, position: 
 /// `display_say` as of 6.18–6.99.
 fn display_say_6(vm: &mut Vm, s: Say) -> PyResult<()> {
     let interact = s.interact;
-    if interact && !preferences(vm, "skip_unseen")? && !seen_current(vm)? && skipping(vm).as_str() == Some("fast") {
+    if interact
+        && !preferences(vm, "skip_unseen")?
+        && !seen_current(vm)?
+        && skipping(vm).as_str() == Some("fast")
+    {
         set_skipping_none(vm)?;
     }
     if interact && skipping(vm).as_str() == Some("fast") {
@@ -855,7 +1093,10 @@ fn display_say_6(vm: &mut Vm, s: Say) -> PyResult<()> {
     }
     let callback = callback_list(vm, &s.callback)?;
     let cbs = py::items(vm, &callback)?;
-    let mut base_kw: Vec<(Rc<str>, Value)> = vec![("interact".into(), Value::Bool(interact)), ("type".into(), s.type_.clone())];
+    let mut base_kw: Vec<(Rc<str>, Value)> = vec![
+        ("interact".into(), Value::Bool(interact)),
+        ("type".into(), s.type_.clone()),
+    ];
     base_kw.extend(py::str_items(vm, &s.cb_args)?);
     let call_all = |vm: &mut Vm, ev: &str| -> PyResult<()> {
         for c in &cbs {
@@ -865,7 +1106,11 @@ fn display_say_6(vm: &mut Vm, s: Say) -> PyResult<()> {
     };
     call_all(vm, "begin")?;
     let rfi = ex(vm, "roll_forward_info", Vec::new(), Vec::new())?;
-    let roll_forward = if py::truthy(vm, &rfi)? { Value::Bool(false) } else { Value::None };
+    let roll_forward = if py::truthy(vm, &rfi)? {
+        Value::Bool(false)
+    } else {
+        Value::None
+    };
     let after_rollback = py::import_attr(vm, "renpy.game", "after_rollback")?;
     let (mut slow, mut all_at_once) = (s.slow, s.all_at_once);
     let skip = skipping(vm);
@@ -882,23 +1127,40 @@ fn display_say_6(vm: &mut Vm, s: Say) -> PyResult<()> {
     let what = py::string(vm, &s.what)?;
     let dtt = parse_dtt(vm, &what)?;
     let (starts, ends, delays) = if all_at_once {
-        (vec![dtt.pause_start[0]], vec![clen(&dtt.text)], vec![*dtt.pause_delay.last().unwrap()])
+        (
+            vec![dtt.pause_start[0]],
+            vec![clen(&dtt.text)],
+            vec![*dtt.pause_delay.last().unwrap()],
+        )
     } else {
-        (dtt.pause_start.clone(), dtt.pause_end.clone(), dtt.pause_delay.clone())
+        (
+            dtt.pause_start.clone(),
+            dtt.pause_end.clone(),
+            dtt.pause_delay.clone(),
+        )
     };
     let position = s.ctc_position.as_str().unwrap_or("").to_owned();
     for (i, ((start, end), delay)) in starts.iter().zip(&ends).zip(&delays).enumerate() {
         let last_pause = i == starts.len() - 1;
         let behavior = if interact {
             let ad = cfg(vm, "say_allow_dismiss", Value::None);
-            ui(vm, "saybehavior", Vec::new(), kw_of(&[("allow_dismiss", ad)]))?
+            ui(
+                vm,
+                "saybehavior",
+                Vec::new(),
+                kw_of(&[("allow_dismiss", ad)]),
+            )?
         } else {
             Value::None
         };
         let mut what_ctc = if last_pause {
             s.ctc.clone()
         } else if delay.is_some() {
-            if py::truthy(vm, &s.ctc_timedpause)? { s.ctc_timedpause.clone() } else { s.ctc_pause.clone() }
+            if py::truthy(vm, &s.ctc_timedpause)? {
+                s.ctc_timedpause.clone()
+            } else {
+                s.ctc_pause.clone()
+            }
         } else {
             s.ctc_pause.clone()
         };
@@ -910,12 +1172,26 @@ fn display_say_6(vm: &mut Vm, s: Say) -> PyResult<()> {
         if *delay == Some(0.0) {
             what_ctc = Value::None;
         }
-        let slow_done = new_slow_done(vm, vec![what_ctc.clone(), s.ctc_position.clone(), callback.clone(), Value::Bool(interact), s.type_.clone(), s.cb_args.clone(), opt_f(*delay)])?;
+        let slow_done = new_slow_done(
+            vm,
+            vec![
+                what_ctc.clone(),
+                s.ctc_position.clone(),
+                callback.clone(),
+                Value::Bool(interact),
+                s.type_.clone(),
+                s.cb_args.clone(),
+                opt_f(*delay),
+            ],
+        )?;
         call_all(vm, "show")?;
         let ws = vm.types.new_str(&dtt.text);
         let what_text = vm.call(&s.show_function, vec![s.who.clone(), ws], Vec::new())?;
         if !isinst(vm, &what_text, "renpy.text.text", "Text")? {
-            return Err(py::error(vm, "The say screen (or show_function) must return a Text object."));
+            return Err(py::error(
+                vm,
+                "The say screen (or show_function) must return a Text object.",
+            ));
         }
         if py::truthy(vm, &what_ctc)? && position == "nestled" {
             vm.call_method(&what_text, "set_ctc", vec![what_ctc.clone()])?;
@@ -933,7 +1209,16 @@ fn display_say_6(vm: &mut Vm, s: Say) -> PyResult<()> {
             vm.call(&slow_done, Vec::new(), Vec::new())?;
         }
         if interact {
-            let rv = ui(vm, "interact", Vec::new(), kw_of(&[("mouse", py::s(vm, "say")), ("type", s.type_.clone()), ("roll_forward", roll_forward.clone())]))?;
+            let rv = ui(
+                vm,
+                "interact",
+                Vec::new(),
+                kw_of(&[
+                    ("mouse", py::s(vm, "say")),
+                    ("type", s.type_.clone()),
+                    ("roll_forward", roll_forward.clone()),
+                ]),
+            )?;
             if matches!(rv, Value::Bool(false)) {
                 break;
             }
@@ -982,7 +1267,11 @@ fn display_say_7(vm: &mut Vm, s: Say) -> PyResult<()> {
     if !final_ {
         advance = false;
     }
-    if final_ && !preferences(vm, "skip_unseen")? && !seen_current(vm)? && skipping(vm).as_str() == Some("fast") {
+    if final_
+        && !preferences(vm, "skip_unseen")?
+        && !seen_current(vm)?
+        && skipping(vm).as_str() == Some("fast")
+    {
         set_skipping_none(vm)?;
     }
     let hard = has_cfg(vm, "nointeract_callbacks");
@@ -996,7 +1285,14 @@ fn display_say_7(vm: &mut Vm, s: Say) -> PyResult<()> {
         call_list(vm, "nointeract_callbacks")?;
     }
     let cbs = callback_list(vm, &s.callback)?;
-    let callback = new_callbacks(vm, cbs, Value::Bool(interact), s.type_.clone(), s.cb_args.clone(), s.multiple.clone())?;
+    let callback = new_callbacks(
+        vm,
+        cbs,
+        Value::Bool(interact),
+        s.type_.clone(),
+        s.cb_args.clone(),
+        s.multiple.clone(),
+    )?;
     let mut roll_forward = ex(vm, "roll_forward_info", Vec::new(), Vec::new())?;
     if matches!(roll_forward, Value::Bool(true)) {
         roll_forward = Value::Bool(false);
@@ -1007,17 +1303,36 @@ fn display_say_7(vm: &mut Vm, s: Say) -> PyResult<()> {
     if py::truthy(vm, &after_rollback)? {
         slow = false;
         all_at_once = true;
-    } else if py::truthy(vm, &skip)? && advance && (preferences(vm, "skip_unseen")? || seen_current(vm)?) {
+    } else if py::truthy(vm, &skip)?
+        && advance
+        && (preferences(vm, "skip_unseen")? || seen_current(vm)?)
+    {
         slow = false;
         all_at_once = true;
     }
     if !interact || preferences(vm, "self_voicing")? {
         all_at_once = true;
     }
-    let dtt_v = if py::is_none(&s.dtt) { new_dtt(vm, &s.what)? } else { s.dtt.clone() };
+    let dtt_v = if py::is_none(&s.dtt) {
+        new_dtt(vm, &s.what)?
+    } else {
+        s.dtt.clone()
+    };
     let gl = |vm: &mut Vm, n: &str| -> PyResult<Vec<Value>> { py::get_items(vm, &dtt_v, n) };
-    let (ps, pe, pd) = (gl(vm, "pause_start")?, gl(vm, "pause_end")?, gl(vm, "pause_delay")?);
-    let (starts, ends, delays) = if all_at_once { (vec![ps[0].clone()], vec![pe.last().unwrap().clone()], vec![pd.last().unwrap().clone()]) } else { (ps, pe, pd) };
+    let (ps, pe, pd) = (
+        gl(vm, "pause_start")?,
+        gl(vm, "pause_end")?,
+        gl(vm, "pause_delay")?,
+    );
+    let (starts, ends, delays) = if all_at_once {
+        (
+            vec![ps[0].clone()],
+            vec![pe.last().unwrap().clone()],
+            vec![pd.last().unwrap().clone()],
+        )
+    } else {
+        (ps, pe, pd)
+    };
     let dtt_text = py::get(vm, &dtt_v, "text")?;
     let no_wait = py::get(vm, &dtt_v, "no_wait")?;
     let no_wait = py::truthy(vm, &no_wait)?;
@@ -1062,7 +1377,14 @@ fn display_say_7(vm: &mut Vm, s: Say) -> PyResult<()> {
             let (mut what_ctc, kind) = if last_pause {
                 (ctc.clone(), "last")
             } else if !py::is_none(delay) {
-                (if py::truthy(vm, &s.ctc_timedpause)? { s.ctc_timedpause.clone() } else { s.ctc_pause.clone() }, "timedpause")
+                (
+                    if py::truthy(vm, &s.ctc_timedpause)? {
+                        s.ctc_timedpause.clone()
+                    } else {
+                        s.ctc_pause.clone()
+                    },
+                    "timedpause",
+                )
             } else {
                 (s.ctc_pause.clone(), "pause")
             };
@@ -1083,7 +1405,18 @@ fn display_say_7(vm: &mut Vm, s: Say) -> PyResult<()> {
             fire(vm, &pause_callback, "show")?;
             let slow_done = new_slow_done(
                 vm,
-                vec![what_ctc.clone(), s.ctc_position.clone(), pause_callback.clone(), Value::Bool(interact), s.type_.clone(), s.cb_args.clone(), delay.clone(), ctc_kwargs, Value::Bool(last_pause), Value::Bool(no_wait)],
+                vec![
+                    what_ctc.clone(),
+                    s.ctc_position.clone(),
+                    pause_callback.clone(),
+                    Value::Bool(interact),
+                    s.type_.clone(),
+                    s.cb_args.clone(),
+                    delay.clone(),
+                    ctc_kwargs,
+                    Value::Bool(last_pause),
+                    Value::Bool(no_wait),
+                ],
             )?;
             let mut extend_text = String::new();
             if cfg_true(vm, "scry_extend")? {
@@ -1099,7 +1432,15 @@ fn display_say_7(vm: &mut Vm, s: Say) -> PyResult<()> {
                         break;
                     } else if !py::is_none(&et) {
                         let f = py::import_attr(vm, "renpy.substitutions", "substitute")?;
-                        if let Ok(r) = vm.call(&f, vec![et], kw_of(&[("scope", Value::None), ("force", Value::Bool(false)), ("translate", Value::Bool(true))])) {
+                        if let Ok(r) = vm.call(
+                            &f,
+                            vec![et],
+                            kw_of(&[
+                                ("scope", Value::None),
+                                ("force", Value::Bool(false)),
+                                ("translate", Value::Bool(true)),
+                            ]),
+                        ) {
                             if let Ok(t) = ops::getitem(vm, &r, Value::Int(0)) {
                                 extend_text.push_str(&py::string(vm, &t)?);
                             }
@@ -1119,8 +1460,15 @@ fn display_say_7(vm: &mut Vm, s: Say) -> PyResult<()> {
             if s.retain {
                 show_kw.push(("retain".into(), retain_tag.clone()));
             }
-            let mut what_text = vm.call(&s.show_function, vec![s.who.clone(), dtt_text.clone()], show_kw)?;
-            if matches!(what_text.payload(), Some(crysirror_python::Payload::Tuple(_))) {
+            let mut what_text = vm.call(
+                &s.show_function,
+                vec![s.who.clone(), dtt_text.clone()],
+                show_kw,
+            )?;
+            if matches!(
+                what_text.payload(),
+                Some(crysirror_python::Payload::Tuple(_))
+            ) {
                 let t = py::items(vm, &what_text)?;
                 if i != 0 && cfg_true(vm, "say_replace_event")? {
                     let gs = py::import_attr(vm, "renpy.display.screen", "get_screen")?;
@@ -1130,20 +1478,34 @@ fn display_say_7(vm: &mut Vm, s: Say) -> PyResult<()> {
                         if !s.retain && !last_pause {
                             let c = ctx(vm)?;
                             let sls = py::get(vm, &c, "scene_lists")?;
-                            vm.call_method(&sls, "set_transient_prefix", vec![t[2].clone(), t[0].clone(), py::s(vm, "replaced")])?;
+                            vm.call_method(
+                                &sls,
+                                "set_transient_prefix",
+                                vec![t[2].clone(), t[0].clone(), py::s(vm, "replaced")],
+                            )?;
                         }
                     }
                 }
                 let gw = py::import_attr(vm, "renpy.display.screen", "get_widget")?;
-                what_text = vm.call(&gw, vec![t[0].clone(), t[1].clone(), t[2].clone()], Vec::new())?;
+                what_text = vm.call(
+                    &gw,
+                    vec![t[0].clone(), t[1].clone(), t[2].clone()],
+                    Vec::new(),
+                )?;
             }
             let queue = py::get(vm, &m, "afm_text_queue")?;
             if !py::truthy(vm, &s.multiple)? {
-                py::set(vm, &m, "afm_text_queue", vm.types.new_list(vec![what_text.clone()]))?;
+                py::set(
+                    vm,
+                    &m,
+                    "afm_text_queue",
+                    vm.types.new_list(vec![what_text.clone()]),
+                )?;
             } else {
                 vm.call_method(&queue, "append", vec![what_text.clone()])?;
             }
-            let zero = matches!(delay, Value::Int(0)) || matches!(delay, Value::Float(f) if *f == 0.0);
+            let zero =
+                matches!(delay, Value::Int(0)) || matches!(delay, Value::Float(f) if *f == 0.0);
             if zero {
                 what_ctc = Value::None;
                 if extend_text.is_empty() {
@@ -1153,18 +1515,34 @@ fn display_say_7(vm: &mut Vm, s: Say) -> PyResult<()> {
             let what_nonempty = py::truthy(vm, &dtt_text)?;
             let afm = py::truthy(vm, &s.afm)?;
             let mut slow_now = slow;
-            if interact || what_nonempty || !py::is_none(&what_ctc) || (!py::is_none(&behavior) && afm) {
+            if interact
+                || what_nonempty
+                || !py::is_none(&what_ctc)
+                || (!py::is_none(&behavior) && afm)
+            {
                 if !isinst(vm, &what_text, "renpy.text.text", "Text")? {
-                    return Err(py::error(vm, "The say screen (or show_function) must return a Text object."));
+                    return Err(py::error(
+                        vm,
+                        "The say screen (or show_function) must return a Text object.",
+                    ));
                 }
                 if py::truthy(vm, &what_ctc)? {
-                    if (!extend_text.is_empty() || !last_pause) && (position == "nestled" || position == "nestled-close") {
+                    if (!extend_text.is_empty() || !last_pause)
+                        && (position == "nestled" || position == "nestled-close")
+                    {
                         let fixed = py::import_attr(vm, "store", "Fixed")?;
-                        what_ctc = vm.call(&fixed, vec![what_ctc.clone()], kw_of(&[("xsize", Value::Int(0))]))?;
+                        what_ctc = vm.call(
+                            &fixed,
+                            vec![what_ctc.clone()],
+                            kw_of(&[("xsize", Value::Int(0))]),
+                        )?;
                     }
                     ctc_set(vm, &what_text, "set_ctc", &what_ctc, &position)?;
                 }
-                if (!extend_text.is_empty() || !last_pause) && py::truthy(vm, &ctc)? && py::get_opt(vm, &what_text, "set_last_ctc")?.is_some() {
+                if (!extend_text.is_empty() || !last_pause)
+                    && py::truthy(vm, &ctc)?
+                    && py::get_opt(vm, &what_text, "set_last_ctc")?.is_some()
+                {
                     ctc_set(vm, &what_text, "set_last_ctc", &ctc, &position)?;
                 }
                 let tl = py::get(vm, &what_text, "text")?;
@@ -1181,7 +1559,10 @@ fn display_say_7(vm: &mut Vm, s: Say) -> PyResult<()> {
                     py::set(vm, &what_text, "slow_done", slow_done.clone())?;
                     vm.call_method(&what_text, "update", Vec::new())?;
                 } else if cfg_true(vm, "developer")? {
-                    return Err(py::error(vm, "The displayable with id 'what' was not given the exact contents of the what variable given to the say screen."));
+                    return Err(py::error(
+                        vm,
+                        "The displayable with id 'what' was not given the exact contents of the what variable given to the say screen.",
+                    ));
                 }
                 if !py::is_none(&behavior) && afm {
                     let q = py::import_attr(vm, MODULE, "afm_text_queue")?;
@@ -1196,11 +1577,22 @@ fn display_say_7(vm: &mut Vm, s: Say) -> PyResult<()> {
                 vm.call(&slow_done, Vec::new(), Vec::new())?;
             }
             if final_ {
-                let rv = ui(vm, "interact", Vec::new(), kw_of(&[("mouse", py::s(vm, "say")), ("type", s.type_.clone()), ("roll_forward", roll_forward.clone())]))?;
+                let rv = ui(
+                    vm,
+                    "interact",
+                    Vec::new(),
+                    kw_of(&[
+                        ("mouse", py::s(vm, "say")),
+                        ("type", s.type_.clone()),
+                        ("roll_forward", roll_forward.clone()),
+                    ]),
+                )?;
                 if matches!(rv, Value::Bool(false)) {
                     break;
                 }
-                if isinst(vm, &rv, "renpy.game", "JumpException")? || isinst(vm, &rv, "renpy.game", "CallException")? {
+                if isinst(vm, &rv, "renpy.game", "JumpException")?
+                    || isinst(vm, &rv, "renpy.game", "CallException")?
+                {
                     return Err(PyErr::Exc(rv.obj().unwrap().clone()));
                 }
                 if !last_pause {
@@ -1250,8 +1642,35 @@ fn f_display_say(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 // ---------------------------------------------------------------------------
 // ADVCharacter.
 
-const CHAR_ATTRS: &[&str] = &["name", "who_prefix", "who_suffix", "what_prefix", "what_suffix", "show_function", "predict_function", "condition", "dynamic", "screen", "mode", "voice_tag"];
-const DISPLAY_ARGS: &[&str] = &["interact", "slow", "afm", "ctc", "ctc_pause", "ctc_timedpause", "ctc_position", "all_at_once", "with_none", "callback", "type", "advance", "retain"];
+const CHAR_ATTRS: &[&str] = &[
+    "name",
+    "who_prefix",
+    "who_suffix",
+    "what_prefix",
+    "what_suffix",
+    "show_function",
+    "predict_function",
+    "condition",
+    "dynamic",
+    "screen",
+    "mode",
+    "voice_tag",
+];
+const DISPLAY_ARGS: &[&str] = &[
+    "interact",
+    "slow",
+    "afm",
+    "ctc",
+    "ctc_pause",
+    "ctc_timedpause",
+    "ctc_position",
+    "all_at_once",
+    "with_none",
+    "callback",
+    "type",
+    "advance",
+    "retain",
+];
 
 fn not_set(vm: &mut Vm) -> PyResult<Value> {
     py::import_attr(vm, MODULE, "NotSet")
@@ -1266,7 +1685,10 @@ fn pop(vm: &mut Vm, props: &Value, n: &str) -> PyResult<Option<Value>> {
 }
 
 fn character_prefixes(vm: &mut Vm) -> PyResult<Vec<String>> {
-    let mut p: Vec<String> = ["show", "cb", "what", "window", "who"].iter().map(|s| s.to_string()).collect();
+    let mut p: Vec<String> = ["show", "cb", "what", "window", "who"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let extra = cfg(vm, "character_id_prefixes", Value::None);
     if !py::is_none(&extra) {
         for i in py::items(vm, &extra)? {
@@ -1285,7 +1707,10 @@ fn defaultdict_dict(vm: &mut Vm) -> PyResult<Value> {
 /// The 7.x split of character properties into the prefixed dicts.
 fn split_into(vm: &mut Vm, properties: &Value, props: &Value) -> PyResult<()> {
     let prefixes = character_prefixes(vm)?;
-    let mut sargs: Vec<Value> = prefixes.iter().map(|p| vm.types.new_str(&format!("{p}_"))).collect();
+    let mut sargs: Vec<Value> = prefixes
+        .iter()
+        .map(|p| vm.types.new_str(&format!("{p}_")))
+        .collect();
     sargs.push(py::s(vm, ""));
     let sp = py::import_attr(vm, "renpy.easy", "split_properties")?;
     let mut a = vec![properties.clone()];
@@ -1304,8 +1729,16 @@ fn split_into(vm: &mut Vm, properties: &Value, props: &Value) -> PyResult<()> {
 fn c_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let ns = not_set(vm)?;
-    let name = args.get(1).cloned().or_else(|| py::kw(kw, "name").cloned()).unwrap_or_else(|| ns.clone());
-    let mut kind = args.get(2).cloned().or_else(|| py::kw(kw, "kind").cloned()).unwrap_or(Value::None);
+    let name = args
+        .get(1)
+        .cloned()
+        .or_else(|| py::kw(kw, "name").cloned())
+        .unwrap_or_else(|| ns.clone());
+    let mut kind = args
+        .get(2)
+        .cloned()
+        .or_else(|| py::kw(kw, "kind").cloned())
+        .unwrap_or(Value::None);
     let properties = py::dict(vm);
     for (k, v) in kw {
         if &**k == "name" || &**k == "kind" {
@@ -1337,7 +1770,11 @@ fn c_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     };
     py::set(vm, this, "image_tag", image_tag)?;
     let da = py::dict(vm);
-    let kind_da = if has_kind { py::get(vm, &kind, "display_args")? } else { Value::None };
+    let kind_da = if has_kind {
+        py::get(vm, &kind, "display_args")?
+    } else {
+        Value::None
+    };
     let old = e6(vm);
     for n in DISPLAY_ARGS {
         if old && (*n == "advance" || *n == "retain") {
@@ -1381,7 +1818,13 @@ fn c_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         }
         py::set(vm, this, "properties", props)?;
     }
-    for n in ["who_args", "what_args", "window_args", "show_args", "cb_args"] {
+    for n in [
+        "who_args",
+        "what_args",
+        "window_args",
+        "show_args",
+        "cb_args",
+    ] {
         let v = if has_kind {
             let k = py::get(vm, &kind, n)?;
             dict_copy(vm, &k)?
@@ -1429,7 +1872,13 @@ fn c_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let props = py::get(vm, this, "properties")?;
     split_into(vm, &properties, &props)?;
-    for (p, attr) in [("show", "show_args"), ("cb", "cb_args"), ("what", "what_args"), ("window", "window_args"), ("who", "who_args")] {
+    for (p, attr) in [
+        ("show", "show_args"),
+        ("cb", "cb_args"),
+        ("what", "what_args"),
+        ("window", "window_args"),
+        ("who", "who_args"),
+    ] {
         let d = vm.call_method(&props, "pop", vec![py::s(vm, p)])?;
         let t = py::get(vm, this, attr)?;
         vm.call_method(&t, "update", vec![d])?;
@@ -1440,7 +1889,11 @@ fn c_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn c_copy(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let ns = not_set(vm)?;
-    let name = args.get(1).cloned().or_else(|| py::kw(kw, "name").cloned()).unwrap_or(ns);
+    let name = args
+        .get(1)
+        .cloned()
+        .or_else(|| py::kw(kw, "name").cloned())
+        .unwrap_or(ns);
     let ty = Value::Obj(ops::type_of(vm, this));
     let mut k: Vec<(Rc<str>, Value)> = kw.iter().filter(|(k, _)| &**k != "name").cloned().collect();
     k.push(("kind".into(), this.clone()));
@@ -1452,10 +1905,19 @@ fn c_do_add(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 /// `get_show_properties(extra_properties)` (8.1).
-fn show_properties(vm: &mut Vm, this: &Value, extra: &Value) -> PyResult<(Value, Value, Value, Value, Value, Value)> {
+fn show_properties(
+    vm: &mut Vm,
+    this: &Value,
+    extra: &Value,
+) -> PyResult<(Value, Value, Value, Value, Value, Value)> {
     let g = |vm: &mut Vm, n: &str| py::get(vm, this, n);
     let mut screen = g(vm, "screen")?;
-    let (mut show, mut who, mut what, mut window) = (g(vm, "show_args")?, g(vm, "who_args")?, g(vm, "what_args")?, g(vm, "window_args")?);
+    let (mut show, mut who, mut what, mut window) = (
+        g(vm, "show_args")?,
+        g(vm, "who_args")?,
+        g(vm, "what_args")?,
+        g(vm, "window_args")?,
+    );
     let mut properties = py::get_opt(vm, this, "properties")?.unwrap_or_else(|| py::dict(vm));
     if py::truthy(vm, extra)? {
         let extra = dict_copy(vm, extra)?;
@@ -1473,7 +1935,12 @@ fn show_properties(vm: &mut Vm, this: &Value, extra: &Value) -> PyResult<(Value,
         }
         properties = np;
         split_into(vm, &extra, &properties)?;
-        for (p, d) in [("show", &show), ("who", &who), ("what", &what), ("window", &window)] {
+        for (p, d) in [
+            ("show", &show),
+            ("who", &who),
+            ("what", &what),
+            ("window", &window),
+        ] {
             let v = vm.call_method(&properties, "pop", vec![py::s(vm, p)])?;
             vm.call_method(d, "update", vec![v])?;
         }
@@ -1482,7 +1949,8 @@ fn show_properties(vm: &mut Vm, this: &Value, extra: &Value) -> PyResult<(Value,
 }
 
 fn c_get_show_properties(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let (a, b, c, d, e, f) = show_properties(vm, &args[0], &args.get(1).cloned().unwrap_or(Value::None))?;
+    let (a, b, c, d, e, f) =
+        show_properties(vm, &args[0], &args.get(1).cloned().unwrap_or(Value::None))?;
     Ok(vm.types.new_tuple(vec![a, b, c, d, e, f]))
 }
 
@@ -1527,12 +1995,22 @@ fn c_do_show(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn c_do_done(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let mut k = Vec::new();
-    if let Some(m) = args.get(3).cloned().or_else(|| py::kw(kw, "multiple").cloned()) {
+    if let Some(m) = args
+        .get(3)
+        .cloned()
+        .or_else(|| py::kw(kw, "multiple").cloned())
+    {
         if !e6(vm) {
             k.push(("multiple".into(), m));
         }
     }
-    py::method_kw(vm, &args[0], "add_history", vec![py::s(vm, "adv"), args[1].clone(), args[2].clone()], k)?;
+    py::method_kw(
+        vm,
+        &args[0],
+        "add_history",
+        vec![py::s(vm, "adv"), args[1].clone(), args[2].clone()],
+        k,
+    )?;
     Ok(Value::None)
 }
 
@@ -1544,7 +2022,11 @@ fn c_do_extend(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn c_do_display(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let show = py::get(vm, &args[0], "do_show")?;
     let ds = py::import_attr(vm, MODULE, "display_say")?;
-    vm.call(&ds, vec![args[1].clone(), args[2].clone(), show], kw.to_vec())
+    vm.call(
+        &ds,
+        vec![args[1].clone(), args[2].clone(), show],
+        kw.to_vec(),
+    )
 }
 
 fn c_do_predict(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -1552,7 +2034,12 @@ fn c_do_predict(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let f = py::get(vm, this, "predict_function")?;
     let extra = arg_or(&args[3..], kw, 0, "extra_properties", Value::None);
     let (screen, show, who_a, what_a, window_a, properties) = show_properties(vm, this, &extra)?;
-    let mut k: Vec<(Rc<str>, Value)> = vec![("who_args".into(), who_a), ("what_args".into(), what_a), ("window_args".into(), window_a), ("screen".into(), screen)];
+    let mut k: Vec<(Rc<str>, Value)> = vec![
+        ("who_args".into(), who_a),
+        ("what_args".into(), what_a),
+        ("window_args".into(), window_a),
+        ("screen".into(), screen),
+    ];
     if !e6(vm) {
         k.push(("properties".into(), properties));
     }
@@ -1574,7 +2061,13 @@ fn tuple_with(vm: &mut Vm, first: &[Value], rest: &Value) -> PyResult<Value> {
 }
 
 /// 6.x `resolve_say_attributes(predict, wanted=[], remove=[])`.
-fn resolve_6(vm: &mut Vm, this: &Value, predict: bool, wanted: &Value, remove: &Value) -> PyResult<()> {
+fn resolve_6(
+    vm: &mut Vm,
+    this: &Value,
+    predict: bool,
+    wanted: &Value,
+    remove: &Value,
+) -> PyResult<()> {
     let attrs = ex(vm, "get_say_attributes", Vec::new(), Vec::new())?;
     if !(py::truthy(vm, &attrs)? || py::truthy(vm, wanted)? || py::truthy(vm, remove)?) {
         return Ok(());
@@ -1583,7 +2076,12 @@ fn resolve_6(vm: &mut Vm, this: &Value, predict: bool, wanted: &Value, remove: &
     if !py::truthy(vm, &tag)? {
         if py::truthy(vm, &attrs)? && !predict {
             let r = ops::repr(vm, &attrs)?;
-            return Err(py::error(vm, format!("Say has image attributes {r}, but there's no image tag associated with the speaking character.")));
+            return Err(py::error(
+                vm,
+                format!(
+                    "Say has image attributes {r}, but there's no image tag associated with the speaking character."
+                ),
+            ));
         }
         return Ok(());
     }
@@ -1595,11 +2093,27 @@ fn resolve_6(vm: &mut Vm, this: &Value, predict: bool, wanted: &Value, remove: &
     let t1 = vm.types.new_tuple(vec![tag.clone()]);
     let showing = vm.call_method(&imgs, "showing", vec![layer.clone(), t1])?;
     if py::truthy(vm, &showing)? {
-        let mut new_image = vm.call_method(&imgs, "apply_attributes", vec![layer.clone(), tag.clone(), tagged.clone(), wanted.clone(), remove.clone()])?;
+        let mut new_image = vm.call_method(
+            &imgs,
+            "apply_attributes",
+            vec![
+                layer.clone(),
+                tag.clone(),
+                tagged.clone(),
+                wanted.clone(),
+                remove.clone(),
+            ],
+        )?;
         if py::is_none(&new_image) {
             new_image = tagged;
         }
-        let exact = py::method_kw(vm, &imgs, "showing", vec![layer, new_image.clone()], kw_of(&[("exact", Value::Bool(true))]))?;
+        let exact = py::method_kw(
+            vm,
+            &imgs,
+            "showing",
+            vec![layer, new_image.clone()],
+            kw_of(&[("exact", Value::Bool(true))]),
+        )?;
         if py::truthy(vm, &exact)? {
             return Ok(());
         }
@@ -1616,7 +2130,13 @@ fn resolve_6(vm: &mut Vm, this: &Value, predict: bool, wanted: &Value, remove: &
             }
         }
     } else {
-        py::method_kw(vm, &imgs, "predict_show", vec![master, tagged], kw_of(&[("show", Value::Bool(false))]))?;
+        py::method_kw(
+            vm,
+            &imgs,
+            "predict_show",
+            vec![master, tagged],
+            kw_of(&[("show", Value::Bool(false))]),
+        )?;
     }
     Ok(())
 }
@@ -1630,22 +2150,42 @@ fn resolve_7(vm: &mut Vm, this: &Value, predict: bool, attrs: &Value) -> PyResul
     if !py::truthy(vm, &tag)? {
         if !predict {
             let r = ops::repr(vm, attrs)?;
-            return Err(py::error(vm, format!("Say has image attributes {r}, but there's no image tag associated with the speaking character.")));
+            return Err(py::error(
+                vm,
+                format!(
+                    "Say has image attributes {r}, but there's no image tag associated with the speaking character."
+                ),
+            ));
         }
         return Ok(false);
     }
     let attrs_t = tuple_with(vm, &[], attrs)?;
     let tagged = tuple_with(vm, &[tag.clone()], &attrs_t)?;
     let imgs = images(vm)?;
-    let layer = ex(vm, "default_layer", vec![Value::None, tag.clone()], Vec::new())?;
+    let layer = ex(
+        vm,
+        "default_layer",
+        vec![Value::None, tag.clone()],
+        Vec::new(),
+    )?;
     let t1 = vm.types.new_tuple(vec![tag.clone()]);
     let showing = vm.call_method(&imgs, "showing", vec![layer.clone(), t1])?;
     if py::truthy(vm, &showing)? {
-        let mut new_image = vm.call_method(&imgs, "apply_attributes", vec![layer.clone(), tag.clone(), tagged.clone()])?;
+        let mut new_image = vm.call_method(
+            &imgs,
+            "apply_attributes",
+            vec![layer.clone(), tag.clone(), tagged.clone()],
+        )?;
         if py::is_none(&new_image) {
             new_image = tagged;
         }
-        let exact = py::method_kw(vm, &imgs, "showing", vec![layer, new_image.clone()], kw_of(&[("exact", Value::Bool(true))]))?;
+        let exact = py::method_kw(
+            vm,
+            &imgs,
+            "showing",
+            vec![layer, new_image.clone()],
+            kw_of(&[("exact", Value::Bool(true))]),
+        )?;
         if py::truthy(vm, &exact)? {
             return Ok(false);
         }
@@ -1661,15 +2201,31 @@ fn resolve_7(vm: &mut Vm, this: &Value, predict: bool, attrs: &Value) -> PyResul
         let mut parts = vec![spt];
         parts.extend(py::items(vm, &tagged)?);
         let tagged2 = vm.types.new_tuple(parts);
-        let mut new_image = vm.call_method(&imgs, "apply_attributes", vec![layer.clone(), tag.clone(), tagged2.clone()])?;
+        let mut new_image = vm.call_method(
+            &imgs,
+            "apply_attributes",
+            vec![layer.clone(), tag.clone(), tagged2.clone()],
+        )?;
         if py::is_none(&new_image) {
             new_image = tagged2;
         }
         let items = py::items(vm, &new_image)?;
         let rest = vm.types.new_tuple(items[1..].to_vec());
-        py::method_kw(vm, &imgs, "predict_show", vec![layer, rest], kw_of(&[("show", Value::Bool(false))]))?;
+        py::method_kw(
+            vm,
+            &imgs,
+            "predict_show",
+            vec![layer, rest],
+            kw_of(&[("show", Value::Bool(false))]),
+        )?;
     } else {
-        py::method_kw(vm, &imgs, "predict_show", vec![layer, tagged], kw_of(&[("show", Value::Bool(false))]))?;
+        py::method_kw(
+            vm,
+            &imgs,
+            "predict_show",
+            vec![layer, tagged],
+            kw_of(&[("show", Value::Bool(false))]),
+        )?;
     }
     Ok(false)
 }
@@ -1683,11 +2239,19 @@ fn c_resolve_say_attributes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Val
         return Ok(Value::None);
     }
     let attrs = arg_or(&args[2..], kw, 0, "attrs", Value::None);
-    Ok(if resolve_7(vm, &args[0], predict, &attrs)? { Value::Bool(true) } else { Value::None })
+    Ok(if resolve_7(vm, &args[0], predict, &attrs)? {
+        Value::Bool(true)
+    } else {
+        Value::None
+    })
 }
 
 fn resolve_call(vm: &mut Vm, this: &Value, predict: bool, attrs: &Value) -> PyResult<bool> {
-    let r = vm.call_method(this, "resolve_say_attributes", vec![Value::Bool(predict), attrs.clone()])?;
+    let r = vm.call_method(
+        this,
+        "resolve_say_attributes",
+        vec![Value::Bool(predict), attrs.clone()],
+    )?;
     py::truthy(vm, &r)
 }
 
@@ -1707,7 +2271,11 @@ fn c_handle_say_attributes(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value
     let mut temporary = py::get_or_none(vm, &c, "temporary_attributes")?;
     py::set(vm, &c, "temporary_attributes", Value::None)?;
     if interact {
-        let mut t = if py::truthy(vm, &temporary)? { py::items(vm, &temporary)? } else { Vec::new() };
+        let mut t = if py::truthy(vm, &temporary)? {
+            py::items(vm, &temporary)?
+        } else {
+            Vec::new()
+        };
         let sa = cfg(vm, "speaking_attribute", Value::None);
         if !py::is_none(&sa) {
             t.insert(0, sa);
@@ -1732,7 +2300,11 @@ fn c_handle_say_attributes(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value
     }
     if let Some(m) = mode {
         let after = get_attributes(vm, Value::None, &tag)?;
-        vm.call_method(this, "handle_say_transition", vec![py::s(vm, m), before, after])?;
+        vm.call_method(
+            this,
+            "handle_say_transition",
+            vec![py::s(vm, m), before, after],
+        )?;
     }
     if py::truthy(vm, &temporary)? {
         let imgs = images(vm)?;
@@ -1816,7 +2388,13 @@ fn c_restore_say_attributes(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Valu
         }
         ex(vm, "predict_show", vec![with_attrs], Vec::new())?;
     } else {
-        py::method_kw(vm, &imgs, "predict_show", vec![Value::None, with_attrs], kw_of(&[("show", Value::Bool(false))]))?;
+        py::method_kw(
+            vm,
+            &imgs,
+            "predict_show",
+            vec![Value::None, with_attrs],
+            kw_of(&[("show", Value::Bool(false))]),
+        )?;
     }
     Ok(Value::None)
 }
@@ -1853,7 +2431,10 @@ fn c_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn c_empty_window(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let empty = py::s(vm, "");
-    let base = kw_of(&[("interact", Value::Bool(false)), ("_call_done", Value::Bool(false))]);
+    let base = kw_of(&[
+        ("interact", Value::Bool(false)),
+        ("_call_done", Value::Bool(false)),
+    ]);
     if e6(vm) {
         vm.call(this, vec![empty], base)?;
         return Ok(Value::None);
@@ -1862,7 +2443,11 @@ fn c_empty_window(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let name = py::get(vm, this, "name")?;
     let wp = py::get(vm, this, "what_prefix")?;
     let ws = py::get(vm, this, "what_suffix")?;
-    if cfg_true(vm, "fast_empty_window")? && py::is_none(&name) && !(py::truthy(vm, &wp)? || py::truthy(vm, &ws)?) && py::is_none(&multiple) {
+    if cfg_true(vm, "fast_empty_window")?
+        && py::is_none(&name)
+        && !(py::truthy(vm, &wp)? || py::truthy(vm, &ws)?)
+        && py::is_none(&multiple)
+    {
         vm.call_method(this, "do_show", vec![Value::None, empty])?;
         return Ok(Value::None);
     }
@@ -1884,13 +2469,24 @@ fn c_has_character_arguments(_: &mut Vm, _: &[Value], kw: Kw) -> PyResult<Value>
     Ok(Value::Bool(kw.iter().all(|(k, _)| safe.contains(&&**k))))
 }
 
-fn prefix_suffix(vm: &mut Vm, thing: &str, prefix: &Value, body: &Value, suffix: &Value, translate: bool) -> PyResult<Value> {
+fn prefix_suffix(
+    vm: &mut Vm,
+    thing: &str,
+    prefix: &Value,
+    body: &Value,
+    suffix: &Value,
+    translate: bool,
+) -> PyResult<Value> {
     let sub = |vm: &mut Vm, s: &str| -> PyResult<String> {
         let v = vm.types.new_str(s);
         let r = substitute(vm, &v, true)?;
         py::string(vm, &r)
     };
-    let (p, b, s) = (py::string(vm, prefix)?, py::string(vm, body)?, py::string(vm, suffix)?);
+    let (p, b, s) = (
+        py::string(vm, prefix)?,
+        py::string(vm, body)?,
+        py::string(vm, suffix)?,
+    );
     if !cfg_true(vm, "new_substitutions")? {
         return Ok(vm.types.new_str(&format!("{p}{b}{s}")));
     }
@@ -1934,18 +2530,38 @@ fn log_line(vm: &mut Vm, s: Value) -> PyResult<()> {
 }
 
 /// 6.x `__call__(what, interact=True, _call_done=True, **kwargs)`.
-fn call_6(vm: &mut Vm, this: &Value, what: &Value, interact: bool, call_done: bool, kw: &[(Rc<str>, Value)]) -> PyResult<Value> {
+fn call_6(
+    vm: &mut Vm,
+    this: &Value,
+    what: &Value,
+    interact: bool,
+    call_done: bool,
+    kw: &[(Rc<str>, Value)],
+) -> PyResult<Value> {
     if condition_false(vm, this)? {
         return Ok(Value::Bool(true));
     }
     if !is_str(what) {
         let r = ops::repr(vm, what)?;
-        return Err(py::error(vm, format!("Character expects its what argument to be a string, got {r}.")));
+        return Err(py::error(
+            vm,
+            format!("Character expects its what argument to be a string, got {r}."),
+        ));
     }
     let sa = cfg(vm, "speaking_attribute", Value::None);
-    let speaking = if interact && !py::is_none(&sa) { vm.types.new_list(vec![sa]) } else { vm.types.new_list(Vec::new()) };
+    let speaking = if interact && !py::is_none(&sa) {
+        vm.types.new_list(vec![sa])
+    } else {
+        vm.types.new_list(Vec::new())
+    };
     let empty = vm.types.new_list(Vec::new());
-    py::method_kw(vm, this, "resolve_say_attributes", vec![Value::Bool(false)], kw_of(&[("wanted", speaking.clone())]))?;
+    py::method_kw(
+        vm,
+        this,
+        "resolve_say_attributes",
+        vec![Value::Bool(false)],
+        kw_of(&[("wanted", speaking.clone())]),
+    )?;
     let old_side = store_get(vm, "_side_image_attributes")?;
     let tag = py::get(vm, this, "image_tag")?;
     let attrs = if py::truthy(vm, &tag)? {
@@ -1975,12 +2591,18 @@ fn call_6(vm: &mut Vm, this: &Value, what: &Value, interact: bool, call_done: bo
         py::dict_set(vm, &da, "interact", Value::Bool(di))?;
         let mut who = who_name(vm, this)?;
         if !py::is_none(&who) {
-            let (p, s) = (py::get(vm, this, "who_prefix")?, py::get(vm, this, "who_suffix")?);
+            let (p, s) = (
+                py::get(vm, this, "who_prefix")?,
+                py::get(vm, this, "who_suffix")?,
+            );
             who = prefix_suffix(vm, "who", &p, &who, &s, true)?;
         }
         let c = ctx(vm)?;
         let tbl = py::get_or_none(vm, &c, "translate_block_language")?;
-        let (p, s) = (py::get(vm, this, "what_prefix")?, py::get(vm, this, "what_suffix")?);
+        let (p, s) = (
+            py::get(vm, this, "what_prefix")?,
+            py::get(vm, this, "what_suffix")?,
+        );
         let what = prefix_suffix(vm, "what", &p, what, &s, py::is_none(&tbl))?;
         vm.call_method(this, "do_add", vec![who.clone(), what.clone()])?;
         let mut k: Vec<(Rc<str>, Value)> = vec![("cb_args".into(), py::get(vm, this, "cb_args")?)];
@@ -1998,7 +2620,13 @@ fn call_6(vm: &mut Vm, this: &Value, what: &Value, interact: bool, call_done: bo
     })();
     if interact {
         store_set(vm, "_side_image_attributes", old_side)?;
-        py::method_kw(vm, this, "resolve_say_attributes", vec![Value::Bool(false)], kw_of(&[("remove", speaking)]))?;
+        py::method_kw(
+            vm,
+            this,
+            "resolve_say_attributes",
+            vec![Value::Bool(false)],
+            kw_of(&[("remove", speaking)]),
+        )?;
     }
     let _ = empty;
     r?;
@@ -2006,7 +2634,15 @@ fn call_6(vm: &mut Vm, this: &Value, what: &Value, interact: bool, call_done: bo
 }
 
 /// 7.x/8.x `__call__`.
-fn call_7(vm: &mut Vm, this: &Value, what: &Value, interact: bool, call_done: bool, multiple: Value, kw: &[(Rc<str>, Value)]) -> PyResult<Value> {
+fn call_7(
+    vm: &mut Vm,
+    this: &Value,
+    what: &Value,
+    interact: bool,
+    call_done: bool,
+    multiple: Value,
+    kw: &[(Rc<str>, Value)],
+) -> PyResult<Value> {
     let mut kw = kw.to_vec();
     let take = |kw: &mut Vec<(Rc<str>, Value)>, n: &str| -> Value {
         match kw.iter().position(|(k, _)| &**k == n) {
@@ -2021,16 +2657,32 @@ fn call_7(vm: &mut Vm, this: &Value, what: &Value, interact: bool, call_done: bo
         let mut k = kw.clone();
         k.push(("kind".into(), this.clone()));
         let c = vm.call(&ch, Vec::new(), k)?;
-        return vm.call(&c, vec![what.clone()], kw_of(&[("interact", Value::Bool(interact)), ("_call_done", Value::Bool(call_done)), ("multiple", multiple), ("_mode", mode_kw), ("_with_none", with_none)]));
+        return vm.call(
+            &c,
+            vec![what.clone()],
+            kw_of(&[
+                ("interact", Value::Bool(interact)),
+                ("_call_done", Value::Bool(call_done)),
+                ("multiple", multiple),
+                ("_mode", mode_kw),
+                ("_with_none", with_none),
+            ]),
+        );
     }
     if condition_false(vm, this)? {
         return Ok(Value::Bool(true));
     }
     if !is_str(what) {
         let r = ops::repr(vm, what)?;
-        return Err(py::error(vm, format!("Character expects its what argument to be a string, got {r}.")));
+        return Err(py::error(
+            vm,
+            format!("Character expects its what argument to be a string, got {r}."),
+        ));
     }
-    if store_get(vm, "_side_image_attributes_reset").and_then(|v| py::truthy(vm, &v)).unwrap_or(false) {
+    if store_get(vm, "_side_image_attributes_reset")
+        .and_then(|v| py::truthy(vm, &v))
+        .unwrap_or(false)
+    {
         store_set(vm, "_side_image_attributes", Value::None)?;
         store_set(vm, "_side_image_attributes_reset", Value::Bool(false))?;
     }
@@ -2043,10 +2695,23 @@ fn call_7(vm: &mut Vm, this: &Value, what: &Value, interact: bool, call_done: bo
         let n = py::int(vm, &mc)? + 1;
         let total = py::int(vm, &multiple)?;
         multiple = vm.types.new_tuple(vec![Value::Int(n), Value::Int(total)]);
-        py::set(vm, &m, "multiple_count", Value::Int(if n == total { 0 } else { n }))?;
+        py::set(
+            vm,
+            &m,
+            "multiple_count",
+            Value::Int(if n == total { 0 } else { n }),
+        )?;
     }
     let has_handle = py::get_opt(vm, this, "handle_say_attributes")?.is_some();
-    let old_attr_state = if has_handle { vm.call_method(this, "handle_say_attributes", vec![Value::Bool(false), Value::Bool(interact)])? } else { Value::None };
+    let old_attr_state = if has_handle {
+        vm.call_method(
+            this,
+            "handle_say_attributes",
+            vec![Value::Bool(false), Value::Bool(interact)],
+        )?
+    } else {
+        Value::None
+    };
     let mut old_side = Value::None;
     let tag = py::get(vm, this, "image_tag")?;
     if py::is_none(&multiple) {
@@ -2070,7 +2735,11 @@ fn call_7(vm: &mut Vm, this: &Value, what: &Value, interact: bool, call_done: bo
     let r = (|| -> PyResult<()> {
         let c = ctx(vm)?;
         if interact {
-            let mode = if py::truthy(vm, &mode_kw)? { mode_kw.clone() } else { py::get(vm, this, "mode")? };
+            let mode = if py::truthy(vm, &mode_kw)? {
+                mode_kw.clone()
+            } else {
+                py::get(vm, this, "mode")?
+            };
             ex(vm, "mode", vec![mode], Vec::new())?;
         } else if py::get_opt(vm, &c, "deferred_translate_identifier")?.is_some() {
             let ti = py::get_or_none(vm, &c, "translate_identifier")?;
@@ -2089,17 +2758,39 @@ fn call_7(vm: &mut Vm, this: &Value, what: &Value, interact: bool, call_done: bo
         }
         let mut who = who_name(vm, this)?;
         if !py::is_none(&who) {
-            let (p, s) = (py::get(vm, this, "who_prefix")?, py::get(vm, this, "who_suffix")?);
+            let (p, s) = (
+                py::get(vm, this, "who_prefix")?,
+                py::get(vm, this, "who_suffix")?,
+            );
             who = prefix_suffix(vm, "who", &p, &who, &s, true)?;
         }
-        let (p, s) = (py::get(vm, this, "what_prefix")?, py::get(vm, this, "what_suffix")?);
+        let (p, s) = (
+            py::get(vm, this, "what_prefix")?,
+            py::get(vm, this, "what_suffix")?,
+        );
         let what = prefix_suffix(vm, "what", &p, what, &s, true)?;
-        let mk = if py::is_none(&multiple) { Vec::new() } else { vec![("multiple".into(), multiple.clone())] };
-        py::method_kw(vm, this, "do_add", vec![who.clone(), what.clone()], mk.clone())?;
+        let mk = if py::is_none(&multiple) {
+            Vec::new()
+        } else {
+            vec![("multiple".into(), multiple.clone())]
+        };
+        py::method_kw(
+            vm,
+            this,
+            "do_add",
+            vec![who.clone(), what.clone()],
+            mk.clone(),
+        )?;
         let dtt = new_dtt(vm, &what)?;
         let hcd = cfg_true(vm, "history_current_dialogue")?;
         if hcd {
-            py::method_kw(vm, this, "add_history", vec![py::s(vm, "current"), who.clone(), what.clone()], kw_of(&[("multiple", multiple.clone())]))?;
+            py::method_kw(
+                vm,
+                this,
+                "add_history",
+                vec![py::s(vm, "current"), who.clone(), what.clone()],
+                kw_of(&[("multiple", multiple.clone())]),
+            )?;
         }
         let mut k: Vec<(Rc<str>, Value)> = vec![("cb_args".into(), py::get(vm, this, "cb_args")?)];
         if at_least(vm, 7, 4) {
@@ -2134,11 +2825,23 @@ fn call_7(vm: &mut Vm, this: &Value, what: &Value, interact: bool, call_done: bo
             let st = py::items(vm, &old_attr_state)?;
             before = vm.call_method(&st[1], "get_attributes", vec![Value::None, tag.clone()])?;
         }
-        let restored = vm.call_method(this, "restore_say_attributes", vec![Value::Bool(false), old_attr_state.clone(), Value::Bool(interact)])?;
+        let restored = vm.call_method(
+            this,
+            "restore_say_attributes",
+            vec![
+                Value::Bool(false),
+                old_attr_state.clone(),
+                Value::Bool(interact),
+            ],
+        )?;
         if py::truthy(vm, &restored)? {
             let st = py::items(vm, &old_attr_state)?;
             let after = vm.call_method(&st[1], "get_attributes", vec![Value::None, tag])?;
-            vm.call_method(this, "handle_say_transition", vec![py::s(vm, "restore"), before, after])?;
+            vm.call_method(
+                this,
+                "handle_say_transition",
+                vec![py::s(vm, "restore"), before, after],
+            )?;
         }
     }
     r?;
@@ -2147,17 +2850,29 @@ fn call_7(vm: &mut Vm, this: &Value, what: &Value, interact: bool, call_done: bo
 
 fn c_call(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let what = args.get(1).cloned().or_else(|| py::kw(kw, "what").cloned()).unwrap_or(Value::None);
+    let what = args
+        .get(1)
+        .cloned()
+        .or_else(|| py::kw(kw, "what").cloned())
+        .unwrap_or(Value::None);
     let interact = arg_or(&args[1..], kw, 1, "interact", Value::Bool(true));
     let interact = py::truthy(vm, &interact)?;
     let call_done = arg_or(&args[1..], kw, 2, "_call_done", Value::Bool(true));
     let call_done = py::truthy(vm, &call_done)?;
     if e6(vm) {
-        let rest: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "what" | "interact" | "_call_done")).cloned().collect();
+        let rest: Vec<_> = kw
+            .iter()
+            .filter(|(k, _)| !matches!(&**k, "what" | "interact" | "_call_done"))
+            .cloned()
+            .collect();
         return call_6(vm, this, &what, interact, call_done, &rest);
     }
     let multiple = arg_or(&args[1..], kw, 3, "multiple", Value::None);
-    let rest: Vec<_> = kw.iter().filter(|(k, _)| !matches!(&**k, "what" | "interact" | "_call_done" | "multiple")).cloned().collect();
+    let rest: Vec<_> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "what" | "interact" | "_call_done" | "multiple"))
+        .cloned()
+        .collect();
     call_7(vm, this, &what, interact, call_done, multiple, &rest)
 }
 
@@ -2182,10 +2897,20 @@ fn c_predict(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         let sa = cfg(vm, "speaking_attribute", Value::None);
         if !py::is_none(&sa) {
             let w = vm.types.new_list(vec![sa]);
-            py::method_kw(vm, this, "resolve_say_attributes", vec![Value::Bool(true)], kw_of(&[("wanted", w)]))?;
+            py::method_kw(
+                vm,
+                this,
+                "resolve_say_attributes",
+                vec![Value::Bool(true)],
+                kw_of(&[("wanted", w)]),
+            )?;
         }
     } else if py::get_opt(vm, this, "handle_say_attributes")?.is_some() {
-        state = vm.call_method(this, "handle_say_attributes", vec![Value::Bool(true), Value::Bool(true)])?;
+        state = vm.call_method(
+            this,
+            "handle_say_attributes",
+            vec![Value::Bool(true), Value::Bool(true)],
+        )?;
     }
     let old_side = store_get(vm, "_side_image_attributes")?;
     let tag = py::get(vm, this, "image_tag")?;
@@ -2198,12 +2923,20 @@ fn c_predict(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     store_set(vm, "_side_image_attributes", attrs)?;
     let r = (|| -> PyResult<Value> {
         let dynamic = py::get(vm, this, "dynamic")?;
-        let who = if py::truthy(vm, &dynamic)? { py::s(vm, "<Dynamic>") } else { py::get(vm, this, "name")? };
+        let who = if py::truthy(vm, &dynamic)? {
+            py::s(vm, "<Dynamic>")
+        } else {
+            py::get(vm, this, "name")?
+        };
         vm.call_method(this, "do_predict", vec![who, what])
     })();
     store_set(vm, "_side_image_attributes", old_side)?;
     if !old && py::get_opt(vm, this, "restore_say_attributes")?.is_some() {
-        vm.call_method(this, "restore_say_attributes", vec![Value::Bool(true), state, Value::Bool(true)])?;
+        vm.call_method(
+            this,
+            "restore_say_attributes",
+            vec![Value::Bool(true), state, Value::Bool(true)],
+        )?;
     }
     r
 }
@@ -2232,7 +2965,13 @@ fn c_add_history(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     py::set(vm, &h, "kind", args[1].clone())?;
     py::set(vm, &h, "who", args[2].clone())?;
     py::set(vm, &h, "what", args[3].clone())?;
-    for n in ["who_args", "what_args", "window_args", "show_args", "image_tag"] {
+    for n in [
+        "who_args",
+        "what_args",
+        "window_args",
+        "show_args",
+        "image_tag",
+    ] {
         let v = py::get(vm, this, n)?;
         py::set(vm, &h, n, v)?;
     }
@@ -2286,8 +3025,16 @@ fn c_pop_history(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn f_character(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let ns = not_set(vm)?;
-    let name = args.first().cloned().or_else(|| py::kw(kw, "name").cloned()).unwrap_or(ns);
-    let mut kind = args.get(1).cloned().or_else(|| py::kw(kw, "kind").cloned()).unwrap_or(Value::None);
+    let name = args
+        .first()
+        .cloned()
+        .or_else(|| py::kw(kw, "name").cloned())
+        .unwrap_or(ns);
+    let mut kind = args
+        .get(1)
+        .cloned()
+        .or_else(|| py::kw(kw, "kind").cloned())
+        .unwrap_or(Value::None);
     if py::is_none(&kind) {
         kind = store_get(vm, "adv")?;
     }
@@ -2297,7 +3044,11 @@ fn f_character(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         }
     }
     let ty = Value::Obj(ops::type_of(vm, &kind));
-    let mut k: Vec<(Rc<str>, Value)> = kw.iter().filter(|(k, _)| !matches!(&**k, "name" | "kind")).cloned().collect();
+    let mut k: Vec<(Rc<str>, Value)> = kw
+        .iter()
+        .filter(|(k, _)| !matches!(&**k, "name" | "kind"))
+        .cloned()
+        .collect();
     k.push(("kind".into(), kind));
     vm.call(&ty, vec![name], k)
 }
@@ -2348,19 +3099,74 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
         ],
     );
     let set = |vm: &Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
-    let dtt = py::class(vm, MODULE, "DialogueTextTags", &[], &[("__init__", dtt_init)], &[])?;
+    let dtt = py::class(
+        vm,
+        MODULE,
+        "DialogueTextTags",
+        &[],
+        &[("__init__", dtt_init)],
+        &[],
+    )?;
     set(vm, "DialogueTextTags", Value::Obj(dtt));
-    let cb = py::class(vm, MODULE, "Callbacks", &[], &[("__init__", cb_init), ("__call__", cb_call), ("copy", cb_copy)], &[])?;
+    let cb = py::class(
+        vm,
+        MODULE,
+        "Callbacks",
+        &[],
+        &[
+            ("__init__", cb_init),
+            ("__call__", cb_call),
+            ("copy", cb_copy),
+        ],
+        &[],
+    )?;
     set(vm, "Callbacks", Value::Obj(cb));
-    let sd = py::class(vm, MODULE, "SlowDone", &[], &[("__init__", sd_init), ("__call__", sd_call)], &[("delay", Value::None), ("last_pause", Value::Bool(true)), ("no_wait", Value::Bool(false))])?;
+    let sd = py::class(
+        vm,
+        MODULE,
+        "SlowDone",
+        &[],
+        &[("__init__", sd_init), ("__call__", sd_call)],
+        &[
+            ("delay", Value::None),
+            ("last_pause", Value::Bool(true)),
+            ("no_wait", Value::Bool(false)),
+        ],
+    )?;
     set(vm, "SlowDone", Value::Obj(sd));
     let obj = py::import_attr(vm, "renpy.object", "Object")?;
-    let he = py::class(vm, MODULE, "HistoryEntry", &[obj], &[("__eq__", he_eq), ("__hash__", he_hash), ("__repr__", he_repr)], &[("multiple", Value::None), ("who", Value::None), ("what", Value::None)])?;
+    let he = py::class(
+        vm,
+        MODULE,
+        "HistoryEntry",
+        &[obj],
+        &[
+            ("__eq__", he_eq),
+            ("__hash__", he_hash),
+            ("__repr__", he_repr),
+        ],
+        &[
+            ("multiple", Value::None),
+            ("who", Value::None),
+            ("what", Value::None),
+        ],
+    )?;
     set(vm, "HistoryEntry", Value::Obj(he));
     let sentinel = py::import_attr(vm, "renpy.object", "Sentinel")?;
     let ns = vm.call(&sentinel, vec![py::s(vm, "NotSet")], Vec::new())?;
     set(vm, "NotSet", ns);
-    let special = vm.types.new_list(["what_prefix", "what_suffix", "who_prefix", "who_suffix", "show_function"].iter().map(|s| vm.types.new_str(s)).collect());
+    let special = vm.types.new_list(
+        [
+            "what_prefix",
+            "what_suffix",
+            "who_prefix",
+            "who_suffix",
+            "show_function",
+        ]
+        .iter()
+        .map(|s| vm.types.new_str(s))
+        .collect(),
+    );
     let methods: py::Methods = &[
         ("__init__", c_init),
         ("copy", c_copy),
@@ -2389,10 +3195,30 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
         ("add_history", c_add_history),
         ("pop_history", c_pop_history),
     ];
-    let adv = py::class(vm, MODULE, "ADVCharacter", &[], methods, &[("special_properties", special), ("voice_tag", Value::None), ("properties", py::dict(vm)), ("_statement_name", Value::None)])?;
+    let adv = py::class(
+        vm,
+        MODULE,
+        "ADVCharacter",
+        &[],
+        methods,
+        &[
+            ("special_properties", special),
+            ("voice_tag", Value::None),
+            ("properties", py::dict(vm)),
+            ("_statement_name", Value::None),
+        ],
+    )?;
     if e6(vm) {
         // Not part of the 6.x class.
-        for n in ["handle_say_attributes", "handle_say_transition", "restore_say_attributes", "has_character_arguments", "prefix_suffix", "statement_name", "get_show_properties"] {
+        for n in [
+            "handle_say_attributes",
+            "handle_say_transition",
+            "restore_say_attributes",
+            "has_character_arguments",
+            "prefix_suffix",
+            "statement_name",
+            "get_show_properties",
+        ] {
             if let Some(d) = adv.attr_table() {
                 d.borrow_mut().del_str(n);
             }

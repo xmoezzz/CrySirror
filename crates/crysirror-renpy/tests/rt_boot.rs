@@ -24,7 +24,9 @@ struct DirFiles {
 }
 
 fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
@@ -64,19 +66,30 @@ fn fixture() -> Option<(DirFiles, [u32; 4])> {
     for (i, p) in v.split('.').take(4).enumerate() {
         version[i] = p.parse().ok()?;
     }
-    Some((DirFiles { game: game.into(), common: common.into() }, version))
+    Some((
+        DirFiles {
+            game: game.into(),
+            common: common.into(),
+        },
+        version,
+    ))
 }
 
 #[test]
 fn game_boots_to_its_first_interaction() {
     let Some((files, version)) = fixture() else {
-        eprintln!("game_boots_to_its_first_interaction: no fixture (RENPY_GAME_DIR/RENPY_COMMON_DIR/RENPY_VERSION); not run");
+        eprintln!(
+            "game_boots_to_its_first_interaction: no fixture (RENPY_GAME_DIR/RENPY_COMMON_DIR/RENPY_VERSION); not run"
+        );
         return;
     };
     let (to_script, from_owner) = mpsc::sync_channel::<ToScript>(1);
     let (to_owner, from_script) = mpsc::sync_channel::<FromScript>(1);
     let files: Arc<dyn Files> = Arc::new(files);
-    let first = Tick { now_ms: 0, ..Tick::default() };
+    let first = Tick {
+        now_ms: 0,
+        ..Tick::default()
+    };
     let thread = std::thread::Builder::new()
         .stack_size(64 << 20)
         .spawn(move || {
@@ -107,7 +120,12 @@ fn game_boots_to_its_first_interaction() {
                 if frames >= 3 {
                     break;
                 }
-                to_script.send(ToScript::Tick(Tick { now_ms: now, ..Tick::default() })).unwrap();
+                to_script
+                    .send(ToScript::Tick(Tick {
+                        now_ms: now,
+                        ..Tick::default()
+                    }))
+                    .unwrap();
             }
             FromScript::Exit { out, result } => {
                 for d in &out.diagnostics {
@@ -134,5 +152,8 @@ fn game_boots_to_its_first_interaction() {
     }
     assert!(frames > 0, "no frame was drawn (exit: {exit:?})");
     let f = last_frame.unwrap();
-    eprintln!("frames: {frames}; last frame has {} layer operations", f.len());
+    eprintln!(
+        "frames: {frames}; last frame has {} layer operations",
+        f.len()
+    );
 }

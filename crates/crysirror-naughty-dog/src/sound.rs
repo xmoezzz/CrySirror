@@ -15,7 +15,7 @@
 //! bytes) is `{command << 24 | data offset, delay}`. Command 1 plays a
 //! tone: 24 bytes of grain data ending in the sample's offset and size in
 //! section 1. The name table is `{bank name[8], buckets, strings offset}`
-//! and one 16-byte record per sound `{string offset, hash, sound, next}`.
+//! and one 16-byte record per sound `{string offset, hash, bucket head:u16, next:u16, sound index:u16, pad:u16}`.
 use crate::dc::{Dc, sid};
 use anyhow::{Context, Result, ensure};
 use crysirror_core::service::AssetReader;
@@ -123,8 +123,8 @@ impl Bank {
             let text = b.get(at..).context("SBlk name")?;
             let end = text.iter().position(|c| *c == 0).unwrap_or(text.len());
             let sound_name = String::from_utf8_lossy(&text[..end]).into_owned();
-            let index = u16::from_be_bytes(b.get(r + 8..r + 10).context("SBlk name record")?.try_into()?) as usize;
-            ensure!(index < count, "SBlk sound index");
+            let index = u16::from_be_bytes(b.get(r + 12..r + 14).context("SBlk name record")?.try_into()?) as usize;
+            ensure!(index < count && by_index[index].is_empty(), "invalid or repeated SBlk sound index");
             let s = sounds + 12 * index;
             let volume = *b.get(s).context("SBlk sound")?;
             let n = *b.get(s + 4).context("SBlk sound")? as usize;
@@ -274,6 +274,8 @@ mod tests {
         w(&mut s, 0x54 + 20, 32);
         w(&mut s, 0x80 + 12, 0x20);
         w(&mut s, 0x90, 0);
+        // Empty hash bucket at +8; this is not the sound number at +12.
+        w(&mut s, 0x98, u32::MAX);
         s[0xa0..0xa4].copy_from_slice(b"boom");
         let mut b = vec![0u8; 32];
         w(&mut b, 0, 3);

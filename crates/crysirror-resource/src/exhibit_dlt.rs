@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-//! Ordinary indexed ExHibit DLT 0x0101–0x0103 without a separate alpha plane.
+//! Ordinary indexed ExHibit DLT 0x0101–0x0103, including v1 mask planes.
 //!
 //! Resource decoding only: the frame interval and loop hint come from the
 //! file header. Script modes, placement and animation clocks are not here.
@@ -34,7 +34,11 @@ pub struct DltFrame {
 
 #[derive(Debug)]
 enum Delta {
-    Paint { rect: [u32; 4], range: Range<usize> },
+    Paint {
+        rect: [u32; 4],
+        range: Range<usize>,
+        mask: Option<Range<usize>>,
+    },
     Hold,
 }
 
@@ -51,6 +55,8 @@ pub struct DltDecoder {
     palette: [[u8; 4]; 256],
     pixels: Vec<u8>,
     base: Range<usize>,
+    mask_base: Option<Range<usize>>,
+    mask_pixels: Vec<u8>,
     stride: usize,
     version: Version,
     deltas: Vec<Delta>,
@@ -105,11 +111,12 @@ impl DltDecoder {
             "invalid ExHibit DLT record count"
         );
         let format = word(&encoded, 16)?;
+        let masked = version == Version::V101 && matches!(format, 0x0802 | 0x0803);
         ensure!(
             if late {
                 format == 0x0800
             } else {
-                matches!(format, 0x0800 | 0x0801)
+                matches!(format, 0x0800 | 0x0801) || masked
             },
             "unsupported ExHibit DLT pixel profile {format:#x}"
         );
@@ -145,11 +152,22 @@ impl DltDecoder {
             if late {
                 word(&encoded, b.start)? == 0x0d02 && base_len > 0
             } else {
-                word(&encoded, b.start)? == 0x0f02 && base_len == stride * height as usize
+                word(&encoded, b.start)? == if masked { 0x4f02 } else { 0x0f02 }
+                    && base_len == stride * height as usize
             },
             "invalid ExHibit DLT full image record"
         );
+        if masked {
+            let header = take(&encoded, &mut at, 4)?;
+            ensure!(
+                word(&encoded, header.start)? as usize == base_len,
+                "invalid ExHibit DLT mask extent"
+            );
+        }
         let base = take(&encoded, &mut at, base_len)?;
+        let mask_base = masked
+            .then(|| take(&encoded, &mut at, base_len))
+            .transpose()?;
         // 0x0103 counts its terminator; 0x0101 does not.
         let physical_frames = records as usize - 1 - usize::from(late);
         let mut deltas = Vec::with_capacity(physical_frames - 1);
@@ -168,7 +186,9 @@ impl DltDecoder {
             let ptr = header.start;
             ensure!(
                 flags
-                    == if version == Version::V101 {
+                    == if masked {
+                        0x4200
+                    } else if version == Version::V101 {
                         0x0200
                     } else {
                         0x0001_0200
@@ -190,10 +210,22 @@ impl DltDecoder {
                 "invalid ExHibit DLT delta rectangle"
             );
             ensure!(decode_len > 0, "empty ExHibit DLT delta");
+            let mask_len = if masked {
+                let header = take(&encoded, &mut at, 4)?;
+                let len = word(&encoded, header.start)? as usize;
+                ensure!(len > 0, "empty ExHibit DLT mask delta");
+                Some(len)
+            } else {
+                None
+            };
             let range = take(&encoded, &mut at, decode_len)?;
+            let mask = mask_len
+                .map(|len| take(&encoded, &mut at, len))
+                .transpose()?;
             deltas.push(Delta::Paint {
                 rect: [x, y, w, h],
                 range,
+                mask,
             });
         }
         let tail = take(&encoded, &mut at, 4)?;
@@ -213,6 +245,8 @@ impl DltDecoder {
             palette,
             pixels: vec![0; count],
             base,
+            mask_base,
+            mask_pixels: if masked { vec![0; count] } else { Vec::new() },
             stride,
             version,
             deltas,
@@ -260,8 +294,17 @@ impl DltDecoder {
             {
                 destination.copy_from_slice(&source[..row]);
             }
+            if let Some(range) = &self.mask_base {
+                for (dst, src) in self
+                    .mask_pixels
+                    .chunks_exact_mut(row)
+                    .zip(self.encoded[range.clone()].chunks_exact(self.stride).rev())
+                {
+                    dst.copy_from_slice(&src[..row]);
+                }
+            }
             [0, 0, width, height]
-        } else if let Delta::Paint { rect, range } = &self.deltas[frame - 1] {
+        } else if let Delta::Paint { rect, range, mask } = &self.deltas[frame - 1] {
             let [x, y, w, h] = rect.map(|n| n as usize);
             let packed = &self.encoded[range.clone()];
             let size = w * h;
@@ -270,6 +313,16 @@ impl DltDecoder {
             }
             let decoded = decompress_exact_12_4(packed, size)
                 .with_context(|| format!("ExHibit DLT color frame {frame}"))?;
+            // Decode both planes before mutating either retained canvas.
+            let mask = mask
+                .as_ref()
+                .map(|range| {
+                    let packed = &self.encoded[range.clone()];
+                    validate_lzss_prefix(packed, size.min(18))?;
+                    decompress_exact_12_4(packed, size)
+                        .with_context(|| format!("ExHibit DLT mask frame {frame}"))
+                })
+                .transpose()?;
             for (i, update) in decoded.chunks_exact(w).enumerate() {
                 let source_y = if self.version == Version::V101 {
                     i
@@ -282,6 +335,16 @@ impl DltDecoder {
                         *pixel = *new;
                     }
                 }
+                if let Some(mask) = &mask {
+                    for (pixel, &new) in self.mask_pixels[start..start + w]
+                        .iter_mut()
+                        .zip(&mask[i * w..(i + 1) * w])
+                    {
+                        if new != 0xfe {
+                            *pixel = new;
+                        }
+                    }
+                }
             }
             *rect
         } else {
@@ -289,8 +352,12 @@ impl DltDecoder {
         };
         self.next += 1;
         let mut rgba = Vec::with_capacity(self.pixels.len() * 4);
-        for &index in &self.pixels {
-            rgba.extend_from_slice(&self.palette[index as usize]);
+        for (i, &index) in self.pixels.iter().enumerate() {
+            let mut color = self.palette[index as usize];
+            if let Some(mask) = self.mask_pixels.get(i) {
+                color[3] = mask.saturating_mul(16);
+            }
+            rgba.extend_from_slice(&color);
         }
         Ok(Some(DltFrame {
             index: frame,
@@ -544,6 +611,84 @@ mod tests {
         let overlap = [0x01, 42, 0xee, 0xf0];
         validate_lzss_prefix(&overlap, 4)?;
         assert_eq!(decompress_exact_12_4(&overlap, 4)?, [42; 4]);
+        Ok(())
+    }
+
+    #[test]
+    fn v1_mask_planes_keep_only_fe_and_corruption_preserves_both_canvases() -> Result<()> {
+        let mut src = fixture()[..1064].to_vec();
+        src[16..20].copy_from_slice(&0x0803u32.to_le_bytes());
+        src.extend([0x4f02u32, 8, 8].into_iter().flat_map(u32::to_le_bytes));
+        src.extend([4, 5, 6, 0, 1, 2, 3, 0]);
+        src.extend([0, 16, 1, 0, 8, 3, 15, 0]);
+        src.extend(
+            [0x4200u32, 5, 1, 0, 2, 2, 5]
+                .into_iter()
+                .flat_map(u32::to_le_bytes),
+        );
+        src.extend([0x0f, 0, 7, 8, 0]);
+        let mask_start = src.len();
+        src.extend([0x0f, 0, 0xfe, 0xfe, 16]);
+        src.extend(0x8000u32.to_le_bytes());
+        let mut decoder = DltDecoder::open(src.clone().into())?;
+        let lanes = |frame: DltFrame, lane: usize| {
+            frame
+                .rgba
+                .chunks_exact(4)
+                .map(|p| p[lane])
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            lanes(decoder.next_frame()?.unwrap(), 3),
+            [128, 48, 240, 0, 255, 16]
+        );
+        assert_eq!(
+            lanes(decoder.next_frame()?.unwrap(), 3),
+            [128, 0, 240, 0, 255, 255]
+        );
+        assert_eq!(
+            lanes(decoder.next_looped_frame()?.unwrap(), 0),
+            [1, 2, 7, 4, 8, 6]
+        );
+
+        src[mask_start..mask_start + 3].copy_from_slice(&[0, 0xee, 0xf0]);
+        let mut bad = DltDecoder::open(src.into())?;
+        bad.next_frame()?;
+        assert!(bad.next_frame().is_err());
+        assert_eq!(bad.pixels, [1, 2, 3, 4, 5, 6]);
+        assert_eq!(bad.mask_pixels, [8, 3, 15, 0, 16, 1]);
+        assert_eq!(bad.next, 1);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires the user's installed Famisupi 1180.dlt; no game run"]
+    fn official_masked_clip_matches_independent_rgba_hash() -> Result<()> {
+        let path = std::env::var_os("CRYSIRROR_EXHIBIT_DLT_MASKED")
+            .context("set CRYSIRROR_EXHIBIT_DLT_MASKED to the local stock 1180.dlt")?;
+        let bytes = std::fs::read(path)?;
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&bytes)),
+            "fe17d25044ef8851f6487b31f516844e49ae4c2cd369ed6c2c255afb4a9ba83e"
+        );
+        let mut decoder = DltDecoder::open(bytes.into())?;
+        assert_eq!(
+            decoder.info(),
+            DltInfo {
+                size: [400, 400],
+                frames: 25,
+                interval_ms: 80,
+                loop_hint: true
+            }
+        );
+        let mut digest = Sha256::new();
+        while let Some(frame) = decoder.next_frame()? {
+            digest.update(frame.rgba);
+        }
+        assert_eq!(
+            format!("{:x}", digest.finalize()),
+            "0d6aea2ba35be3f915b3dbd343162a2a17ca976ead05fa789df2c8b22e7dd52b"
+        );
         Ok(())
     }
 

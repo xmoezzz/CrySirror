@@ -21,7 +21,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    fn channel(self) -> u32 {
+    pub(crate) fn channel(self) -> u32 {
         match self {
             Kind::Bgm => 0,
             Kind::Env => 1,
@@ -74,12 +74,71 @@ pub struct Sound {
     pub volumes: [f32; 5],
     pub current_bgm: Option<String>,
     bgm_legacy: bool,
+    pub dance_volume: f32,
+    pub special_se: bool,
+    spatial: [bool; 5],
+    voice_position: [f32; 3],
 }
 
 impl Sound {
     pub fn new() -> Self {
         let volumes = [Kind::Bgm, Kind::Env, Kind::Se, Kind::System, Kind::Voice].map(Kind::volume);
-        Self { pending: Vec::new(), all_volume: 50., volumes, current_bgm: None, bgm_legacy:false }
+        Self { pending: Vec::new(), all_volume: 50., volumes, current_bgm: None, bgm_legacy:false, dance_volume: 70., special_se: true, spatial: [false; 5], voice_position: [0.; 3] }
+    }
+
+    pub fn standalone() -> Self {
+        let mut sound = Self::new();
+        sound.all_volume = 80.;
+        sound.volumes = [35., 50., 60., 50., 80.];
+        sound.spatial = [false, true, true, false, true];
+        sound
+    }
+
+    pub fn spatial_enabled(&self, kind: Kind) -> bool {
+        self.spatial[kind as usize]
+    }
+
+    fn spatial_position(&self, kind: Kind) -> Option<[f32; 3]> {
+        self.spatial_enabled(kind).then_some(if kind == Kind::Voice { self.voice_position } else { [0.; 3] })
+    }
+
+    fn apply_spatial(&self, host: &mut dyn HostServices, client: ClientId, kind: Kind) -> Result<()> {
+        host.submit_audio(client, AudioRequest::SetChannelSpatial {
+            channel: kind.channel(), position: self.spatial_position(kind),
+        })?;
+        Ok(())
+    }
+
+    pub fn set_spatial_mode(&mut self, host: &mut dyn HostServices, client: ClientId, kind: Kind, enabled: bool) -> Result<()> {
+        self.spatial[kind as usize] = enabled;
+        if !self.pending.iter().any(|p| p.0 == kind) {
+            self.apply_spatial(host, client, kind)?;
+        }
+        Ok(())
+    }
+
+    pub fn set_voice_position(&mut self, host: &mut dyn HostServices, client: ClientId, position: [f32; 3]) -> Result<()> {
+        if position != self.voice_position {
+            self.voice_position = position;
+            if self.spatial_enabled(Kind::Voice) && !self.pending.iter().any(|p| p.0 == Kind::Voice) {
+                self.apply_spatial(host, client, Kind::Voice)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn voice_busy(&self, host: &dyn HostServices, client: ClientId) -> Result<bool> {
+        Ok(self.pending.iter().any(|p| p.0 == Kind::Voice) || host.audio_playing(client, Kind::Voice.channel())?)
+    }
+
+    pub fn set_dance_volume(&mut self, host: &mut dyn HostServices, client: ClientId, volume: f32) -> Result<()> {
+        host.submit_audio(client, AudioRequest::SetMixGroupGain {
+            name: "com3d2-dance".into(),
+            gain: volume / 100.,
+            fade_ms: 0.,
+        })?;
+        self.dance_volume = volume;
+        Ok(())
     }
 
     pub fn play(&mut self, host: &mut dyn HostServices, client: ClientId, files: &GameFiles, kind: Kind, name: &str, fade_s: f32, looping: bool) -> Result<()> {
@@ -97,6 +156,7 @@ impl Sound {
         }
         let parameters = AudioParameters {
             gain: self.gain(kind),
+            spatial_position: self.spatial_position(kind),
             decode_gain: if legacy { match kind { Kind::Bgm=>0.3,Kind::Se=>0.8,Kind::System=>0.5,Kind::Env=>0.15,Kind::Voice=>2.0 } } else {1.0},
             looping,
             ..Default::default()
@@ -111,6 +171,7 @@ impl Sound {
                 parameters,
             },
         )?;
+        self.clear_pending(host, client, kind)?;
         self.pending.push((kind, name.to_owned(), ticket));
         Ok(())
     }
@@ -128,9 +189,17 @@ impl Sound {
             Some(k) => self.volumes[k as usize] = value,
         }
         for k in [Kind::Bgm, Kind::Env, Kind::Se, Kind::System, Kind::Voice] {
-            if kind.is_none_or(|x| x == k) {
+            if kind.is_none_or(|x| x == k) && !self.pending.iter().any(|p| p.0 == k) {
                 host.submit_audio(client, AudioRequest::SetGain { channel: k.channel(), gain: self.gain(k), fade_ms: 0. })?;
             }
+        }
+        Ok(())
+    }
+
+    fn clear_pending(&mut self, host: &mut dyn HostServices, client: ClientId, kind: Kind) -> Result<()> {
+        if let Some(index) = self.pending.iter().position(|p| p.0 == kind) {
+            host.release_audio(client, self.pending[index].2)?;
+            self.pending.swap_remove(index);
         }
         Ok(())
     }
@@ -139,7 +208,19 @@ impl Sound {
         if kind == Kind::Bgm {
             self.current_bgm = None;
         }
+        self.clear_pending(host, client, kind)?;
         host.submit_audio(client, AudioRequest::Stop { channel: kind.channel(), fade_ms: fade_s.max(0.) * 1000. })?;
+        Ok(())
+    }
+
+    pub(crate) fn stop_all(&mut self, host: &mut dyn HostServices, client: ClientId) -> Result<()> {
+        for kind in [Kind::Bgm, Kind::System, Kind::Se, Kind::Voice, Kind::Env] {
+            self.stop(host, client, kind, 0.)?;
+        }
+        while let Some(&(_, _, ticket)) = self.pending.last() {
+            host.release_audio(client, ticket)?;
+            self.pending.pop();
+        }
         Ok(())
     }
 
@@ -150,7 +231,13 @@ impl Sound {
             let p = host.audio_preparation(client, ticket)?;
             match p.phase {
                 AudioPreparePhase::Pending => keep.push((kind, name, ticket)),
-                AudioPreparePhase::Ready => host.release_audio(client, ticket)?,
+                AudioPreparePhase::Ready => {
+                    self.apply_spatial(host, client, kind)?;
+                    host.submit_audio(client, AudioRequest::SetGain {
+                        channel: kind.channel(), gain: self.gain(kind), fade_ms: 0.,
+                    })?;
+                    host.release_audio(client, ticket)?;
+                }
                 AudioPreparePhase::Failed => bail!("SoundMgr {kind:?} {name}: {}", p.error.unwrap_or_default()),
             }
         }

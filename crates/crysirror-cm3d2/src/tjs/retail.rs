@@ -5,12 +5,14 @@ use super::{Func, TjsState, Variant, arg_bool, arg_int, arg_string, boolean, int
 use crate::{files::GameFiles, native_key::NativeKeys, nei::Table};
 pub(crate) mod activities;
 mod character;
+pub(crate) mod guest;
 mod facility;
 pub(crate) mod wardrobe;
 pub(crate) mod construction;
 pub(crate) mod shop;
 mod day;
 mod daily;
+pub(crate) mod native_save;
 pub(crate) mod operations;
 pub(crate) use daily::close_daily;
 mod stock;
@@ -23,6 +25,10 @@ pub(crate) use preset::{apply_bytes as apply_preset_bytes, read_colors as read_r
 pub(crate) use character::MPN as RETAIL_MPN;
 pub(crate) mod scenario;
 mod selection;
+pub(crate) use selection::sub_cast;
+pub(crate) mod free_skill;
+pub(crate) mod recollection;
+pub(crate) mod linked;
 mod status;
 use anyhow::{Context, Result, bail, ensure};
 use chrono::{Datelike, Local};
@@ -50,12 +56,22 @@ pub(crate) struct DeskPlacement {
     pub transform: [[f32; 3]; 3],
 }
 
+#[derive(Clone)]
+struct RecollectionMemory {
+    flags: crate::binio::OrderedMap<String, i32>,
+    experience: i32,
+    initial_experience: i32,
+    relation: Option<i32>,
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct State {
     source: Option<Source>,
     key: Option<NativeKeys>,
     tables: BTreeMap<String, Arc<Table>>,
     legacy_files: GameFiles,
+    legacy_key: Option<[u8; 16]>,
+    legacy_suffixes: Vec<String>,
     enabled_lists: BTreeMap<String, BTreeSet<i32>>,
     suffixes: Option<Vec<String>>,
     event_end: BTreeMap<String, BTreeMap<i32, bool>>,
@@ -68,6 +84,7 @@ pub(crate) struct State {
     pub(crate) casino_coins: i64,
     pub(crate) casino_dealers: BTreeMap<usize,usize>,
     pub(crate) casino_slot: Option<usize>,
+    pub(crate) casino_sold_out: BTreeSet<i32>,
     events: scenario::Events,
     vr_karaoke: Option<bool>,
     selection: Option<selection::Manager>,
@@ -77,10 +94,13 @@ pub(crate) struct State {
     pub(crate) upgrade_count: i32,
     slot_communication: BTreeMap<usize, [bool; 2]>,
     schedule_backup: Vec<daily::SlotBackup>,
+    legacy_schedule_backup: Vec<daily::SlotBackup>,
     pub(crate) business_name: Option<String>,
     pub(crate) club_name: Option<String>,
     pub(crate) peak_facilities: usize,
     facility_exp: BTreeMap<i32, crate::params::Exp>,
+    facility_build_counts: BTreeMap<i32, i32>,
+    native_facility_records: Option<crate::save::facility_v5::Facilities>,
     pub(crate) construction: construction::Orders,
     pub(crate) edit_facility: Option<usize>,
     facilities: Vec<facility::Facility>,
@@ -92,17 +112,22 @@ pub(crate) struct State {
     parts_indexed: bool,
     characters: BTreeMap<String, character::Status>,
     main_characters: BTreeSet<usize>,
+    native_employee_state: BTreeMap<String, (crate::save::status_1040::Status, crate::save::stock_1040::Misc<'static>)>,
     debug_stage: String,
     pub(crate) adv_present: bool,
     pub(crate) title_request: Option<String>,
     kasizuki: Kasizuki,
+    native_guest_slots: Vec<crate::save::slot_1040::Guest>,
+    native_guest_origin: Option<i32>,
+    recollection: BTreeMap<String, RecollectionMemory>,
+    pub(crate) recollection_returns: Option<BTreeMap<String, String>>,
     buildings: Option<BTreeSet<i32>>,
 }
 
 #[derive(Clone)]
 struct Kasizuki {
     system: BTreeMap<String, String>,
-    maids: BTreeMap<String, BTreeMap<String, i32>>,
+    maids: BTreeMap<String, BTreeMap<String, String>>,
 }
 impl Default for Kasizuki {
     fn default() -> Self {
@@ -232,6 +257,11 @@ impl State {
         Ok((source.files.clone(),source.storage.clone()))
     }
     pub(crate) fn editor_owns(&self, menu:&str)->bool { self.owned_parts.get(&menu.to_lowercase()).copied().unwrap_or(true) }
+    pub(crate) fn award_casino_parts(&mut self, menus: &[String]) {
+        for menu in menus {
+            self.owned_parts.insert(menu.to_ascii_lowercase(), true);
+        }
+    }
     pub(crate) fn index_parts(&mut self) -> Result<()> {
         if self.parts_indexed { return Ok(()); }
         let mut items = BTreeSet::new();
@@ -286,6 +316,10 @@ impl State {
         status.thumbnail_card_time = Local::now().format("%Y%m%d%H%M%S%3f").to_string();
         Ok(())
     }
+    pub(crate) fn has_built_facility(&self, id: i32) -> bool {
+        self.facilities.iter().any(|facility| facility.type_id == id)
+    }
+
     pub(crate) fn table(&mut self, name: &str) -> Result<Arc<Table>> {
         if let Some(table) = self.tables.get(name) {
             return Ok(table.clone());
@@ -302,6 +336,47 @@ impl State {
         self.tables.insert(name.to_owned(), table.clone());
         Ok(table)
     }
+}
+
+/// SceneFreeModeSelectManager.StoreBackupData.
+pub(crate) fn begin_recollection(s: &mut TjsState, returns: BTreeMap<String, String>) {
+    s.retail.recollection_returns = Some(returns);
+    s.retail.recollection = s.stock.iter().filter_map(|id| {
+        let status = s.maids.get(id)?;
+        let guid = &status.guid_id;
+        Some((guid.clone(), RecollectionMemory {
+            flags: status.generic_flag.clone(),
+            experience: status.seikeiken,
+            initial_experience: status.init_seikeiken,
+            relation: s.retail.characters.get(guid).map(|data| data.relation),
+        }))
+    }).collect();
+}
+
+/// RestoreBackupData re-adds the current trait sets. Its backed-up fields
+/// used for replacement are flags, both experience fields and relation.
+pub(crate) fn restore_recollection(s: &mut TjsState) {
+    for id in &s.stock {
+        let Some(status) = s.maids.get_mut(id) else { continue };
+        let Some(memory) = s.retail.recollection.get(&status.guid_id) else { continue };
+        status.generic_flag = memory.flags.clone();
+        status.seikeiken = memory.experience;
+        status.init_seikeiken = memory.initial_experience;
+        if let Some(value) = memory.relation
+            && let Some(data) = s.retail.characters.get_mut(&status.guid_id)
+        {
+            data.relation = value;
+        }
+    }
+}
+
+pub(crate) fn require_transferred_character(s: &TjsState) -> Result<()> {
+    let maid = s.maid(0).context("SceneYotogiOld requires an active transferred character")?;
+    ensure!(
+        s.retail.characters.get(&maid.guid_id).is_some_and(|status| status.old.is_some()),
+        "SceneYotogiOld requires a transferred character"
+    );
+    Ok(())
 }
 
 /// Original ReplaceFileNameCallBack checks slot zero before ReplacePersonal
@@ -368,7 +443,7 @@ fn maid_flag(s: &TjsState, slot: usize, name: &str) -> Result<i32> {
         .maids
         .get(&maid.guid_id)
         .and_then(|m| m.get(name))
-        .copied()
+        .and_then(|value| value.parse().ok())
         .unwrap_or(0))
 }
 fn likability(s: &TjsState, slot: usize) -> Result<i32> {
@@ -497,6 +572,16 @@ fn award(s:&mut TjsState,id:i32)->Result<()> {
     }
     Ok(())
 }
+
+pub(crate) fn record_casino_winnings(s: &mut TjsState, amount: i32) -> Result<()> {
+    let total = s.player.flag("コイン入手総額").wrapping_add(amount);
+    s.player.generic_flag.insert("コイン入手総額".into(), total);
+    if total >= 10_000 {
+        award(s, 1120)?;
+    }
+    Ok(())
+}
+
 fn contract_awards(s:&mut TjsState,_:&[Variant])->Result<Variant>{
     if s.retail.compatibility || s.player.flag("2.0モード")==1 {return Ok(Variant::Void);}
     let mut counts=[0usize;3];
@@ -873,7 +958,7 @@ pub(super) const METHODS: &[(&str, Func)] = &[
         let data = s.retail.kasizuki.maids.entry(guid).or_default();
         let name = arg_string(a, 1);
         if name != "好感度＿本編" {
-            data.insert(name, arg_int(a, 2) as i32);
+            data.insert(name, arg_string(a, 2));
         }
         Ok(Variant::Void)
     }),
@@ -1175,6 +1260,7 @@ mod tests {
                 before_assignment: Default::default(),
                 costume: wardrobe::Wardrobe{mode:wardrobe::Mode::Default,..Default::default()},
                 recipes: Default::default(),
+                native_parameters: None,
             });
         }
         assert!(t.eval_bool("SetCommunicationChara()")?);

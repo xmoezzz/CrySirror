@@ -18,9 +18,7 @@ use super::{
     params,
     py::{self, *},
 };
-use crate::{
-    sl2::{Block, Displayable, NChildren, Screen, SlNode, StatementSpec},
-};
+use crate::sl2::{Block, Displayable, NChildren, Screen, SlNode, StatementSpec};
 use crysirror_python::{ObjRef, PyErr, PyResult, Value, Vm, builtins::Kw, ops};
 use std::{
     cell::{Cell, RefCell},
@@ -38,9 +36,9 @@ thread_local! {
 // Screen AST values ------------------------------------------------------------------------------------
 
 /// Resolved statement of one displayable node.
-struct NodeRt {
-    spec: StatementSpec,
-    factory: Value,
+pub(crate) struct NodeRt {
+    pub(crate) spec: StatementSpec,
+    pub(crate) factory: Value,
 }
 
 pub struct ScreenAst {
@@ -65,7 +63,9 @@ pub fn ast_of(v: &Value) -> Option<Rc<ScreenAst>> {
 
 fn native_class(vm: &mut Vm, name: &str) -> PyResult<ObjRef> {
     let c = py::import_attr(vm, MODULE, name)?;
-    c.obj().cloned().ok_or_else(|| vm.type_error(name.to_owned()))
+    c.obj()
+        .cloned()
+        .ok_or_else(|| vm.type_error(name.to_owned()))
 }
 
 /// The `SLScreen` value of a parsed or unpickled screen.
@@ -74,7 +74,12 @@ pub fn screen_value(vm: &mut Vm, screen: Rc<Screen>) -> PyResult<Value> {
         v.set(v.get() + 1);
         v.get()
     });
-    let ast = Rc::new(ScreenAst { screen: screen.clone(), version, nodes: Default::default(), atl: Default::default() });
+    let ast = Rc::new(ScreenAst {
+        screen: screen.clone(),
+        version,
+        nodes: Default::default(),
+        atl: Default::default(),
+    });
     let c = native_class(vm, "SLScreen")?;
     let rv = vm.types.new_native(&c, Box::new(AstRef(ast)));
     let name = py::s(vm, &screen.name);
@@ -91,9 +96,17 @@ pub fn screen_value(vm: &mut Vm, screen: Rc<Screen>) -> PyResult<Value> {
         let v = py::s(vm, v);
         py::set(vm, &rv, n, v)?;
     }
-    let tag = screen.tag.as_ref().map(|t| py::s(vm, t)).unwrap_or(Value::None);
+    let tag = screen
+        .tag
+        .as_ref()
+        .map(|t| py::s(vm, t))
+        .unwrap_or(Value::None);
     py::set(vm, &rv, "tag", tag)?;
-    let doc = screen.docstring.as_ref().map(|t| py::s(vm, t)).unwrap_or(Value::None);
+    let doc = screen
+        .docstring
+        .as_ref()
+        .map(|t| py::s(vm, t))
+        .unwrap_or(Value::None);
     py::set(vm, &rv, "docstring", doc)?;
     let params = match &screen.parameters {
         Some(p) => super::atlrt::signature_value(vm, p.clone())?,
@@ -129,12 +142,28 @@ impl ScreenAst {
                 .into_iter()
                 .find(|s| s.displayable == d.statement)
                 .unwrap_or_else(|| custom_spec(&d.statement)),
-            None => return Err(py::error(vm, format!("{}:{}: unknown screen language statement {}", d.loc.0, d.loc.1, d.statement))),
+            None => {
+                return Err(py::error(
+                    vm,
+                    format!(
+                        "{}:{}: unknown screen language statement {}",
+                        d.loc.0, d.loc.1, d.statement
+                    ),
+                ));
+            }
         };
         let factory = resolve(vm, &spec.displayable)?;
         let rt = Rc::new(NodeRt { spec, factory });
         self.nodes.borrow_mut().insert(key, rt.clone());
         Ok(rt)
+    }
+
+    pub(crate) fn node_rt(&self, vm: &mut Vm, d: &Displayable) -> PyResult<Rc<NodeRt>> {
+        self.node(vm, d)
+    }
+
+    pub(crate) fn atl_parent_value(&self, vm: &mut Vm, b: &Block) -> PyResult<Value> {
+        self.atl_parent(vm, b)
     }
 
     fn atl_parent(&self, vm: &mut Vm, b: &Block) -> PyResult<Value> {
@@ -196,7 +225,9 @@ fn store_lookup(vm: &mut Vm, path: &str) -> PyResult<Value> {
 
 fn dget(vm: &mut Vm, d: &Value, k: &Value) -> PyResult<Option<Value>> {
     match d.obj() {
-        Some(o) if matches!(o.payload, crysirror_python::Payload::Dict(_)) => ops::dict_get(vm, o, k),
+        Some(o) if matches!(o.payload, crysirror_python::Payload::Dict(_)) => {
+            ops::dict_get(vm, o, k)
+        }
         _ => Ok(None),
     }
 }
@@ -236,7 +267,9 @@ fn is_transform(vm: &mut Vm, v: &Value) -> PyResult<bool> {
 }
 
 fn predicting(vm: &mut Vm) -> bool {
-    py::import_attr(vm, "renpy.display.predict", "predicting").ok().is_some_and(|v| matches!(v, Value::Bool(true)))
+    py::import_attr(vm, "renpy.display.predict", "predicting")
+        .ok()
+        .is_some_and(|v| matches!(v, Value::Bool(true)))
 }
 
 fn predict_displayable(vm: &mut Vm, d: &Value) -> PyResult<()> {
@@ -311,31 +344,40 @@ fn mark_copy_on_change(vm: &mut Vm, cache: &Value, seen: &mut HashSet<i64>) -> P
     Ok(())
 }
 
+pub(crate) fn copy_on_change_cache(vm: &mut Vm, cache: &Value) -> PyResult<()> {
+    mark_copy_on_change(vm, cache, &mut HashSet::new())
+}
+
+/// A constant-analysis level (`NOT_CONST`, `LOCAL_CONST`, `GLOBAL_CONST`).
+pub(crate) fn const_value(vm: &mut Vm, name: &str) -> PyResult<Value> {
+    py::import_attr(vm, MODULE, name)
+}
+
 // Contexts ---------------------------------------------------------------------------------------------
 
 #[derive(Clone)]
-struct Ctx<'a> {
-    ast: &'a ScreenAst,
-    scope: Value,
-    root_scope: Value,
-    children: Value,
-    keywords: Value,
-    style_prefix: Value,
-    new_cache: Value,
-    old_cache: Value,
-    miss_cache: Value,
-    use_index: Value,
-    predicting: bool,
-    updating: bool,
-    predicted: Value,
-    showif: Option<bool>,
-    fail: Cell<bool>,
-    parent: Option<&'a Ctx<'a>>,
-    transclude: Option<&'a Block>,
-    unlikely: bool,
-    old_use_cache: Value,
-    new_use_cache: Value,
-    sticky: Vec<(Rc<str>, Value)>,
+pub(crate) struct Ctx<'a> {
+    pub(crate) ast: &'a ScreenAst,
+    pub(crate) scope: Value,
+    pub(crate) root_scope: Value,
+    pub(crate) children: Value,
+    pub(crate) keywords: Value,
+    pub(crate) style_prefix: Value,
+    pub(crate) new_cache: Value,
+    pub(crate) old_cache: Value,
+    pub(crate) miss_cache: Value,
+    pub(crate) use_index: Value,
+    pub(crate) predicting: bool,
+    pub(crate) updating: bool,
+    pub(crate) predicted: Value,
+    pub(crate) showif: Option<bool>,
+    pub(crate) fail: Cell<bool>,
+    pub(crate) parent: Option<&'a Ctx<'a>>,
+    pub(crate) transclude: Option<&'a Block>,
+    pub(crate) unlikely: bool,
+    pub(crate) old_use_cache: Value,
+    pub(crate) new_use_cache: Value,
+    pub(crate) sticky: Vec<(Rc<str>, Value)>,
 }
 
 impl<'a> Ctx<'a> {
@@ -358,7 +400,12 @@ impl<'a> Ctx<'a> {
         py::set(vm, &o, "keywords", self.keywords.clone())?;
         py::set(vm, &o, "predicting", Value::Bool(self.predicting))?;
         py::set(vm, &o, "updating", Value::Bool(self.updating))?;
-        py::set(vm, &o, "showif", self.showif.map(Value::Bool).unwrap_or(Value::None))?;
+        py::set(
+            vm,
+            &o,
+            "showif",
+            self.showif.map(Value::Bool).unwrap_or(Value::None),
+        )?;
         Ok(o)
     }
 
@@ -376,13 +423,13 @@ fn pop_stack(vm: &mut Vm) -> PyResult<()> {
     Ok(())
 }
 
-enum Flow {
+pub(crate) enum Flow {
     Next,
     Break,
     Continue,
 }
 
-type SR = PyResult<Flow>;
+pub(crate) type SR = PyResult<Flow>;
 
 fn eval(vm: &mut Vm, e: &crate::lexer::PyExpr, scope: &Value) -> PyResult<Value> {
     super::atlrt::eval(vm, e, scope)
@@ -394,7 +441,7 @@ fn is_control(e: &PyErr) -> bool {
 
 // Blocks -----------------------------------------------------------------------------------------------
 
-fn block_has_keyword(b: &Block) -> bool {
+pub(crate) fn block_has_keyword(b: &Block) -> bool {
     !b.keyword.is_empty() || b.atl_transform.is_some() || b.children.iter().any(node_has_keyword)
 }
 
@@ -407,7 +454,7 @@ fn node_has_keyword(n: &SlNode) -> bool {
 
 /// `SLBlock.keywords`: evaluates the properties of a block (and of the
 /// chosen branches of nested `if` statements) into `ctx.keywords`.
-fn block_keywords(vm: &mut Vm, ctx: &mut Ctx, b: &Block) -> PyResult<()> {
+pub(crate) fn block_keywords(vm: &mut Vm, ctx: &mut Ctx, b: &Block) -> PyResult<()> {
     for (k, e) in &b.keyword {
         let v = eval(vm, e, &ctx.scope)?;
         py::dict_set(vm, &ctx.keywords, k, v)?;
@@ -433,7 +480,8 @@ fn block_keywords(vm: &mut Vm, ctx: &mut Ctx, b: &Block) -> PyResult<()> {
         }
     }
     if let Some(raw) = &b.atl_transform {
-        let t = super::atlrt::new_atl_transform(vm, raw.clone(), None, ctx.scope.clone(), Value::None)?;
+        let t =
+            super::atlrt::new_atl_transform(vm, raw.clone(), None, ctx.scope.clone(), Value::None)?;
         let parent = ctx.ast.atl_parent(vm, b)?;
         py::set(vm, &t, "parent_transform", parent)?;
         match dget(vm, &ctx.keywords, &py::s(vm, "at"))? {
@@ -463,7 +511,7 @@ fn block_keywords(vm: &mut Vm, ctx: &mut Ctx, b: &Block) -> PyResult<()> {
 }
 
 /// `SLBlock.execute`: while predicting, a failing child is skipped.
-fn exec_children(vm: &mut Vm, ctx: &mut Ctx, children: &[SlNode]) -> SR {
+pub(crate) fn exec_children(vm: &mut Vm, ctx: &mut Ctx, children: &[SlNode]) -> SR {
     for c in children {
         match exec_node(vm, ctx, c) {
             Ok(Flow::Next) => {}
@@ -475,33 +523,74 @@ fn exec_children(vm: &mut Vm, ctx: &mut Ctx, children: &[SlNode]) -> SR {
     Ok(Flow::Next)
 }
 
-fn exec_node(vm: &mut Vm, ctx: &mut Ctx, n: &SlNode) -> SR {
+pub(crate) fn exec_node(vm: &mut Vm, ctx: &mut Ctx, n: &SlNode) -> SR {
     match n {
         SlNode::Displayable(d) => exec_displayable(vm, ctx, d),
         SlNode::If { entries, .. } => exec_if(vm, ctx, n, entries),
         SlNode::ShowIf { entries, .. } => exec_showif(vm, ctx, entries),
-        SlNode::For { variable, expression, index_expression, block, .. } => exec_for(vm, ctx, n, variable, expression, index_expression.as_ref(), block),
+        SlNode::For {
+            variable,
+            expression,
+            index_expression,
+            block,
+            ..
+        } => exec_for(
+            vm,
+            ctx,
+            n,
+            variable,
+            expression,
+            index_expression.as_ref(),
+            block,
+        ),
         SlNode::Python { code, .. } => {
             super::atlrt::exec(vm, code, &ctx.scope)?;
             Ok(Flow::Next)
         }
         SlNode::Pass { .. } => Ok(Flow::Next),
-        SlNode::Default { variable, expression, .. } => {
+        SlNode::Default {
+            variable,
+            expression,
+            ..
+        } => {
             if !dcontains(vm, &ctx.scope, variable)? {
                 let v = eval(vm, expression, &ctx.scope)?;
                 py::dict_set(vm, &ctx.scope, variable, v)?;
             }
             Ok(Flow::Next)
         }
-        SlNode::Use { loc, target, expression, args, id, block, .. } => {
-            exec_use(vm, ctx, n, loc, target, *expression, args.as_ref(), id.as_ref(), block.as_ref())?;
+        SlNode::Use {
+            loc,
+            target,
+            expression,
+            args,
+            id,
+            block,
+            ..
+        } => {
+            exec_use(
+                vm,
+                ctx,
+                n,
+                loc,
+                target,
+                *expression,
+                args.as_ref(),
+                id.as_ref(),
+                block.as_ref(),
+            )?;
             Ok(Flow::Next)
         }
         SlNode::Transclude { .. } => {
             exec_transclude(vm, ctx, n)?;
             Ok(Flow::Next)
         }
-        SlNode::CustomUse { target, positional, block, .. } => {
+        SlNode::CustomUse {
+            target,
+            positional,
+            block,
+            ..
+        } => {
             exec_custom_use(vm, ctx, n, target, positional, block)?;
             Ok(Flow::Next)
         }
@@ -522,7 +611,12 @@ fn cond_true(vm: &mut Vm, ctx: &Ctx, cond: &Option<crate::lexer::PyExpr>) -> PyR
     }
 }
 
-fn exec_if(vm: &mut Vm, ctx: &mut Ctx, n: &SlNode, entries: &[(Option<crate::lexer::PyExpr>, Block)]) -> SR {
+fn exec_if(
+    vm: &mut Vm,
+    ctx: &mut Ctx,
+    n: &SlNode,
+    entries: &[(Option<crate::lexer::PyExpr>, Block)],
+) -> SR {
     if !ctx.predicting {
         for (cond, block) in entries {
             if cond_true(vm, ctx, cond)? {
@@ -568,7 +662,11 @@ fn exec_if(vm: &mut Vm, ctx: &mut Ctx, n: &SlNode, entries: &[(Option<crate::lex
     Ok(Flow::Next)
 }
 
-fn exec_showif(vm: &mut Vm, ctx: &mut Ctx, entries: &[(Option<crate::lexer::PyExpr>, Block)]) -> SR {
+fn exec_showif(
+    vm: &mut Vm,
+    ctx: &mut Ctx,
+    entries: &[(Option<crate::lexer::PyExpr>, Block)],
+) -> SR {
     let mut first_true = ctx.showif != Some(false);
     for (cond, block) in entries {
         let mut cx = ctx.derive();
@@ -593,7 +691,15 @@ fn exec_showif(vm: &mut Vm, ctx: &mut Ctx, entries: &[(Option<crate::lexer::PyEx
     Ok(Flow::Next)
 }
 
-fn exec_for(vm: &mut Vm, ctx: &mut Ctx, n: &SlNode, variable: &str, expression: &crate::lexer::PyExpr, index: Option<&crate::lexer::PyExpr>, block: &Block) -> SR {
+fn exec_for(
+    vm: &mut Vm,
+    ctx: &mut Ctx,
+    n: &SlNode,
+    variable: &str,
+    expression: &crate::lexer::PyExpr,
+    index: Option<&crate::lexer::PyExpr>,
+    block: &Block,
+) -> SR {
     let value = match eval(vm, expression, &ctx.scope) {
         Ok(v) => ops::collect(vm, &v),
         Err(e) => Err(e),
@@ -685,7 +791,16 @@ fn exec_displayable(vm: &mut Vm, context: &mut Ctx, node: &Displayable) -> SR {
     let screen = super::ui::mget(vm, "screen")?;
 
     let mut ctx = context.derive();
-    let made = make_displayable(vm, context, &mut ctx, node, &rt, &cache, copy_on_change, &screen);
+    let made = make_displayable(
+        vm,
+        context,
+        &mut ctx,
+        node,
+        &rt,
+        &cache,
+        copy_on_change,
+        &screen,
+    );
     let (mut made, mut fail) = match made {
         Ok(m) => (Some(m), false),
         Err(e) if context.predicting && !is_control(&e) => (None, true),
@@ -786,10 +901,18 @@ fn exec_displayable(vm: &mut Vm, context: &mut Ctx, node: &Displayable) -> SR {
         c.style_prefix = Some(context.style_prefix.clone());
     }
 
-    let no_d = py::import_attr(vm, MODULE, "NO_DISPLAYABLE")?;
-    let transform = if py::truthy(vm, &m.transform)? { Some(m.transform.clone()) } else { None };
+    // NO_DISPLAYABLE is a 6.99+ name; 6.18 always applies the transform.
+    let m_ = py::import(vm, MODULE)?;
+    let no_d = py::get_opt(vm, &m_, "NO_DISPLAYABLE")?;
+    let transform = if py::truthy(vm, &m.transform)? {
+        Some(m.transform.clone())
+    } else {
+        None
+    };
     match transform {
-        Some(t) if !py::same(&d, &no_d) => d = apply_at(vm, context, &cache, m.reused, &t, d)?,
+        Some(t) if !no_d.as_ref().is_some_and(|n| py::same(&d, n)) => {
+            d = apply_at(vm, context, &cache, m.reused, &t, d)?
+        }
         _ => {
             let mut c = cache.borrow_mut();
             c.inner_transform = None;
@@ -800,7 +923,7 @@ fn exec_displayable(vm: &mut Vm, context: &mut Ctx, node: &Displayable) -> SR {
     if ctx.fail.get() {
         context.fail.set(true);
     }
-    if !py::same(&d, &no_d) {
+    if !no_d.as_ref().is_some_and(|n| py::same(&d, n)) {
         if let Some(s) = context.showif {
             d = wrap_in_showif(vm, context, &cache, s, d)?;
         }
@@ -809,7 +932,16 @@ fn exec_displayable(vm: &mut Vm, context: &mut Ctx, node: &Displayable) -> SR {
     Ok(Flow::Next)
 }
 
-fn make_displayable(vm: &mut Vm, context: &Ctx, ctx: &mut Ctx, node: &Displayable, rt: &NodeRt, cache: &Rc<RefCell<SlCache>>, copy_on_change: bool, screen: &Value) -> PyResult<Made> {
+fn make_displayable(
+    vm: &mut Vm,
+    context: &Ctx,
+    ctx: &mut Ctx,
+    node: &Displayable,
+    rt: &NodeRt,
+    cache: &Rc<RefCell<SlCache>>,
+    copy_on_change: bool,
+    screen: &Value,
+) -> PyResult<Made> {
     let spec = &rt.spec;
     let mut positional = Vec::with_capacity(node.positional.len());
     for e in &node.positional {
@@ -887,7 +1019,9 @@ fn make_displayable(vm: &mut Vm, context: &Ctx, ctx: &mut Ctx, node: &Displayabl
             let cp = opt(&cache.borrow().positional);
             let ck = opt(&cache.borrow().keywords);
             let cs = opt(&cache.borrow().style_prefix);
-            ops::eq(vm, &pos_list, &cp)? && ops::eq(vm, &keywords, &ck)? && ops::eq(vm, &context.style_prefix, &cs)?
+            ops::eq(vm, &pos_list, &cp)?
+                && ops::eq(vm, &keywords, &ck)?
+                && ops::eq(vm, &context.style_prefix, &cs)?
         }
         None => false,
     };
@@ -897,7 +1031,12 @@ fn make_displayable(vm: &mut Vm, context: &Ctx, ctx: &mut Ctx, node: &Displayabl
     if spec.hotspot {
         let ims = super::ui::mget(vm, "imagemap_stack")?;
         let imc = ops::getitem(vm, &ims, Value::Int(-1))?;
-        if !cache.borrow().imagemap.as_ref().is_some_and(|i| py::same(i, &imc)) {
+        if !cache
+            .borrow()
+            .imagemap
+            .as_ref()
+            .is_some_and(|i| py::same(i, &imc))
+        {
             can_reuse = false;
         }
         cache.borrow_mut().imagemap = Some(imc);
@@ -922,7 +1061,11 @@ fn make_displayable(vm: &mut Vm, context: &Ctx, ctx: &mut Ctx, node: &Displayabl
         if spec.scope {
             let uses = py::get_or_none(vm, &m.main, "_uses_scope")?;
             if py::truthy(vm, &uses)? {
-                let changed = vm.call_method(&m.main, "_scope", vec![ctx.scope.clone(), Value::Bool(!copy_on_change)])?;
+                let changed = vm.call_method(
+                    &m.main,
+                    "_scope",
+                    vec![ctx.scope.clone(), Value::Bool(!copy_on_change)],
+                )?;
                 if copy_on_change && py::truthy(vm, &changed)? {
                     m.reused = false;
                 }
@@ -964,12 +1107,25 @@ fn register_widget(vm: &mut Vm, ctx: &Ctx, screen: &Value, m: &Made) -> PyResult
 }
 
 /// Calls the statement's factory with the evaluated arguments.
-fn create(vm: &mut Vm, context: &Ctx, ctx: &Ctx, node: &Displayable, rt: &NodeRt, m: &mut Made, screen: &Value, first: bool) -> PyResult<()> {
+fn create(
+    vm: &mut Vm,
+    context: &Ctx,
+    ctx: &Ctx,
+    node: &Displayable,
+    rt: &NodeRt,
+    m: &mut Made,
+    screen: &Value,
+    first: bool,
+) -> PyResult<()> {
     let spec = &rt.spec;
     if spec.scope {
         py::dict_set(vm, &m.keywords, "scope", ctx.scope.clone())?;
     }
-    let updating = if first { ctx.updating } else { context.updating };
+    let updating = if first {
+        ctx.updating
+    } else {
+        context.updating
+    };
     if spec.replaces && updating {
         py::dict_set(vm, &m.keywords, "replaces", m.old_main.clone())?;
     }
@@ -998,14 +1154,27 @@ fn create(vm: &mut Vm, context: &Ctx, ctx: &Ctx, node: &Displayable, rt: &NodeRt
 
 /// The `at` property: wraps `d` in the transforms, reusing the previous
 /// wrappers when the transform list is unchanged.
-fn apply_at(vm: &mut Vm, context: &Ctx, cache: &Rc<RefCell<SlCache>>, reused: bool, transform: &Value, d: Value) -> PyResult<Value> {
+fn apply_at(
+    vm: &mut Vm,
+    context: &Ctx,
+    cache: &Rc<RefCell<SlCache>>,
+    reused: bool,
+    transform: &Value,
+    d: Value,
+) -> PyResult<Value> {
     let raw = opt(&cache.borrow().raw_transform);
     if reused && ops::eq(vm, transform, &raw)? {
         let inner = opt(&cache.borrow().inner_transform);
         if is_transform(vm, &inner)? {
             let child = py::get_or_none(vm, &inner, "child")?;
             if !py::same(&child, &d) {
-                py::method_kw(vm, &inner, "set_child", vec![d.clone()], vec![("duplicate".into(), Value::Bool(false))])?;
+                py::method_kw(
+                    vm,
+                    &inner,
+                    "set_child",
+                    vec![d.clone()],
+                    vec![("duplicate".into(), Value::Bool(false))],
+                )?;
             }
         }
         return Ok(opt(&cache.borrow().outer_transform));
@@ -1018,7 +1187,8 @@ fn apply_at(vm: &mut Vm, context: &Ctx, cache: &Rc<RefCell<SlCache>>, reused: bo
         c.outer_transform = None;
     }
     let mut d = d;
-    let call_child = |vm: &mut Vm, t: &Value, d: Value| vm.call(t, Vec::new(), vec![("child".into(), d)]);
+    let call_child =
+        |vm: &mut Vm, t: &Value, d: Value| vm.call(t, Vec::new(), vec![("child".into(), d)]);
     if is_transform(vm, transform)? {
         d = call_child(vm, transform, d)?;
         vm.call_method(&d, "_unique", Vec::new())?;
@@ -1061,7 +1231,13 @@ fn apply_at(vm: &mut Vm, context: &Ctx, cache: &Rc<RefCell<SlCache>>, reused: bo
     Ok(d)
 }
 
-fn wrap_in_showif(vm: &mut Vm, context: &Ctx, cache: &Rc<RefCell<SlCache>>, showif: bool, d: Value) -> PyResult<Value> {
+fn wrap_in_showif(
+    vm: &mut Vm,
+    context: &Ctx,
+    cache: &Rc<RefCell<SlCache>>,
+    showif: bool,
+    d: Value,
+) -> PyResult<Value> {
     let c = py::import_attr(vm, "renpy.sl2.sldisplayables", "ShowIf")?;
     let old = opt(&cache.borrow().old_showif);
     let rv = vm.call(&c, vec![Value::Bool(showif), old], Vec::new())?;
@@ -1098,7 +1274,17 @@ fn screen_exists(vm: &mut Vm, name: &Value) -> PyResult<bool> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn exec_use(vm: &mut Vm, context: &mut Ctx, n: &SlNode, loc: &(Rc<str>, u32), target: &str, expression: bool, args: Option<&crate::ast::ArgumentInfo>, id: Option<&crate::lexer::PyExpr>, block: Option<&Block>) -> PyResult<()> {
+fn exec_use(
+    vm: &mut Vm,
+    context: &mut Ctx,
+    n: &SlNode,
+    loc: &(Rc<str>, u32),
+    target: &str,
+    expression: bool,
+    args: Option<&crate::ast::ArgumentInfo>,
+    id: Option<&crate::lexer::PyExpr>,
+    block: Option<&Block>,
+) -> PyResult<()> {
     let key = Value::Int(serial(n) as i64);
     let (target_v, id_prefix) = if expression {
         let e = crate::lexer::PyExpr::new(target, loc.0.clone(), loc.1);
@@ -1142,7 +1328,16 @@ fn exec_use(vm: &mut Vm, context: &mut Ctx, n: &SlNode, loc: &(Rc<str>, u32), ta
 
 /// Shared tail of `SLUse.execute` and `SLCustomUse.execute`.
 #[allow(clippy::too_many_arguments)]
-fn run_used<'a>(vm: &mut Vm, context: &'a Ctx<'a>, mut ctx: Ctx<'a>, ast: &ScreenAst, target: &str, args: Vec<Value>, kwargs: Vec<(Rc<str>, Value)>, transclude: Option<&'a Block>) -> PyResult<()> {
+fn run_used<'a>(
+    vm: &mut Vm,
+    context: &'a Ctx<'a>,
+    mut ctx: Ctx<'a>,
+    ast: &ScreenAst,
+    target: &str,
+    args: Vec<Value>,
+    kwargs: Vec<(Rc<str>, Value)>,
+    transclude: Option<&'a Block>,
+) -> PyResult<()> {
     let sk = py::s(vm, "scope");
     let scope = match dget(vm, &ctx.old_cache, &sk)? {
         Some(s) if py::truthy(vm, &s)? => s,
@@ -1156,12 +1351,19 @@ fn run_used<'a>(vm: &mut Vm, context: &'a Ctx<'a>, mut ctx: Ctx<'a>, ast: &Scree
     }
     match &ast.screen.parameters {
         Some(sig) => {
-            let values = params::apply(vm, sig, &ast.screen.loc, &args, &kwargs, context.predicting)?;
+            let values =
+                params::apply(vm, sig, &ast.screen.loc, &args, &kwargs, context.predicting)?;
             vm.call_method(&scope, "update", vec![values])?;
         }
         None => {
             if !args.is_empty() {
-                return Err(py::error(vm, format!("Screen {target} does not take positional arguments. ({} given)", args.len())));
+                return Err(py::error(
+                    vm,
+                    format!(
+                        "Screen {target} does not take positional arguments. ({} given)",
+                        args.len()
+                    ),
+                ));
             }
             vm.call_method(&scope, "clear", Vec::new())?;
             vm.call_method(&scope, "update", vec![context.scope.clone()])?;
@@ -1187,7 +1389,14 @@ fn run_used<'a>(vm: &mut Vm, context: &'a Ctx<'a>, mut ctx: Ctx<'a>, ast: &Scree
     Ok(())
 }
 
-fn use_screen_function(vm: &mut Vm, context: &Ctx, key: &Value, target: &Value, loc: &(Rc<str>, u32), args: Option<&crate::ast::ArgumentInfo>) -> PyResult<()> {
+fn use_screen_function(
+    vm: &mut Vm,
+    context: &Ctx,
+    key: &Value,
+    target: &Value,
+    loc: &(Rc<str>, u32),
+    args: Option<&crate::ast::ArgumentInfo>,
+) -> PyResult<()> {
     let n = match dget(vm, &context.use_index, key)? {
         Some(Value::Int(i)) => i,
         _ => 0,
@@ -1215,7 +1424,9 @@ fn use_screen_function(vm: &mut Vm, context: &Ctx, key: &Value, target: &Value, 
 }
 
 fn exec_transclude(vm: &mut Vm, context: &mut Ctx, n: &SlNode) -> PyResult<()> {
-    let Some(block) = context.transclude else { return Ok(()) };
+    let Some(block) = context.transclude else {
+        return Ok(());
+    };
     let key = Value::Int(serial(n) as i64);
     let base = context.parent.unwrap_or(context);
     let mut ctx = base.derive();
@@ -1240,7 +1451,14 @@ fn exec_transclude(vm: &mut Vm, context: &mut Ctx, n: &SlNode) -> PyResult<()> {
     Ok(())
 }
 
-fn exec_custom_use(vm: &mut Vm, context: &mut Ctx, n: &SlNode, target: &str, positional: &[crate::lexer::PyExpr], block: &Block) -> PyResult<()> {
+fn exec_custom_use(
+    vm: &mut Vm,
+    context: &mut Ctx,
+    n: &SlNode,
+    target: &str,
+    positional: &[crate::lexer::PyExpr],
+    block: &Block,
+) -> PyResult<()> {
     let key = Value::Int(serial(n) as i64);
     let mut ctx = context.derive();
     ctx.new_cache = vm.types.new_dict();
@@ -1297,10 +1515,17 @@ fn exec_custom_use(vm: &mut Vm, context: &mut Ctx, n: &SlNode, target: &str, pos
     }
     let t = py::s(vm, target);
     let Some((_, ast)) = screen_ast(vm, &t)? else {
-        return Err(py::error(vm, format!("A screen named {target} does not exist.")));
+        return Err(py::error(
+            vm,
+            format!("A screen named {target} does not exist."),
+        ));
     };
     let kwargs = py::str_items(vm, &kwargs)?;
-    let transclude = if block.children.is_empty() { None } else { Some(block) };
+    let transclude = if block.children.is_empty() {
+        None
+    } else {
+        Some(block)
+    };
     run_used(vm, context, ctx, &ast, target, args, kwargs, transclude)
 }
 
@@ -1322,7 +1547,9 @@ fn this_ast(vm: &Vm, v: &Value) -> PyResult<Rc<ScreenAst>> {
 fn s_call(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let ast = this_ast(vm, this)?;
-    let scope = py::kw(kw, "_scope").cloned().ok_or_else(|| vm.type_error("SLScreen called without _scope"))?;
+    let scope = py::kw(kw, "_scope")
+        .cloned()
+        .ok_or_else(|| vm.type_error("SLScreen called without _scope"))?;
     let predicting = predicting(vm);
     if let Some(sig) = &ast.screen.parameters {
         let a = dget(vm, &scope, &py::s(vm, "_args"))?.unwrap_or(Value::None);
@@ -1413,7 +1640,10 @@ fn s_define(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let mut k: Vec<(Rc<str>, Value)> = Vec::new();
     k.push(("modal".into(), py::s(vm, &s.modal)));
     k.push(("zorder".into(), py::s(vm, &s.zorder)));
-    k.push(("tag".into(), s.tag.as_ref().map(|t| py::s(vm, t)).unwrap_or(Value::None)));
+    k.push((
+        "tag".into(),
+        s.tag.as_ref().map(|t| py::s(vm, t)).unwrap_or(Value::None),
+    ));
     k.push(("variant".into(), variant));
     k.push(("predict".into(), predict));
     k.push(("parameters".into(), params));
@@ -1432,14 +1662,14 @@ fn s_copy_on_change(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
-fn walk_used(vm: &mut Vm, b: &Block, cb: &Value) -> PyResult<()> {
+pub(crate) fn walk_used(vm: &mut Vm, b: &Block, cb: &Value) -> PyResult<()> {
     for n in &b.children {
         walk_used_node(vm, n, cb)?;
     }
     Ok(())
 }
 
-fn walk_used_node(vm: &mut Vm, n: &SlNode, cb: &Value) -> PyResult<()> {
+pub(crate) fn walk_used_node(vm: &mut Vm, n: &SlNode, cb: &Value) -> PyResult<()> {
     match n {
         SlNode::Displayable(d) => walk_used(vm, &d.block, cb),
         SlNode::If { entries, .. } | SlNode::ShowIf { entries, .. } => {
@@ -1449,7 +1679,12 @@ fn walk_used_node(vm: &mut Vm, n: &SlNode, cb: &Value) -> PyResult<()> {
             Ok(())
         }
         SlNode::For { block, .. } => walk_used(vm, block, cb),
-        SlNode::Use { target, expression, block, .. } => {
+        SlNode::Use {
+            target,
+            expression,
+            block,
+            ..
+        } => {
             if !*expression {
                 let t = py::s(vm, target);
                 vm.call(cb, vec![t], Vec::new())?;
@@ -1475,11 +1710,13 @@ fn s_used_screens(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     Ok(Value::None)
 }
 
-fn block_has_transclude(b: &Block) -> bool {
+pub(crate) fn block_has_transclude(b: &Block) -> bool {
     b.children.iter().any(|n| match n {
         SlNode::Transclude { .. } => true,
         SlNode::Displayable(d) => block_has_transclude(&d.block),
-        SlNode::If { entries, .. } | SlNode::ShowIf { entries, .. } => entries.iter().any(|(_, b)| block_has_transclude(b)),
+        SlNode::If { entries, .. } | SlNode::ShowIf { entries, .. } => {
+            entries.iter().any(|(_, b)| block_has_transclude(b))
+        }
         SlNode::For { block, .. } => block_has_transclude(block),
         SlNode::Use { block: Some(b), .. } => block_has_transclude(b),
         SlNode::CustomUse { block, .. } => block_has_transclude(block),
@@ -1502,16 +1739,149 @@ fn s_reduce(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn s_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let ast = this_ast(vm, &args[0])?;
-    Ok(py::s(vm, &format!("<SLScreen {} at {}:{}>", ast.screen.name, ast.screen.loc.0, ast.screen.loc.1)))
+    Ok(py::s(
+        vm,
+        &format!(
+            "<SLScreen {} at {}:{}>",
+            ast.screen.name, ast.screen.loc.0, ast.screen.loc.1
+        ),
+    ))
 }
 
 /// `renpy.sl2.slast.SLContext`: the widget-stack face of an SL context.
-fn ctx_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+/// `SLContext(parent=None)`: a copy of `parent`'s state, or a fresh one.
+fn ctx_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
+    let parent = arg_or(args, kw, 1, "parent", Value::None);
+    if !py::is_none(&parent) {
+        let src = py::get(vm, &parent, "__dict__")?;
+        let dst = py::get(vm, this, "__dict__")?;
+        vm.call_method(&dst, "update", vec![src])?;
+        return Ok(Value::None);
+    }
+    let scope = vm.types.new_dict();
+    py::set(vm, this, "scope", scope.clone())?;
+    py::set(vm, this, "root_scope", scope)?;
+    py::set(vm, this, "globals", vm.types.new_dict())?;
     py::set(vm, this, "children", vm.types.new_list(Vec::new()))?;
-    py::set(vm, this, "scope", vm.types.new_dict())?;
-    py::set(vm, this, "style_prefix", Value::None)?;
     py::set(vm, this, "keywords", vm.types.new_dict())?;
+    py::set(vm, this, "style_prefix", Value::None)?;
+    for n in ["new_cache", "old_cache", "miss_cache", "new_use_cache", "old_use_cache"] {
+        py::set(vm, this, n, vm.types.new_dict())?;
+    }
+    let dd = py::import_attr(vm, "collections", "defaultdict")?;
+    let int = Value::Obj(vm.types.int.clone());
+    let ui = vm.call(&dd, vec![int], Vec::new())?;
+    py::set(vm, this, "use_index", ui)?;
+    for n in ["uses_scope", "widgets", "showif", "parent", "transclude"] {
+        py::set(vm, this, n, Value::None)?;
+    }
+    for n in ["debug", "predicting", "updating", "fail", "unlikely"] {
+        py::set(vm, this, n, Value::Bool(false))?;
+    }
+    py::set(vm, this, "predicted", vm.types.new_set(Default::default()))?;
+    if super::slparser::release(vm) >= (7, 8) {
+        py::set(vm, this, "sticky", vm.types.new_dict())?;
+    }
+    Ok(Value::None)
+}
+
+fn ctx_get_style_group(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+    py::get_or_none(vm, &args[0], "style_prefix")
+}
+
+fn ctx_set_style_group(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+    py::set(vm, &args[0], "style_prefix", args[1].clone())?;
+    Ok(Value::None)
+}
+
+// Module functions -------------------------------------------------------------------------------------
+
+/// `compile_expr(loc, node)` (`compile_expr(node)` in 6.18): compiles an
+/// expression for evaluation. Expressions are given as source (`str` or
+/// `PyExpr`); Python `ast` node objects have no host in this runtime.
+fn f_compile_expr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+    let (loc, node) = match args.len() {
+        1 => (Value::None, args[0].clone()),
+        _ => (args[0].clone(), args.get(1).cloned().unwrap_or(Value::None)),
+    };
+    if node.as_str().is_none() {
+        return Err(vm.type_error(
+            "compile_expr: Python ast nodes are not available in this runtime (no `ast` \
+             compiler); pass the expression source",
+        ));
+    }
+    let f = py::import_attr(vm, "renpy.python", "py_compile")?;
+    let mut kw: Vec<(Rc<str>, Value)> = Vec::new();
+    if !py::is_none(&loc) {
+        kw.push(("filename".into(), ops::getitem(vm, &loc, Value::Int(0))?));
+        kw.push(("lineno".into(), ops::getitem(vm, &loc, Value::Int(1))?));
+    } else {
+        kw.push(("filename".into(), py::s(vm, "<screen language>")));
+    }
+    vm.call(&f, vec![node, py::s(vm, "eval")], kw)
+}
+
+/// `analyze_keywords(node, analysis, conditional=GLOBAL_CONST)`.
+fn f_analyze_keywords(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
+    let node = arg_or(args, kw, 0, "node", Value::None);
+    let analysis = arg_or(args, kw, 1, "analysis", Value::None);
+    let gc = const_value(vm, "GLOBAL_CONST")?;
+    let mut conditional = arg_or(args, kw, 2, "conditional", gc.clone());
+    let min = |vm: &mut Vm, a: Value, b: Value| -> PyResult<Value> {
+        Ok(if py::lt(vm, &b, &a)? { b } else { a })
+    };
+    let mut rv = gc;
+    for k in py::get_items(vm, &node, "keyword")? {
+        let e = ops::getitem(vm, &k, Value::Int(1))?;
+        let c = vm.call_method(&analysis, "is_constant_expr", vec![e])?;
+        rv = min(vm, rv, c)?;
+        rv = min(vm, rv, conditional.clone())?;
+    }
+    let sl_if = py::import_attr(vm, MODULE, "SLIf")?;
+    for n in py::get_items(vm, &node, "children")? {
+        if !sl_if.obj().is_some_and(|c| ops::isinstance(vm, &n, c)) {
+            continue;
+        }
+        for entry in py::get_items(vm, &n, "entries")? {
+            let cond = ops::getitem(vm, &entry, Value::Int(0))?;
+            let block = ops::getitem(vm, &entry, Value::Int(1))?;
+            if !py::is_none(&cond) {
+                let c = vm.call_method(&analysis, "is_constant_expr", vec![cond])?;
+                conditional = min(vm, conditional, c)?;
+            }
+            let sub = f_analyze_keywords(vm, &[block, analysis.clone(), conditional.clone()], &[])?;
+            rv = min(vm, rv, sub)?;
+        }
+    }
+    Ok(rv)
+}
+
+/// `predict_pause(context)` (8.6): a generator that yields when an
+/// incremental prediction has used up its time slice.
+fn f_predict_pause(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+    let context = args.first().cloned().unwrap_or(Value::None);
+    let yp = py::get_opt(vm, &context, "yield_prediction")?.unwrap_or(Value::Bool(false));
+    let mut pause = py::truthy(vm, &yp)? && predicting(vm);
+    if pause {
+        let next = py::import_attr(vm, "renpy.display.predict", "next_predict_pause_ns");
+        let now = py::import_attr(vm, "time", "perf_counter_ns")
+            .and_then(|f| vm.call(&f, Vec::new(), Vec::new()));
+        if let (Ok(next), Ok(now)) = (next, now) {
+            pause = !py::lt(vm, &now, &next)?;
+        }
+    }
+    let items = if pause { vec![Value::None] } else { Vec::new() };
+    let l = vm.types.new_list(items);
+    ops::iter(vm, &l)
+}
+
+fn sc_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
+    let this = &args[0];
+    py::set(vm, this, "version", Value::Int(1))?;
+    py::set(vm, this, "const_analyzed", vm.types.new_dict())?;
+    py::set(vm, this, "not_const_analyzed", vm.types.new_dict())?;
+    py::set(vm, this, "updated", Value::Bool(false))?;
     Ok(Value::None)
 }
 
@@ -1529,8 +1899,13 @@ fn no_new(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     Err(vm.type_error("cannot create instances directly"))
 }
 
-fn native_type(vm: &mut Vm, name: &str, methods: py::Methods) -> ObjRef {
-    let c = vm.types.new_builtin_type(name, &vm.types.object.clone(), crysirror_python::object::BaseKind::Native, false);
+fn native_type(vm: &mut Vm, name: &str, base: &ObjRef, methods: py::Methods) -> ObjRef {
+    let c = vm.types.new_builtin_type(
+        name,
+        base,
+        crysirror_python::object::BaseKind::Native,
+        false,
+    );
     let n = vm.types.new_builtin("__new__", no_new);
     let n = py::staticmethod(vm, n);
     vm.types.set_attr(&c, "__new__", n);
@@ -1542,41 +1917,196 @@ fn native_type(vm: &mut Vm, name: &str, methods: py::Methods) -> ObjRef {
     c
 }
 
+/// `from renpy.pyanalysis import ...`: the analysis levels keep upstream's
+/// values when that module does not define them.
+fn import_analysis(vm: &mut Vm, m: &ObjRef, rel: (u32, u32)) {
+    let mut names = vec![("Analysis", None), ("NOT_CONST", Some(0)), ("GLOBAL_CONST", Some(2))];
+    if rel >= (6, 99) {
+        names.push(("ccache", None));
+    }
+    if rel >= (7, 3) {
+        names.push(("LOCAL_CONST", Some(1)));
+    }
+    for (n, fallback) in names {
+        let v = match py::import_attr(vm, "renpy.pyanalysis", n) {
+            Ok(v) => Some(v),
+            Err(_) => fallback.map(Value::Int),
+        };
+        if let Some(v) = v {
+            crysirror_python::modules::set(vm, m, n, v);
+        }
+    }
+}
+
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    // The screen-analysis cache (game/cache/screens.rpyb) only shortens
-    // start-up; screens are analysed from the script each time.
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[("load_cache", s_noop), ("save_cache", s_noop)]);
+    let rel = super::slparser::release(vm);
+    let child_statements = rel >= (7, 6) && (rel.0, rel.1) != (8, 0);
+    // The screen-analysis cache (game/cache/screens.rpyb) only lets
+    // upstream skip constant analysis at start-up. Screens here are never
+    // const-analysed, so there is nothing to load or save: `load_cache`
+    // and `save_cache` leave `scache` empty, as upstream does without a
+    // cache file.
+    let mut funcs: Vec<(&'static str, crysirror_python::object::NativeFn)> =
+        vec![("compile_expr", f_compile_expr)];
+    if rel >= (6, 99) {
+        funcs.push(("load_cache", s_noop));
+        funcs.push(("save_cache", s_noop));
+    }
+    if child_statements {
+        funcs.push(("analyze_keywords", f_analyze_keywords));
+    }
+    if rel >= (8, 6) {
+        funcs.push(("predict_pause", f_predict_pause));
+    }
+    let m = crysirror_python::modules::module_with(vm, MODULE, &funcs);
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
-    let scr = native_type(vm, "SLScreen", &[
-        ("__call__", s_call),
-        ("define", s_define),
-        ("copy_on_change", s_copy_on_change),
-        ("used_screens", s_used_screens),
-        ("has_transclude", s_has_transclude),
-        ("analyze_screen", s_noop),
-        ("prepare_screen", s_noop),
-        ("unprepare_screen", s_noop),
-        ("__reduce__", s_reduce),
-        ("__reduce_ex__", s_reduce),
-        ("__repr__", s_repr),
-    ]);
+    import_analysis(vm, &m, rel);
+    // Imports of slast.py.
+    let tf = if rel >= (7, 0) {
+        "renpy.display.transform"
+    } else {
+        "renpy.display.motion"
+    };
+    let t = py::import_attr(vm, tf, "Transform")?;
+    set(vm, "Transform", t);
+    if rel >= (7, 3) {
+        let a = py::import_attr(vm, "renpy.display.transform", "ATLTransform")?;
+        set(vm, "ATLTransform", a);
+    }
+    let fixed = py::import_attr(vm, "renpy.display.layout", "Fixed")?;
+    set(vm, "Fixed", fixed);
+    let pd = py::import_attr(vm, "renpy.display.predict", "displayable")?;
+    set(vm, "predict_displayable", pd);
+    let peb = py::import_attr(vm, "renpy.python", "py_eval_bytecode")?;
+    set(vm, "py_eval_bytecode", peb);
+    if rel < (6, 99) {
+        let pc = py::import_attr(vm, "renpy.python", "py_compile")?;
+        set(vm, "py_compile", pc);
+    }
+    if rel >= (8, 4) {
+        let e = py::import_attr(vm, "renpy.python", "py_eval")?;
+        set(vm, "eval", e);
+    }
+    if rel >= (7, 4) {
+        let pm = if py::import(vm, "renpy.compat.pickle").is_ok() {
+            "renpy.compat.pickle"
+        } else {
+            "pickle"
+        };
+        for n in ["dumps", "loads"] {
+            let v = py::import_attr(vm, pm, n)?;
+            set(vm, n, v);
+        }
+    }
+    // Module data.
+    let serial = if rel >= (6, 99) {
+        let t = py::import_attr(vm, "time", "time")?;
+        let now = vm.call(&t, Vec::new(), Vec::new())?;
+        (py::f64_of(vm, &now)? * 1_000_000.0) as i64
+    } else {
+        0
+    };
+    set(vm, "serial", Value::Int(serial));
+    let sentinel = py::import_attr(vm, "renpy.object", "Sentinel")?;
+    let ue = vm.call(&sentinel, vec![py::s(vm, "use_expression")], Vec::new())?;
+    set(vm, "use_expression", ue);
+    let ng = vm.call(&sentinel, vec![py::s(vm, "NotGiven")], Vec::new())?;
+    set(vm, "NotGiven", ng);
+    set(vm, "filename", py::s(vm, "<screen language>"));
+    let log = match py::import_attr(vm, "renpy.log", "open") {
+        Ok(open) => vm.call(
+            &open,
+            vec![py::s(vm, "profile_screen")],
+            vec![
+                ("developer".into(), Value::Bool(true)),
+                ("append".into(), Value::Bool(false)),
+                ("flush".into(), Value::Bool(false)),
+            ],
+        )?,
+        Err(_) => Value::None,
+    };
+    set(vm, "profile_log", log);
+    if rel == (7, 8) || rel >= (8, 2) {
+        let l = vm.types.new_list(STICKY_PROPERTIES.iter().map(|s| vm.types.new_str(s)).collect());
+        set(vm, "STICKY_PROPERTIES", l);
+    }
+    if rel < (8, 6) {
+        let l = Value::Obj(vm.types.list.clone());
+        let t = Value::Obj(vm.types.tuple.clone());
+        let lt = vm.types.new_tuple(vec![l, t]);
+        set(vm, "list_or_tuple", lt);
+    }
+    // Node classes; SLScreen is an SLBlock.
+    let block = super::slast_nodes::install_classes(vm, &m)?;
+    let scr = native_type(
+        vm,
+        "SLScreen",
+        &block,
+        &[
+            ("__call__", s_call),
+            ("define", s_define),
+            ("copy_on_change", s_copy_on_change),
+            ("used_screens", s_used_screens),
+            ("has_transclude", s_has_transclude),
+            ("analyze_screen", s_noop),
+            ("prepare_screen", s_noop),
+            ("unprepare_screen", s_noop),
+            ("__reduce__", s_reduce),
+            ("__reduce_ex__", s_reduce),
+            ("__repr__", s_repr),
+        ],
+    );
     set(vm, "SLScreen", Value::Obj(scr));
-    let cache = native_type(vm, "SLCache", &[("__reduce__", s_reduce), ("__reduce_ex__", s_reduce)]);
+    let object = vm.types.object.clone();
+    let cache = native_type(
+        vm,
+        "SLCache",
+        &object,
+        &[("__reduce__", s_reduce), ("__reduce_ex__", s_reduce)],
+    );
     set(vm, "SLCache", Value::Obj(cache));
     let addable = py::import_attr(vm, "renpy.ui", "Addable")?;
-    let ctx = py::class(vm, MODULE, "SLContext", &[addable], &[("__init__", ctx_init), ("add", ctx_add), ("close", ctx_close)], &[])?;
+    let ctx = py::class(
+        vm,
+        MODULE,
+        "SLContext",
+        &[addable],
+        &[
+            ("__init__", ctx_init),
+            ("add", ctx_add),
+            ("close", ctx_close),
+        ],
+        &[],
+    )?;
+    let g = vm.types.new_builtin("get_style_group", ctx_get_style_group);
+    let s = vm.types.new_builtin("set_style_group", ctx_set_style_group);
+    let p = py::property(vm, g, Some(s))?;
+    py::set(vm, &Value::Obj(ctx.clone()), "style_group", p)?;
     set(vm, "SLContext", Value::Obj(ctx));
-    let null = py::import_attr(vm, "renpy.display.layout", "Null")?;
-    let nd = vm.call(&null, Vec::new(), Vec::new())?;
-    set(vm, "NO_DISPLAYABLE", nd);
+    if rel >= (6, 99) {
+        let null = py::import_attr(vm, "renpy.display.layout", "Null")?;
+        let nd = vm.call(&null, Vec::new(), Vec::new())?;
+        set(vm, "NO_DISPLAYABLE", nd);
+        let sc = py::class(vm, MODULE, "ScreenCache", &[], &[("__init__", sc_init)], &[])?;
+        let inst = vm.call(&Value::Obj(sc.clone()), Vec::new(), Vec::new())?;
+        set(vm, "ScreenCache", Value::Obj(sc));
+        set(vm, "scache", inst);
+        set(vm, "CACHE_FILENAME", py::s(vm, "cache/screens.rpyb"));
+    }
+    // The loop-control exceptions exist for pickled screens of any
+    // release; they are module names from 7.6 / 8.1.
     let exc = Value::Obj(vm.types.exc("Exception"));
-    let fe = py::class(vm, MODULE, "SLForException", &[exc], &[], &[])?;
-    let fe = Value::Obj(fe);
-    set(vm, "SLForException", fe.clone());
+    let fe = Value::Obj(py::class(vm, MODULE, "SLForException", &[exc], &[], &[])?);
     let b = py::class(vm, MODULE, "SLBreakException", &[fe.clone()], &[], &[])?;
-    set(vm, "SLBreakException", Value::Obj(b));
-    let c = py::class(vm, MODULE, "SLContinueException", &[fe], &[], &[])?;
-    set(vm, "SLContinueException", Value::Obj(c));
+    let c = py::class(vm, MODULE, "SLContinueException", &[fe.clone()], &[], &[])?;
+    if child_statements {
+        set(vm, "SLForException", fe);
+        set(vm, "SLBreakException", Value::Obj(b));
+        set(vm, "SLContinueException", Value::Obj(c));
+    } else {
+        set(vm, "_SLBreakException", Value::Obj(b));
+        set(vm, "_SLContinueException", Value::Obj(c));
+    }
     Ok(m)
 }
 

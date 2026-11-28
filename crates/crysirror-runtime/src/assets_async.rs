@@ -117,7 +117,7 @@ impl Entry {
 }
 // Host policy for the aggregate prepared payload. Format-specific decode
 // limits and residency accounting apply independently.
-const DEFAULT_PREPARED_BUDGET: Option<usize> = if cfg!(all(
+pub(super) const DEFAULT_PREPARED_BUDGET: Option<usize> = if cfg!(all(
     target_pointer_width = "64",
     not(target_family = "wasm"),
     any(target_os = "windows", target_os = "macos", target_os = "linux",
@@ -129,7 +129,7 @@ const DEFAULT_PREPARED_BUDGET: Option<usize> = if cfg!(all(
 };
 
 pub(super) struct AsyncAssets {
-    budget: Option<usize>,
+    pub(super) budget: Option<usize>,
     store: u64,
     next: u64,
     io: TaskPool,
@@ -374,7 +374,7 @@ impl Assets {
     pub fn set_prepared_budget(&mut self, bytes: usize) -> Result<()> {
         ensure!(
             (16 * 1024 * 1024..=4u64 * 1024 * 1024 * 1024).contains(&(bytes as u64))
-                && bytes >= self.asynchronous.resident,
+                && bytes >= self.asynchronous.resident && bytes >= self.model_bytes,
             "invalid prepared asset budget or below live residency"
         );
         self.asynchronous.budget = Some(bytes);
@@ -406,6 +406,7 @@ impl Assets {
             cache: self
                 .bytes
                 .iter()
+                .chain(self.models.iter())
                 .filter_map(|(key, value)| {
                     key.strip_prefix(&prefix).map(|p| (p.into(), value.clone()))
                 })
@@ -802,7 +803,7 @@ impl Assets {
         count
     }
     pub fn tasks_inspect(&self) -> serde_json::Value {
-        serde_json::json!({"budget_bytes":self.asynchronous.budget,"nonblocking":self.asynchronous.nonblocking,"resident_bytes":self.asynchronous.resident,"io":self.asynchronous.io.stats(),"cpu":self.asynchronous.cpu.stats(),"assets":self.asynchronous.entries.values().map(|e|&e.status).collect::<Vec<_>>()})
+        serde_json::json!({"budget_bytes":self.asynchronous.budget,"nonblocking":self.asynchronous.nonblocking,"resident_bytes":self.asynchronous.resident,"generated_model_bytes":self.model_bytes,"io":self.asynchronous.io.stats(),"cpu":self.asynchronous.cpu.stats(),"assets":self.asynchronous.entries.values().map(|e|&e.status).collect::<Vec<_>>()})
     }
 }
 

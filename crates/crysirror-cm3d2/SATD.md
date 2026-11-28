@@ -344,6 +344,13 @@ slot data, and broader scenario condition/cast validation. See the
 handlers. The other 24 bindings, original settings persistence, and the
 title Guest load mode remain open. See the [title and corpus inventory](../../docs/validation/com3d2.md#standalone-title-config-and-static-ui-coverage).
 
+2026-11-26 — Connected the remaining 24 standalone settings callbacks in
+`src/com3d2/config_panel.rs` to the window, renderer, shared mixer, text
+and model paths. The 1.0.4 title fixture exercises all 24 controls and reads
+the published engine state. Native settings persistence, the title Guest
+load mode, and the `DanceMain` playback timeline remain open.
+See the [settings inventory](../../docs/validation/com3d2.md#standalone-title-config-and-static-ui-coverage).
+
 2026-11-25 — The remaining direct management destinations now dispatch in
 `src/com3d2/leisure/{studio,room,examination,casino}.rs`. Per-controller
 scope and installed-data fixtures are recorded in the
@@ -351,6 +358,72 @@ scope and installed-data fixtures are recorded in the
 Remaining work within these scenes includes photo character placement, posing
 and composition files, room objects and custom materials, broader judging
 and award validation, casino coin persistence and the separate casino games.
+
+2026-11-25 — Opening-story indoor rendering in `src/com3d2/club.rs` now
+preserves the installed office's unlit monitor and alpha-blended light overlay.
+The entrance's second-UV `_LightMap` and soft-additive particle lighting still
+need their native material paths. Standalone `widgets.rs` now honors the
+dialogue label's line clamp and vertical spacing, with a regression for
+cached geometry after moving or resizing a label. Visual equivalence across
+all indoor camera positions and text layouts remains open.
+
+2026-11-25 — The opening hall in `src/com3d2/club.rs` now imports its
+soft-additive lamp meshes and RGB wall lightmap. This covers the installed
+static glow geometry, whose vertices omit a color stream, and the exact
+`Lighted_Lightmap` material family with a bound secondary texture. The
+depth-faded particle variant and the separate reflective water shader
+still need validation and implementation under their native contracts. The
+shop curtain lacks secondary UVs and retains its previous material path
+until Unity 5.6's missing-attribute behavior is verified.
+
+2026-11-26 — `com3d2/mod.rs` connects `SceneToTitle` through a scoped
+session checkpoint taken at the original title call. Restoring the native
+on-disk -1 slot still requires the complete 1040 save path.
+`com3d2/leisure/casino_shop.rs` connects the enabled reward tables, coin
+exchange, purchase confirmation, ownership and fitting controls. Casino
+shop inventory and coin balance still need native slot persistence.
+`com3d2/leisure/blackjack.rs` connects betting, cards, turns and settlement
+through the installed uGUI controls. It represents the hands in the score
+labels. The original animated cards, chips, dealer voice and motion callbacks
+still need their native paths. The five remaining KAG destinations are
+`SceneCasinoSlot`, `SceneFreeModeSelect`, `SceneKasizukiMainMenu`,
+`SceneYotogi` and `SceneYotogiOld`.
+
+2026-11-26 — Registered the remaining five literal names in the standalone
+scene dispatcher. Level 56 now binds the native casino slot UI and machine
+geometry, original reel strips and payout tables, shared UV scrolling,
+bet/stop/settlement, exchange and return. The original lamp, bonus,
+reach arbitration and payout presentation timelines still need parity checks
+and work. Level 24 binds the native recollection category/list controls and
+script return variables, the native flag/relation checkpoint and
+`@freecall`/ `@freerestorebackupdata`. Character presentation on re-entry,
+VIP task-view parity and the linked legacy catalogue remain open. Level 60
+binds the guest main menu, man and room selection UI, free-character and title
+routes. Guest saves, room eligibility and dispatch, character detail and
+model refresh still need their own controllers. Levels 14 and 70 bind the
+stage selection and Null script-return paths. Skill lists, execution,
+results, supporting cast and supplying the original linked compatibility
+tables to the standalone player remain open. No build or player run was
+performed for these changes at the owner's request.
+
+2026-11-26 — Level 56 reads the serialized slot controller's node and
+texture references. Shared world animation drives the reels, lever, credit
+digits and lamp visibility, and shared composition drives the chance-mode
+fade. The payout, jackpot and chance timelines now update the machine and
+casino state, including native total-coin trophy accounting. Per-cell reel
+shader masks, continuous lamp fades and the remaining reach/stop cases are
+still outstanding. Level 60 uses the room, man and scenario tables to
+filter the room roster and select the native scenario. The replay window
+has the installed room/man/scenario lists, hover descriptions, and returns
+through `label_free` and the native replay filename variable. Returning
+from a scenario with `update_maid_status` applies the native counters.
+Guest save/reload still needs the complete 1040 parent record and the
+bookmark-delimited guest section. Guest character detail and man-model
+refresh also remain open. Levels 14 and 70 record the selected stage's
+native key separately from its display name and background, and stage
+previews use the authored thumbnail naming and fallback. The linked
+installation requirement and the non-stage Yotogi controllers remain.
+Static inspection only for this update.
 
 **Closure.** Exercise the remaining controllers, rendering and resource
 variants through installed original scripts and ordinary input, including

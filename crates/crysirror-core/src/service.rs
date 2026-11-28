@@ -247,6 +247,8 @@ pub struct AudioParameters {
     pub rate: f32,
     /// Stereo balance 0..1, with 0.5 centered.
     pub pan: f32,
+    /// Positional playback in the client listener frame, or stereo playback.
+    pub spatial_position: Option<[f32; 3]>,
     /// Repeat source input, default false.
     pub looping: bool,
     /// Total remaining source-range passes, including the current pass.
@@ -297,6 +299,7 @@ impl Default for AudioParameters {
             decode_gain: 1.,
             rate: 1.,
             pan: 0.5,
+            spatial_position: None,
             looping: false,
             loop_passes: None,
             swap_channels: false,
@@ -946,6 +949,11 @@ pub enum AudioRequest {
     /// gain-stop retires the voice; independent transport deadlines stay intact.
     FinishGainFade {
         channel: u32,
+    },
+    /// Move a live channel into positional playback or restore stereo.
+    SetChannelSpatial {
+        channel: u32,
+        position: Option<[f32; 3]>,
     },
     SetPan {
         channel: u32,
@@ -2181,6 +2189,10 @@ pub trait HostServices: FileSystem {
     /// The display the presenting host shows the canvas on; `None` when the
     /// host has no display model.
     fn display_info(&self) -> Option<DisplayInfo> {
+        None
+    }
+    /// Window frames actually presented per second, if measured by the host.
+    fn presentation_fps(&self) -> Option<u32> {
         None
     }
     /// Resize the logical render/input canvas. This is independent of physical

@@ -246,35 +246,51 @@ impl Player {
     }
 }
 
-/// Decodes only the beginning of a detached GameMain v1040 slot, through the
-/// player's state. Bounds the remaining management data at the first native bookmark.
-pub(super) fn read_slot_management(bytes: &[u8]) -> Result<(Player, std::ops::Range<usize>)> {
+pub(super) struct SlotPrefix {
+    pub header: super::Header,
+    pub has_transferred_characters: bool,
+    pub csv_paths: [Vec<String>; 2],
+    pub player: Player,
+    pub stock_start: usize,
+    pub bookmarks: [usize; 2],
+}
+
+/// Decode the GameMain and CharacterMgr prefix through player status.
+pub(super) fn read_slot_prefix(bytes: &[u8]) -> Result<SlotPrefix> {
     let mut r = Reader::new(bytes);
     r.expect_str("COM3D2_SAVE")?;
     ensure!(r.i32()? == 1040, "unsupported standalone slot version");
-    super::read_header(&mut r)?;
-    let ends = bookmarks(&mut r, bytes.len())?;
+    let header = super::read_header(&mut r)?;
+    let bookmarks = bookmarks(&mut r, bytes.len())?;
     // Includes use of transferred staff and both installed CSV lists.
     let start = r.at;
-    let mut managed = Reader::new(&bytes[start..ends[0]]);
-    managed.bool()?;
-    for _ in 0..2 {
-        for _ in 0..managed.count()? {
-            managed.str()?;
-        }
+    let mut managed = Reader::new(&bytes[start..bookmarks[0]]);
+    let has_transferred_characters = managed.bool()?;
+    let mut csv_paths = [Vec::new(), Vec::new()];
+    for paths in &mut csv_paths {
+        let count = managed.count()?;
+        *paths = (0..count).map(|_| managed.str()).collect::<Result<_>>()?;
     }
     managed.expect_str("CM3D2_CHR_MGR")?;
     ensure!(
         managed.i32()? == 1040,
         "unsupported standalone CharacterMgr version"
     );
-    Ok((Player::read(&mut managed)?, start + managed.at..ends[0]))
+    let player = Player::read(&mut managed)?;
+    Ok(SlotPrefix {
+        header,
+        has_transferred_characters,
+        csv_paths,
+        player,
+        stock_start: start + managed.at,
+        bookmarks,
+    })
 }
 
 /// Read the player and locate CharacterMgr's stock count in a standalone slot.
 pub fn read_slot_player(bytes: &[u8]) -> Result<(Player, usize)> {
-    let (player, remaining) = read_slot_management(bytes)?;
-    Ok((player, remaining.start))
+    let prefix = read_slot_prefix(bytes)?;
+    Ok((prefix.player, prefix.stock_start))
 }
 
 pub(crate) fn bookmarks(r: &mut Reader, length: usize) -> Result<[usize; 2]> {

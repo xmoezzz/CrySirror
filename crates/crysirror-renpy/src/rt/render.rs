@@ -9,11 +9,7 @@
 //! follow upstream `render.pyx` (Ren'Py 8.3, MIT).
 use super::py::{self, *};
 use crysirror_python::{ObjRef, Payload, PyResult, Value, Vm, builtins::Kw, object::BaseKind, ops};
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 pub const BLIT: i64 = 0;
 pub const DISSOLVE: i64 = 1;
@@ -26,7 +22,9 @@ pub const FLATTEN: i64 = 4;
 pub struct Mat(pub [f64; 16]);
 
 impl Mat {
-    pub const IDENTITY: Mat = Mat([1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.]);
+    pub const IDENTITY: Mat = Mat([
+        1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+    ]);
     pub fn mul(&self, o: &Mat) -> Mat {
         let mut r = [0.; 16];
         for i in 0..4 {
@@ -55,18 +53,36 @@ impl Mat {
         let (sx, cx) = x.to_radians().sin_cos();
         let (sy, cy) = y.to_radians().sin_cos();
         let (sz, cz) = z.to_radians().sin_cos();
-        let rx = Mat([1., 0., 0., 0., 0., cx, -sx, 0., 0., sx, cx, 0., 0., 0., 0., 1.]);
-        let ry = Mat([cy, 0., sy, 0., 0., 1., 0., 0., -sy, 0., cy, 0., 0., 0., 0., 1.]);
-        let rz = Mat([cz, -sz, 0., 0., sz, cz, 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.]);
+        let rx = Mat([
+            1., 0., 0., 0., 0., cx, -sx, 0., 0., sx, cx, 0., 0., 0., 0., 1.,
+        ]);
+        let ry = Mat([
+            cy, 0., sy, 0., 0., 1., 0., 0., -sy, 0., cy, 0., 0., 0., 0., 1.,
+        ]);
+        let rz = Mat([
+            cz, -sz, 0., 0., sz, cz, 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ]);
         rz.mul(&ry).mul(&rx)
     }
     pub fn perspective(w: f64, h: f64, n: f64, p: f64, f: f64) -> Mat {
         let offset = Mat::offset(-w / 2., -h / 2., -p);
         let proj = Mat([
-            2. * p / w, 0., 0., 0.,
-            0., 2. * p / h, 0., 0.,
-            0., 0., -(f + n) / (f - n), -2. * f * n / (f - n),
-            0., 0., -1., 0.,
+            2. * p / w,
+            0.,
+            0.,
+            0.,
+            0.,
+            2. * p / h,
+            0.,
+            0.,
+            0.,
+            0.,
+            -(f + n) / (f - n),
+            -2. * f * n / (f - n),
+            0.,
+            0.,
+            -1.,
+            0.,
         ]);
         proj.mul(&offset)
     }
@@ -81,34 +97,93 @@ impl Mat {
     }
     pub fn transform2(&self, x: f64, y: f64) -> (f64, f64) {
         let [a, b, _, w] = self.transform(x, y, 0., 1.);
-        if w != 0. && w != 1. { (a / w, b / w) } else { (a, b) }
+        if w != 0. && w != 1. {
+            (a / w, b / w)
+        } else {
+            (a, b)
+        }
     }
     pub fn is_identity(&self) -> bool {
         *self == Self::IDENTITY
     }
     pub fn is_2d_affine(&self) -> bool {
         let m = &self.0;
-        m[2] == 0. && m[6] == 0. && m[8] == 0. && m[9] == 0. && m[12] == 0. && m[13] == 0. && m[14] == 0. && m[15] == 1.
+        m[2] == 0.
+            && m[6] == 0.
+            && m[8] == 0.
+            && m[9] == 0.
+            && m[12] == 0.
+            && m[13] == 0.
+            && m[14] == 0.
+            && m[15] == 1.
     }
     pub fn inverse(&self) -> Mat {
         let m = &self.0;
         let mut inv = [0.; 16];
-        inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
-        inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
-        inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
-        inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
-        inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
-        inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
-        inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
-        inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
-        inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
-        inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
-        inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
-        inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
-        inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
-        inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
-        inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
-        inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+        inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15]
+            + m[9] * m[7] * m[14]
+            + m[13] * m[6] * m[11]
+            - m[13] * m[7] * m[10];
+        inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15]
+            - m[8] * m[7] * m[14]
+            - m[12] * m[6] * m[11]
+            + m[12] * m[7] * m[10];
+        inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15]
+            + m[8] * m[7] * m[13]
+            + m[12] * m[5] * m[11]
+            - m[12] * m[7] * m[9];
+        inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14]
+            - m[8] * m[6] * m[13]
+            - m[12] * m[5] * m[10]
+            + m[12] * m[6] * m[9];
+        inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15]
+            - m[9] * m[3] * m[14]
+            - m[13] * m[2] * m[11]
+            + m[13] * m[3] * m[10];
+        inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15]
+            + m[8] * m[3] * m[14]
+            + m[12] * m[2] * m[11]
+            - m[12] * m[3] * m[10];
+        inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15]
+            - m[8] * m[3] * m[13]
+            - m[12] * m[1] * m[11]
+            + m[12] * m[3] * m[9];
+        inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14]
+            + m[8] * m[2] * m[13]
+            + m[12] * m[1] * m[10]
+            - m[12] * m[2] * m[9];
+        inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15]
+            + m[5] * m[3] * m[14]
+            + m[13] * m[2] * m[7]
+            - m[13] * m[3] * m[6];
+        inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15]
+            - m[4] * m[3] * m[14]
+            - m[12] * m[2] * m[7]
+            + m[12] * m[3] * m[6];
+        inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15]
+            + m[4] * m[3] * m[13]
+            + m[12] * m[1] * m[7]
+            - m[12] * m[3] * m[5];
+        inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14]
+            - m[4] * m[2] * m[13]
+            - m[12] * m[1] * m[6]
+            + m[12] * m[2] * m[5];
+        inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11]
+            - m[5] * m[3] * m[10]
+            - m[9] * m[2] * m[7]
+            + m[9] * m[3] * m[6];
+        inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11]
+            + m[4] * m[3] * m[10]
+            + m[8] * m[2] * m[7]
+            - m[8] * m[3] * m[6];
+        inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11]
+            - m[4] * m[3] * m[9]
+            - m[8] * m[1] * m[7]
+            + m[8] * m[3] * m[5];
+        inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10]
+            + m[4] * m[2] * m[9]
+            + m[8] * m[1] * m[6]
+            - m[8] * m[2] * m[5];
         let det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
         if det == 0. {
             return Mat([0.; 16]);
@@ -293,7 +368,9 @@ pub struct RenderState {
 }
 
 pub fn rs(vm: &Vm) -> Rc<RefCell<RenderState>> {
-    vm.ext_get::<Rc<RefCell<RenderState>>>().expect("render state").clone()
+    vm.ext_get::<Rc<RefCell<RenderState>>>()
+        .expect("render state")
+        .clone()
 }
 
 pub fn render_data(v: &Value) -> Option<RenderRef> {
@@ -310,7 +387,8 @@ pub fn matrix_data(v: &Value) -> Option<Mat> {
 
 pub fn new_render(vm: &Vm, data: RenderData) -> Value {
     let class = rs(vm).borrow_mut().render_class.clone();
-    vm.types.new_native(&class, Box::new(Rc::new(RefCell::new(data))))
+    vm.types
+        .new_native(&class, Box::new(Rc::new(RefCell::new(data))))
 }
 
 pub fn new_texture(vm: &Vm, t: Texture) -> Value {
@@ -324,7 +402,9 @@ pub fn new_matrix(vm: &Vm, m: Mat) -> Value {
 }
 
 fn this(vm: &Vm, args: &[Value]) -> PyResult<RenderRef> {
-    args.first().and_then(render_data).ok_or_else(|| vm.type_error("Render method on non-Render"))
+    args.first()
+        .and_then(render_data)
+        .ok_or_else(|| vm.type_error("Render method on non-Render"))
 }
 
 /// Converts a blit source value.
@@ -341,19 +421,35 @@ pub fn source_of(vm: &mut Vm, v: &Value) -> PyResult<Source> {
             return Ok(Source::Texture(tex, t));
         }
     }
-    Err(vm.type_error(format!("cannot blit {}", v.obj().map(|o| o.class_name()).unwrap_or_default())))
+    Err(vm.type_error(format!(
+        "cannot blit {}",
+        v.obj().map(|o| o.class_name()).unwrap_or_default()
+    )))
 }
 
 fn blit_impl(vm: &mut Vm, args: &[Value], kw: Kw, mode: u8) -> PyResult<Value> {
     let r = this(vm, args)?;
-    let source = arg(args, kw, 1, "source").cloned().ok_or_else(|| vm.type_error("blit() missing source"))?;
+    let source = arg(args, kw, 1, "source")
+        .cloned()
+        .ok_or_else(|| vm.type_error("blit() missing source"))?;
     if py::same(&source, &args[0]) {
         return Err(py::error(vm, "Blitting to self."));
     }
-    let pos = arg(args, kw, 2, "pos").cloned().ok_or_else(|| vm.type_error("blit() missing pos"))?;
-    let focus = match arg(args, kw, 3, "focus") { Some(v) => ops::truthy(vm, v)?, None => true };
-    let main = match arg(args, kw, 4, "main") { Some(v) => ops::truthy(vm, v)?, None => true };
-    let index = match arg(args, kw, 5, "index") { Some(Value::None) | None => None, Some(v) => Some(py::int(vm, v)?) };
+    let pos = arg(args, kw, 2, "pos")
+        .cloned()
+        .ok_or_else(|| vm.type_error("blit() missing pos"))?;
+    let focus = match arg(args, kw, 3, "focus") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => true,
+    };
+    let main = match arg(args, kw, 4, "main") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => true,
+    };
+    let index = match arg(args, kw, 5, "index") {
+        Some(Value::None) | None => None,
+        Some(v) => Some(py::int(vm, v)?),
+    };
     let p = py::items(vm, &pos)?;
     if p.len() != 2 {
         return Err(vm.type_error("blit pos must be (x, y)"));
@@ -371,7 +467,13 @@ fn blit_impl(vm: &mut Vm, args: &[Value], kw: Kw, mode: u8) -> PyResult<Value> {
         _ => {}
     }
     let source = source_of(vm, &source)?;
-    let b = Blit { source, x, y, focus, main };
+    let b = Blit {
+        source,
+        x,
+        y,
+        focus,
+        main,
+    };
     let mut d = r.borrow_mut();
     match index {
         Some(i) => {
@@ -396,14 +498,23 @@ fn r_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn r_new(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     // args[0] is the class.
-    let w = arg(&args[1..], kw, 0, "width").cloned().unwrap_or(Value::Int(0));
-    let h = arg(&args[1..], kw, 1, "height").cloned().unwrap_or(Value::Int(0));
+    let w = arg(&args[1..], kw, 0, "width")
+        .cloned()
+        .unwrap_or(Value::Int(0));
+    let h = arg(&args[1..], kw, 1, "height")
+        .cloned()
+        .unwrap_or(Value::Int(0));
     let mut d = RenderData::new(py::f64_of(vm, &w)?, py::f64_of(vm, &h)?);
     if let Some(l) = arg(&args[1..], kw, 2, "layer_name") {
         d.layer_name = l.clone();
     }
-    let cls = args[0].obj().cloned().ok_or_else(|| vm.type_error("Render.__new__"))?;
-    Ok(vm.types.new_native(&cls, Box::new(Rc::new(RefCell::new(d)))))
+    let cls = args[0]
+        .obj()
+        .cloned()
+        .ok_or_else(|| vm.type_error("Render.__new__"))?;
+    Ok(vm
+        .types
+        .new_native(&cls, Box::new(Rc::new(RefCell::new(d)))))
 }
 
 fn r_blit(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -419,13 +530,21 @@ fn r_absolute_blit(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn r_get_size(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let r = this(vm, args)?;
     let r = r.borrow();
-    Ok(vm.types.new_tuple(vec![Value::Float(r.width), Value::Float(r.height)]))
+    Ok(vm
+        .types
+        .new_tuple(vec![Value::Float(r.width), Value::Float(r.height)]))
 }
 
 /// `subsurface(rect, focus=False, subpixel=False, bounds=None)`: a clipped
 /// view of this render. Upstream crops child geometry; CrySirror layers clip
 /// the retained child instead, which is equivalent for drawing and focus.
-pub fn subsurface(vm: &mut Vm, this_v: &Value, rect: [f64; 4], focus: bool, subpixel: bool) -> PyResult<Value> {
+pub fn subsurface(
+    vm: &mut Vm,
+    this_v: &Value,
+    rect: [f64; 4],
+    focus: bool,
+    subpixel: bool,
+) -> PyResult<Value> {
     let r = render_data(this_v).ok_or_else(|| vm.type_error("subsurface on non-Render"))?;
     let [mut x, mut y, mut w, mut h] = rect;
     if !subpixel {
@@ -440,7 +559,11 @@ pub fn subsurface(vm: &mut Vm, this_v: &Value, rect: [f64; 4], focus: bool, subp
     {
         let src = r.borrow();
         // Drop clipping on an axis that the crop does not reduce.
-        if src.reverse.is_none() || src.reverse.is_some_and(|m| m.0[0] > 0. && m.0[1] == 0. && m.0[4] == 0. && m.0[5] > 0.) {
+        if src.reverse.is_none()
+            || src
+                .reverse
+                .is_some_and(|m| m.0[0] > 0. && m.0[1] == 0. && m.0[4] == 0. && m.0[5] > 0.)
+        {
             let fwd = src.forward.unwrap_or(Mat::IDENTITY);
             let (tx, ty) = fwd.transform2(x, y);
             let (tw, th) = fwd.transform2(w + x, h + y);
@@ -454,14 +577,28 @@ pub fn subsurface(vm: &mut Vm, this_v: &Value, rect: [f64; 4], focus: bool, subp
         }
         d.render_of = src.render_of.clone();
     }
-    d.children.push(Blit { source: Source::Render(r, this_v.clone()), x: -x, y: -y, focus, main: true });
+    d.children.push(Blit {
+        source: Source::Render(r, this_v.clone()),
+        x: -x,
+        y: -y,
+        focus,
+        main: true,
+    });
     Ok(new_render(vm, d))
 }
 
 fn r_subsurface(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let rect = arg(args, kw, 1, "rect").cloned().ok_or_else(|| vm.type_error("subsurface() missing rect"))?;
-    let focus = match arg(args, kw, 2, "focus") { Some(v) => ops::truthy(vm, v)?, None => false };
-    let subpixel = match arg(args, kw, 3, "subpixel") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let rect = arg(args, kw, 1, "rect")
+        .cloned()
+        .ok_or_else(|| vm.type_error("subsurface() missing rect"))?;
+    let focus = match arg(args, kw, 2, "focus") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
+    let subpixel = match arg(args, kw, 3, "subpixel") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     let rect = rect4(vm, &rect)?;
     subsurface(vm, &args[0], rect, focus, subpixel)
 }
@@ -471,7 +608,12 @@ pub fn rect4(vm: &mut Vm, v: &Value) -> PyResult<[f64; 4]> {
     if p.len() != 4 {
         return Err(vm.type_error("expected (x, y, w, h)"));
     }
-    Ok([py::f64_of(vm, &p[0])?, py::f64_of(vm, &p[1])?, py::f64_of(vm, &p[2])?, py::f64_of(vm, &p[3])?])
+    Ok([
+        py::f64_of(vm, &p[0])?,
+        py::f64_of(vm, &p[1])?,
+        py::f64_of(vm, &p[2])?,
+        py::f64_of(vm, &p[3])?,
+    ])
 }
 
 fn r_depends_on(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -480,7 +622,10 @@ fn r_depends_on(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if py::same(&source, &args[0]) {
         return Err(py::error(vm, "Render depends on itself."));
     }
-    let focus = match arg(args, kw, 2, "focus") { Some(v) => ops::truthy(vm, v)?, None => false };
+    let focus = match arg(args, kw, 2, "focus") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => false,
+    };
     if focus {
         if let Some(s) = render_data(&source) {
             r.borrow_mut().pass_focuses.push(s);
@@ -508,19 +653,44 @@ fn r_add_focus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             (r.width, r.height)
         };
         let x = py::f64_of(vm, &x)?;
-        let y = if py::is_none(&y) { 0. } else { py::f64_of(vm, &y)? };
-        let w = if py::is_none(&w) { rw } else { py::f64_of(vm, &w)? };
-        let h = if py::is_none(&h) { rh } else { py::f64_of(vm, &h)? };
+        let y = if py::is_none(&y) {
+            0.
+        } else {
+            py::f64_of(vm, &y)?
+        };
+        let w = if py::is_none(&w) {
+            rw
+        } else {
+            py::f64_of(vm, &w)?
+        };
+        let h = if py::is_none(&h) {
+            rh
+        } else {
+            py::f64_of(vm, &h)?
+        };
         Some([x, y, w, h])
     };
     let mask = if py::is_none(&mask) {
         None
     } else {
-        let mx = if py::is_none(&mx) { 0. } else { py::f64_of(vm, &mx)? };
-        let my = if py::is_none(&my) { 0. } else { py::f64_of(vm, &my)? };
+        let mx = if py::is_none(&mx) {
+            0.
+        } else {
+            py::f64_of(vm, &mx)?
+        };
+        let my = if py::is_none(&my) {
+            0.
+        } else {
+            py::f64_of(vm, &my)?
+        };
         Some((mx, my, mask))
     };
-    r.borrow_mut().focuses.push(Focus { d, arg: farg, rect, mask });
+    r.borrow_mut().focuses.push(Focus {
+        d,
+        arg: farg,
+        rect,
+        mask,
+    });
     Ok(Value::None)
 }
 
@@ -532,9 +702,25 @@ fn r_fill(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         let r = r.borrow();
         (r.width, r.height)
     };
-    let t = new_texture(vm, Texture { kind: TexKind::Solid(rgba), width: w, height: h, crop: None, full: None, opaque: rgba[3] == 255 });
+    let t = new_texture(
+        vm,
+        Texture {
+            kind: TexKind::Solid(rgba),
+            width: w,
+            height: h,
+            crop: None,
+            full: None,
+            opaque: rgba[3] == 255,
+        },
+    );
     let source = source_of(vm, &t)?;
-    r.borrow_mut().children.push(Blit { source, x: 0., y: 0., focus: false, main: true });
+    r.borrow_mut().children.push(Blit {
+        source,
+        x: 0.,
+        y: 0.,
+        focus: false,
+        main: true,
+    });
     Ok(Value::None)
 }
 
@@ -545,9 +731,25 @@ fn r_canvas(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         (r.width, r.height)
     };
     let ops = Rc::new(RefCell::new(Vec::new()));
-    let t = new_texture(vm, Texture { kind: TexKind::Canvas(ops.clone()), width: w, height: h, crop: None, full: None, opaque: false });
+    let t = new_texture(
+        vm,
+        Texture {
+            kind: TexKind::Canvas(ops.clone()),
+            width: w,
+            height: h,
+            crop: None,
+            full: None,
+            opaque: false,
+        },
+    );
     let source = source_of(vm, &t)?;
-    r.borrow_mut().children.push(Blit { source, x: 0., y: 0., focus: false, main: true });
+    r.borrow_mut().children.push(Blit {
+        source,
+        x: 0.,
+        y: 0.,
+        focus: false,
+        main: true,
+    });
     let class = rs(vm).borrow_mut().canvas_class.clone();
     Ok(vm.types.new_native(&class, Box::new(ops)))
 }
@@ -556,33 +758,68 @@ fn r_place(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let a = |i: usize, n: &str| arg(args, kw, i, n).cloned().unwrap_or(Value::None);
     let rv = args[0].clone();
     let d = a(1, "d");
-    let x = if py::is_none(&a(2, "x")) { 0. } else { py::f64_of(vm, &a(2, "x"))? };
-    let y = if py::is_none(&a(3, "y")) { 0. } else { py::f64_of(vm, &a(3, "y"))? };
+    let x = if py::is_none(&a(2, "x")) {
+        0.
+    } else {
+        py::f64_of(vm, &a(2, "x"))?
+    };
+    let y = if py::is_none(&a(3, "y")) {
+        0.
+    } else {
+        py::f64_of(vm, &a(3, "y"))?
+    };
     let (rw, rh) = {
         let r = this(vm, args)?;
         let r = r.borrow();
         (r.width, r.height)
     };
-    let width = if py::is_none(&a(4, "width")) { rw } else { py::f64_of(vm, &a(4, "width"))? };
-    let height = if py::is_none(&a(5, "height")) { rh } else { py::f64_of(vm, &a(5, "height"))? };
+    let width = if py::is_none(&a(4, "width")) {
+        rw
+    } else {
+        py::f64_of(vm, &a(4, "width"))?
+    };
+    let height = if py::is_none(&a(5, "height")) {
+        rh
+    } else {
+        py::f64_of(vm, &a(5, "height"))?
+    };
     let (st, at) = (a(6, "st"), a(7, "at"));
     let (rst, rat) = {
         let s_rc = rs(vm);
-    let s = s_rc.borrow_mut();
+        let s = s_rc.borrow_mut();
         (s.render_st, s.render_at)
     };
-    let st = if py::is_none(&st) { rst } else { py::f64_of(vm, &st)? };
-    let at = if py::is_none(&at) { rat } else { py::f64_of(vm, &at)? };
+    let st = if py::is_none(&st) {
+        rst
+    } else {
+        py::f64_of(vm, &st)?
+    };
+    let at = if py::is_none(&at) {
+        rat
+    } else {
+        py::f64_of(vm, &at)?
+    };
     let child = a(8, "render");
-    let child = if py::is_none(&child) { render(vm, &d, width, height, st, at)? } else { child };
-    let main = match arg(args, kw, 9, "main") { Some(v) => ops::truthy(vm, v)?, None => true };
+    let child = if py::is_none(&child) {
+        render(vm, &d, width, height, st, at)?
+    } else {
+        child
+    };
+    let main = match arg(args, kw, 9, "main") {
+        Some(v) => ops::truthy(vm, v)?,
+        None => true,
+    };
     let (cw, ch) = source_of(vm, &child)?.size();
     let placement = vm.call_method(&d, "get_placement", Vec::new())?;
     let (px, py_) = super::core::place(vm, &placement, width, height, cw, ch)?;
-    let pos = vm.types.new_tuple(vec![Value::Float(x + px), Value::Float(y + py_)]);
+    let pos = vm
+        .types
+        .new_tuple(vec![Value::Float(x + px), Value::Float(y + py_)]);
     let main_v = Value::Bool(main);
     blit_impl(vm, &[rv, child, pos, Value::Bool(true), main_v], &[], 1)?;
-    Ok(vm.types.new_tuple(vec![Value::Float(x + px), Value::Float(y + py_)]))
+    Ok(vm
+        .types
+        .new_tuple(vec![Value::Float(x + px), Value::Float(y + py_)]))
 }
 
 fn r_zoom(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -594,8 +831,14 @@ fn r_zoom(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     d.height *= yz;
     let rev = Mat::scale(xz, yz, 1.);
     let fwd = Mat::scale(1. / xz, 1. / yz, 1.);
-    d.reverse = Some(match d.reverse { Some(m) => rev.mul(&m), None => rev });
-    d.forward = Some(match d.forward { Some(m) => m.mul(&fwd), None => fwd });
+    d.reverse = Some(match d.reverse {
+        Some(m) => rev.mul(&m),
+        None => rev,
+    });
+    d.forward = Some(match d.forward {
+        Some(m) => m.mul(&fwd),
+        None => fwd,
+    });
     Ok(Value::None)
 }
 
@@ -603,7 +846,10 @@ fn r_add_shader(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let r = this(vm, args)?;
     let shader = arg(args, kw, 1, "shader").cloned().unwrap_or(Value::None);
     let mut d = r.borrow_mut();
-    let mut list = match py::seq(&d.shaders) { Some(v) => v, None => Vec::new() };
+    let mut list = match py::seq(&d.shaders) {
+        Some(v) => v,
+        None => Vec::new(),
+    };
     if let Some(name) = shader.as_str() {
         if let Some(stripped) = name.strip_prefix('-') {
             list.retain(|s| s.as_str() != Some(stripped));
@@ -666,10 +912,11 @@ fn r_is_pixel_opaque(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn r_is_fully_transparent(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let r = this(vm, args)?;
     fn empty(r: &RenderData) -> bool {
-        r.alpha <= 0. || r.children.iter().all(|c| match &c.source {
-            Source::Render(r, _) => empty(&r.borrow()),
-            Source::Texture(t, _) => matches!(t.kind, TexKind::Solid(c) if c[3] == 0),
-        })
+        r.alpha <= 0.
+            || r.children.iter().all(|c| match &c.source {
+                Source::Render(r, _) => empty(&r.borrow()),
+                Source::Texture(t, _) => matches!(t.kind, TexKind::Solid(c) if c[3] == 0),
+            })
     }
     Ok(Value::Bool(empty(&r.borrow())))
 }
@@ -680,7 +927,10 @@ fn r_main_displayables_at_point(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult
     let y = py::f64_of(vm, &arg_or(args, kw, 2, "y", Value::Int(0)))?;
     let mut out = Vec::new();
     fn walk(vm: &mut Vm, r: &RenderData, x: f64, y: f64, out: &mut Vec<Value>) {
-        let (x, y) = match &r.forward { Some(f) => f.transform2(x, y), None => (x, y) };
+        let (x, y) = match &r.forward {
+            Some(f) => f.transform2(x, y),
+            None => (x, y),
+        };
         if x < 0. || y < 0. || x >= r.width || y >= r.height {
             return;
         }
@@ -702,7 +952,11 @@ fn r_main_displayables_at_point(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult
 
 fn r_getattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let r = this(vm, args)?;
-    let name = args.get(1).and_then(|n| n.as_str()).unwrap_or("").to_owned();
+    let name = args
+        .get(1)
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+        .to_owned();
     let d = r.borrow();
     let mat = |vm: &Vm, m: &Option<Mat>| m.map_or(Value::None, |m| new_matrix(vm, m));
     Ok(match name.as_str() {
@@ -733,7 +987,15 @@ fn r_getattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
             let items = d
                 .children
                 .iter()
-                .map(|c| vm.types.new_tuple(vec![c.source.value().clone(), Value::Float(c.x), Value::Float(c.y), Value::Bool(c.focus), Value::Bool(c.main)]))
+                .map(|c| {
+                    vm.types.new_tuple(vec![
+                        c.source.value().clone(),
+                        Value::Float(c.x),
+                        Value::Float(c.y),
+                        Value::Bool(c.focus),
+                        Value::Bool(c.main),
+                    ])
+                })
                 .collect();
             vm.types.new_list(items)
         }
@@ -743,15 +1005,23 @@ fn r_getattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
                 .iter()
                 .map(|f| {
                     let r = f.rect.map(|r| r.map(Value::Float));
-                    let (mx, my, mask) = f.mask.clone().map_or((Value::None, Value::None, Value::None), |(x, y, m)| (Value::Float(x), Value::Float(y), m));
-                    let [x, y, w, h] = r.unwrap_or([Value::None, Value::None, Value::None, Value::None]);
-                    vm.types.new_tuple(vec![f.d.clone(), f.arg.clone(), x, y, w, h, mx, my, mask])
+                    let (mx, my, mask) = f
+                        .mask
+                        .clone()
+                        .map_or((Value::None, Value::None, Value::None), |(x, y, m)| {
+                            (Value::Float(x), Value::Float(y), m)
+                        });
+                    let [x, y, w, h] =
+                        r.unwrap_or([Value::None, Value::None, Value::None, Value::None]);
+                    vm.types
+                        .new_tuple(vec![f.d.clone(), f.arg.clone(), x, y, w, h, mx, my, mask])
                 })
                 .collect();
             vm.types.new_list(items)
         }
         "mark" | "cache_killed" | "killed" | "loaded" => Value::Bool(false),
-        "surface" | "alpha_surface" | "half_cache" | "cached_texture" | "cached_model" | "pass_focuses" => Value::None,
+        "surface" | "alpha_surface" | "half_cache" | "cached_texture" | "cached_model"
+        | "pass_focuses" => Value::None,
         _ => match d.extra.get(&name) {
             Some(v) => v.clone(),
             None => return Err(vm.attr_error(format!("'Render' object has no attribute '{name}'"))),
@@ -765,13 +1035,19 @@ fn bool_of(vm: &mut Vm, v: &Value) -> PyResult<bool> {
 
 fn r_setattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let r = this(vm, args)?;
-    let name = args.get(1).and_then(|n| n.as_str()).unwrap_or("").to_owned();
+    let name = args
+        .get(1)
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+        .to_owned();
     let v = args.get(2).cloned().unwrap_or(Value::None);
     let mat = |vm: &Vm, v: &Value| -> PyResult<Option<Mat>> {
         if py::is_none(v) {
             return Ok(None);
         }
-        matrix_data(v).map(Some).ok_or_else(|| vm.type_error("expected a Matrix"))
+        matrix_data(v)
+            .map(Some)
+            .ok_or_else(|| vm.type_error("expected a Matrix"))
     };
     match name.as_str() {
         "width" => {
@@ -855,9 +1131,21 @@ fn r_setattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
                 let source = source_of(vm, &t[0])?;
                 let x = py::f64_of(vm, &t[1])?;
                 let y = py::f64_of(vm, &t[2])?;
-                let focus = match t.get(3) { Some(v) => ops::truthy(vm, v)?, None => true };
-                let main = match t.get(4) { Some(v) => ops::truthy(vm, v)?, None => true };
-                out.push(Blit { source, x, y, focus, main });
+                let focus = match t.get(3) {
+                    Some(v) => ops::truthy(vm, v)?,
+                    None => true,
+                };
+                let main = match t.get(4) {
+                    Some(v) => ops::truthy(vm, v)?,
+                    None => true,
+                };
+                out.push(Blit {
+                    source,
+                    x,
+                    y,
+                    focus,
+                    main,
+                });
             }
             r.borrow_mut().children = out;
         }
@@ -871,7 +1159,12 @@ fn r_setattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn r_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let r = this(vm, args)?;
     let d = r.borrow();
-    Ok(vm.types.new_string(format!("<Render {}x{} of {} children>", d.width, d.height, d.children.len())))
+    Ok(vm.types.new_string(format!(
+        "<Render {}x{} of {} children>",
+        d.width,
+        d.height,
+        d.children.len()
+    )))
 }
 
 fn r_kill(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -880,11 +1173,31 @@ fn r_kill(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 /// `render(d, width, height, st, at)` with the per-frame cache.
-pub fn render(vm: &mut Vm, d: &Value, width: f64, height: f64, st: f64, at: f64) -> PyResult<Value> {
+pub fn render(
+    vm: &mut Vm,
+    d: &Value,
+    width: f64,
+    height: f64,
+    st: f64,
+    at: f64,
+) -> PyResult<Value> {
     let id = d.id();
     let frame_time = rs(vm).borrow_mut().frame_time;
-    let key = |w: f64, h: f64| [w.to_bits(), h.to_bits(), (frame_time - st).to_bits(), (frame_time - at).to_bits()];
-    let lookup = |vm: &Vm, k: [u64; 4]| rs(vm).borrow_mut().cache.get(&id).and_then(|v| v.iter().find(|(kk, _)| *kk == k).map(|(_, r)| r.clone()));
+    let key = |w: f64, h: f64| {
+        [
+            w.to_bits(),
+            h.to_bits(),
+            (frame_time - st).to_bits(),
+            (frame_time - at).to_bits(),
+        ]
+    };
+    let lookup = |vm: &Vm, k: [u64; 4]| {
+        rs(vm)
+            .borrow_mut()
+            .cache
+            .get(&id)
+            .and_then(|v| v.iter().find(|(kk, _)| *kk == k).map(|(_, r)| r.clone()))
+    };
     let orig = key(width, height);
     if let Some(r) = lookup(vm, orig) {
         return Ok(r);
@@ -918,7 +1231,7 @@ pub fn render(vm: &mut Vm, d: &Value, width: f64, height: f64, st: f64, at: f64)
     }
     let (old_st, old_at, old_size) = {
         let s_rc = rs(vm);
-    let mut s = s_rc.borrow_mut();
+        let mut s = s_rc.borrow_mut();
         s.rendering += 1;
         let old = (s.render_st, s.render_at, s.render_size);
         s.render_st = st;
@@ -926,19 +1239,39 @@ pub fn render(vm: &mut Vm, d: &Value, width: f64, height: f64, st: f64, at: f64)
         s.render_size = (w, h);
         old
     };
-    let result = vm.call_method(d, "render", vec![Value::Float(w), Value::Float(h), Value::Float(st), Value::Float(at)]);
+    let result = vm.call_method(
+        d,
+        "render",
+        vec![
+            Value::Float(w),
+            Value::Float(h),
+            Value::Float(st),
+            Value::Float(at),
+        ],
+    );
     {
         let s_rc = rs(vm);
-    let mut s = s_rc.borrow_mut();
+        let mut s = s_rc.borrow_mut();
         s.rendering -= 1;
         s.render_st = old_st;
         s.render_at = old_at;
         s.render_size = old_size;
     }
     let mut rv = result?;
-    let r = render_data(&rv).ok_or_else(|| py::error(vm, format!("{}.render() must return a Render.", d.obj().map(|o| o.class_name()).unwrap_or_default())))?;
+    let r = render_data(&rv).ok_or_else(|| {
+        py::error(
+            vm,
+            format!(
+                "{}.render() must return a Render.",
+                d.obj().map(|o| o.class_name()).unwrap_or_default()
+            ),
+        )
+    })?;
     r.borrow_mut().render_of.push(d.clone());
-    let clipping = ops::getattr_opt(vm, d, "_clipping")?.map(|v| ops::truthy(vm, &v)).transpose()?.unwrap_or(false);
+    let clipping = ops::getattr_opt(vm, d, "_clipping")?
+        .map(|v| ops::truthy(vm, &v))
+        .transpose()?
+        .unwrap_or(false);
     if clipping {
         let (rw, rh) = {
             let r = r.borrow();
@@ -963,7 +1296,9 @@ pub fn render(vm: &mut Vm, d: &Value, width: f64, height: f64, st: f64, at: f64)
 }
 
 fn f_render(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let d = arg(args, kw, 0, "d").cloned().ok_or_else(|| vm.type_error("render() missing d"))?;
+    let d = arg(args, kw, 0, "d")
+        .cloned()
+        .ok_or_else(|| vm.type_error("render() missing d"))?;
     let w = py::f64_of(vm, &arg_or(args, kw, 1, "width", Value::Int(0)))?;
     let h = py::f64_of(vm, &arg_or(args, kw, 2, "height", Value::Int(0)))?;
     let st = py::f64_of(vm, &arg_or(args, kw, 3, "st", Value::Int(0)))?;
@@ -1019,7 +1354,10 @@ pub fn redraw_time(vm: &Vm) -> Option<f64> {
     if s.invalidated {
         return Some(s.frame_time);
     }
-    s.redraws.iter().map(|(_, t)| *t).fold(None, |a, t| Some(a.map_or(t, |a: f64| a.min(t))))
+    s.redraws
+        .iter()
+        .map(|(_, t)| *t)
+        .fold(None, |a, t| Some(a.map_or(t, |a: f64| a.min(t))))
 }
 
 fn f_redraw_time(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
@@ -1080,7 +1418,11 @@ fn f_render_screen(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let ft = py::get_or_none(vm, &iface, "frame_time")?;
     let ft = py::f64_of(vm, &ft)?;
     rs(vm).borrow_mut().frame_time = ft;
-    let st = if py::is_none(&it) { 0. } else { ft - py::f64_of(vm, &it)? };
+    let st = if py::is_none(&it) {
+        0.
+    } else {
+        ft - py::f64_of(vm, &it)?
+    };
     let rv = render(vm, &root, w, h, st, st)?;
     let m = py::import(vm, "renpy.display.render")?;
     py::set(vm, &m, "screen_render", rv.clone())?;
@@ -1111,10 +1453,15 @@ const MATRIX_DOC_TEXTURE_PROJECTION: &str = "\n        This generates a matrix t
 
 // ---- Matrix ---------------------------------------------------------------
 
-const MNAMES: [&str; 16] = ["xdx", "xdy", "xdz", "xdw", "ydx", "ydy", "ydz", "ydw", "zdx", "zdy", "zdz", "zdw", "wdx", "wdy", "wdz", "wdw"];
+const MNAMES: [&str; 16] = [
+    "xdx", "xdy", "xdz", "xdw", "ydx", "ydy", "ydz", "ydw", "zdx", "zdy", "zdz", "zdw", "wdx",
+    "wdy", "wdz", "wdw",
+];
 
 fn m_this(vm: &Vm, args: &[Value]) -> PyResult<Mat> {
-    args.first().and_then(matrix_data).ok_or_else(|| vm.type_error("Matrix method on non-Matrix"))
+    args.first()
+        .and_then(matrix_data)
+        .ok_or_else(|| vm.type_error("Matrix method on non-Matrix"))
 }
 
 fn m_new(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -1144,7 +1491,10 @@ fn m_new(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             _ => return Err(vm.value_error("Matrix expects 4, 9 or 16 components")),
         }
     }
-    let cls = args[0].obj().cloned().ok_or_else(|| vm.type_error("Matrix.__new__"))?;
+    let cls = args[0]
+        .obj()
+        .cloned()
+        .ok_or_else(|| vm.type_error("Matrix.__new__"))?;
     Ok(vm.types.new_native(&cls, Box::new(m)))
 }
 
@@ -1171,9 +1521,16 @@ fn m_getattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn m_setattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let name = args.get(1).and_then(|n| n.as_str()).unwrap_or("").to_owned();
+    let name = args
+        .get(1)
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+        .to_owned();
     let v = py::f64_of(vm, &args.get(2).cloned().unwrap_or(Value::Int(0)))?;
-    let i = MNAMES.iter().position(|n| *n == name).ok_or_else(|| vm.attr_error(format!("Matrix has no component {name}")))?;
+    let i = MNAMES
+        .iter()
+        .position(|n| *n == name)
+        .ok_or_else(|| vm.attr_error(format!("Matrix has no component {name}")))?;
     py::native::<Mat, _>(&args[0], |m| m.0[i] = v);
     Ok(Value::None)
 }
@@ -1189,7 +1546,9 @@ fn m_mul(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn m_eq(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let a = m_this(vm, args)?;
-    Ok(Value::Bool(args.get(1).and_then(matrix_data).is_some_and(|b| a == b)))
+    Ok(Value::Bool(
+        args.get(1).and_then(matrix_data).is_some_and(|b| a == b),
+    ))
 }
 
 fn m_transform(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -1200,7 +1559,11 @@ fn m_transform(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let w = py::f64_of(vm, &arg_or(args, kw, 4, "w", Value::Int(1)))?;
     let components = py::int(vm, &arg_or(args, kw, 5, "components", Value::Int(2)))?;
     let [a, b, c, d] = m.transform(x, y, z, w);
-    let v = [a, b, c, d].iter().take(components.clamp(1, 4) as usize).map(|x| Value::Float(*x)).collect();
+    let v = [a, b, c, d]
+        .iter()
+        .take(components.clamp(1, 4) as usize)
+        .map(|x| Value::Float(*x))
+        .collect();
     Ok(vm.types.new_tuple(v))
 }
 
@@ -1212,25 +1575,43 @@ fn m_inverse(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn m_is_unit_aligned(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let m = m_this(vm, args)?;
     let a = m.0;
-    Ok(Value::Bool((a[1] == 0. && a[4] == 0.) || (a[0] == 0. && a[5] == 0.)))
+    Ok(Value::Bool(
+        (a[1] == 0. && a[4] == 0.) || (a[0] == 0. && a[5] == 0.),
+    ))
 }
 
 fn m_getitem(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let m = m_this(vm, args)?;
     let i = py::int(vm, &args.get(1).cloned().unwrap_or(Value::Int(0)))?;
-    m.0.get(i as usize).map(|v| Value::Float(*v)).ok_or_else(|| vm.index_error("Matrix index out of range"))
+    m.0.get(i as usize)
+        .map(|v| Value::Float(*v))
+        .ok_or_else(|| vm.index_error("Matrix index out of range"))
 }
 
 fn m_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let m = m_this(vm, args)?;
-    let rows: Vec<String> = (0..4).map(|r| format!("{:.5}, {:.5}, {:.5}, {:.5}", m.0[r * 4], m.0[r * 4 + 1], m.0[r * 4 + 2], m.0[r * 4 + 3])).collect();
-    Ok(vm.types.new_string(format!("Matrix([{}])", rows.join(",\n        "))))
+    let rows: Vec<String> = (0..4)
+        .map(|r| {
+            format!(
+                "{:.5}, {:.5}, {:.5}, {:.5}",
+                m.0[r * 4],
+                m.0[r * 4 + 1],
+                m.0[r * 4 + 2],
+                m.0[r * 4 + 3]
+            )
+        })
+        .collect();
+    Ok(vm
+        .types
+        .new_string(format!("Matrix([{}])", rows.join(",\n        "))))
 }
 
 fn m_reduce(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let m = m_this(vm, args)?;
     let cls = rs(vm).borrow_mut().matrix_class.clone();
-    let l = vm.types.new_list(m.0.iter().map(|v| Value::Float(*v)).collect());
+    let l = vm
+        .types
+        .new_list(m.0.iter().map(|v| Value::Float(*v)).collect());
     let a = vm.types.new_tuple(vec![l]);
     Ok(vm.types.new_tuple(vec![Value::Obj(cls), a]))
 }
@@ -1261,35 +1642,85 @@ fn sm_perspective(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     for (i, n) in ["w", "h", "n", "p", "f"].iter().enumerate() {
         v[i] = py::f64_of(vm, &arg_or(args, kw, i, n, Value::Int(0)))?;
     }
-    Ok(new_matrix(vm, Mat::perspective(v[0], v[1], v[2], v[3], v[4])))
+    Ok(new_matrix(
+        vm,
+        Mat::perspective(v[0], v[1], v[2], v[3], v[4]),
+    ))
 }
 fn sm_screen_projection(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let w = py::f64_of(vm, &arg_or(args, kw, 0, "w", Value::Int(1)))?;
     let h = py::f64_of(vm, &arg_or(args, kw, 1, "h", Value::Int(1)))?;
-    Ok(new_matrix(vm, Mat([2. / w, 0., 0., -1., 0., -2. / h, 0., 1., 0., 0., 1., 0., 0., 0., 0., 1.])))
+    Ok(new_matrix(
+        vm,
+        Mat([
+            2. / w,
+            0.,
+            0.,
+            -1.,
+            0.,
+            -2. / h,
+            0.,
+            1.,
+            0.,
+            0.,
+            1.,
+            0.,
+            0.,
+            0.,
+            0.,
+            1.,
+        ]),
+    ))
 }
 fn sm_texture_projection(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let w = py::f64_of(vm, &arg_or(args, kw, 0, "w", Value::Int(1)))?;
     let h = py::f64_of(vm, &arg_or(args, kw, 1, "h", Value::Int(1)))?;
-    Ok(new_matrix(vm, Mat([2. / w, 0., 0., -1., 0., 2. / h, 0., -1., 0., 0., 1., 0., 0., 0., 0., 1.])))
+    Ok(new_matrix(
+        vm,
+        Mat([
+            2. / w,
+            0.,
+            0.,
+            -1.,
+            0.,
+            2. / h,
+            0.,
+            -1.,
+            0.,
+            0.,
+            1.,
+            0.,
+            0.,
+            0.,
+            0.,
+            1.,
+        ]),
+    ))
 }
 
 // ---- Texture --------------------------------------------------------------
 
 fn t_this(vm: &Vm, args: &[Value]) -> PyResult<Rc<Texture>> {
-    args.first().and_then(texture_data).ok_or_else(|| vm.type_error("texture method on non-texture"))
+    args.first()
+        .and_then(texture_data)
+        .ok_or_else(|| vm.type_error("texture method on non-texture"))
 }
 
 fn t_get_size(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let t = t_this(vm, args)?;
-    Ok(vm.types.new_tuple(vec![Value::Float(t.width), Value::Float(t.height)]))
+    Ok(vm
+        .types
+        .new_tuple(vec![Value::Float(t.width), Value::Float(t.height)]))
 }
 
 fn t_subsurface(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let t = t_this(vm, args)?;
     let rect = arg_or(args, kw, 1, "rect", Value::None);
     let [x, y, w, h] = rect4(vm, &rect)?;
-    let [bx, by] = match t.crop { Some(c) => [c[0], c[1]], None => [0., 0.] };
+    let [bx, by] = match t.crop {
+        Some(c) => [c[0], c[1]],
+        None => [0., 0.],
+    };
     let mut n = (*t).clone();
     if n.full.is_none() {
         n.full = Some([t.width, t.height]);
@@ -1312,7 +1743,12 @@ fn t_getattr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 // ---- Canvas ---------------------------------------------------------------
 
-fn canvas_push(vm: &mut Vm, args: &[Value], op: &str, fields: serde_json::Value) -> PyResult<Value> {
+fn canvas_push(
+    vm: &mut Vm,
+    args: &[Value],
+    op: &str,
+    fields: serde_json::Value,
+) -> PyResult<Value> {
     let color = super::color::rgba(vm, &args.get(1).cloned().unwrap_or(Value::None))?;
     let mut o = serde_json::json!({"op": op, "color": color});
     if let (Some(o), serde_json::Value::Object(f)) = (o.as_object_mut(), fields) {
@@ -1337,43 +1773,82 @@ fn points(vm: &mut Vm, v: &Value) -> PyResult<Vec<[f64; 2]>> {
 fn c_rect(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let rect = rect4(vm, &arg_or(args, kw, 2, "rect", Value::None))?;
     let width = py::f64_of(vm, &arg_or(args, kw, 3, "width", Value::Int(0)))?;
-    canvas_push(vm, args, "rect", serde_json::json!({"rect": rect, "width": width}))
+    canvas_push(
+        vm,
+        args,
+        "rect",
+        serde_json::json!({"rect": rect, "width": width}),
+    )
 }
 fn c_polygon(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let pts = points(vm, &arg_or(args, kw, 2, "pointlist", Value::None))?;
     let width = py::f64_of(vm, &arg_or(args, kw, 3, "width", Value::Int(0)))?;
-    canvas_push(vm, args, "polygon", serde_json::json!({"points": pts, "width": width}))
+    canvas_push(
+        vm,
+        args,
+        "polygon",
+        serde_json::json!({"points": pts, "width": width}),
+    )
 }
 fn c_circle(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let p = points(vm, &vm.types.new_list(vec![arg_or(args, kw, 2, "pos", Value::None)]))?;
+    let p = points(
+        vm,
+        &vm.types
+            .new_list(vec![arg_or(args, kw, 2, "pos", Value::None)]),
+    )?;
     let radius = py::f64_of(vm, &arg_or(args, kw, 3, "radius", Value::Int(0)))?;
     let width = py::f64_of(vm, &arg_or(args, kw, 4, "width", Value::Int(0)))?;
-    canvas_push(vm, args, "circle", serde_json::json!({"center": p[0], "radius": radius, "width": width}))
+    canvas_push(
+        vm,
+        args,
+        "circle",
+        serde_json::json!({"center": p[0], "radius": radius, "width": width}),
+    )
 }
 fn c_ellipse(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let rect = rect4(vm, &arg_or(args, kw, 2, "rect", Value::None))?;
     let width = py::f64_of(vm, &arg_or(args, kw, 3, "width", Value::Int(0)))?;
-    canvas_push(vm, args, "ellipse", serde_json::json!({"rect": rect, "width": width}))
+    canvas_push(
+        vm,
+        args,
+        "ellipse",
+        serde_json::json!({"rect": rect, "width": width}),
+    )
 }
 fn c_arc(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let rect = rect4(vm, &arg_or(args, kw, 2, "rect", Value::None))?;
     let a0 = py::f64_of(vm, &arg_or(args, kw, 3, "start_angle", Value::Int(0)))?;
     let a1 = py::f64_of(vm, &arg_or(args, kw, 4, "stop_angle", Value::Int(0)))?;
     let width = py::f64_of(vm, &arg_or(args, kw, 5, "width", Value::Int(1)))?;
-    canvas_push(vm, args, "arc", serde_json::json!({"rect": rect, "start": a0, "stop": a1, "width": width}))
+    canvas_push(
+        vm,
+        args,
+        "arc",
+        serde_json::json!({"rect": rect, "start": a0, "stop": a1, "width": width}),
+    )
 }
 fn c_line(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let a = arg_or(args, kw, 2, "start_pos", Value::None);
     let b = arg_or(args, kw, 3, "end_pos", Value::None);
     let pts = points(vm, &vm.types.new_list(vec![a, b]))?;
     let width = py::f64_of(vm, &arg_or(args, kw, 4, "width", Value::Int(1)))?;
-    canvas_push(vm, args, "lines", serde_json::json!({"points": pts, "closed": false, "width": width}))
+    canvas_push(
+        vm,
+        args,
+        "lines",
+        serde_json::json!({"points": pts, "closed": false, "width": width}),
+    )
 }
 fn c_lines(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let closed = ops::truthy(vm, &arg_or(args, kw, 2, "closed", Value::Bool(false)))?;
     let pts = points(vm, &arg_or(args, kw, 3, "pointlist", Value::None))?;
     let width = py::f64_of(vm, &arg_or(args, kw, 4, "width", Value::Int(1)))?;
-    canvas_push(vm, args, "lines", serde_json::json!({"points": pts, "closed": closed, "width": width}))
+    canvas_push(
+        vm,
+        args,
+        "lines",
+        serde_json::json!({"points": pts, "closed": closed, "width": width}),
+    )
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
@@ -1413,7 +1888,13 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     set(vm, "Texture", Value::Obj(tc));
     set(vm, "Matrix", Value::Obj(mc));
     set(vm, "Canvas", Value::Obj(cc));
-    for (n, v) in [("BLIT", BLIT), ("DISSOLVE", DISSOLVE), ("IMAGEDISSOLVE", IMAGEDISSOLVE), ("PIXELLATE", PIXELLATE), ("FLATTEN", FLATTEN)] {
+    for (n, v) in [
+        ("BLIT", BLIT),
+        ("DISSOLVE", DISSOLVE),
+        ("IMAGEDISSOLVE", IMAGEDISSOLVE),
+        ("PIXELLATE", PIXELLATE),
+        ("FLATTEN", FLATTEN),
+    ] {
         set(vm, n, Value::Int(v));
     }
     let ident = new_matrix(vm, Mat::IDENTITY);
@@ -1426,7 +1907,11 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
 }
 
 pub fn init_matrix_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, "renpy.display.matrix", &[("Matrix2D", f_matrix2d)]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        "renpy.display.matrix",
+        &[("Matrix2D", f_matrix2d)],
+    );
     let mc = rs(vm).borrow_mut().matrix_class.clone();
     crysirror_python::modules::set(vm, &m, "Matrix", Value::Obj(mc));
     let ident = new_matrix(vm, Mat::IDENTITY);
@@ -1434,8 +1919,16 @@ pub fn init_matrix_module(vm: &mut Vm) -> PyResult<ObjRef> {
     Ok(m)
 }
 
-fn native_type(vm: &mut Vm, name: &str, module: &str, new: crysirror_python::object::NativeFn, methods: Methods) -> ObjRef {
-    let c = vm.types.new_builtin_type(name, &vm.types.object.clone(), BaseKind::Native, true);
+fn native_type(
+    vm: &mut Vm,
+    name: &str,
+    module: &str,
+    new: crysirror_python::object::NativeFn,
+    methods: Methods,
+) -> ObjRef {
+    let c = vm
+        .types
+        .new_builtin_type(name, &vm.types.object.clone(), BaseKind::Native, true);
     let n = vm.types.new_builtin("__new__", new);
     let n = py::staticmethod(vm, n);
     vm.types.set_attr(&c, "__new__", n);
@@ -1452,62 +1945,92 @@ fn no_new(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn install(vm: &mut Vm) {
-    let render_class = native_type(vm, "Render", "renpy.display.render", r_new, &[
-        ("__init__", r_init),
-        ("blit", r_blit),
-        ("subpixel_blit", r_subpixel_blit),
-        ("absolute_blit", r_absolute_blit),
-        ("get_size", r_get_size),
-        ("subsurface", r_subsurface),
-        ("depends_on", r_depends_on),
-        ("kill_cache", r_noop),
-        ("kill", r_kill),
-        ("add_focus", r_add_focus),
-        ("fill", r_fill),
-        ("canvas", r_canvas),
-        ("place", r_place),
-        ("zoom", r_zoom),
-        ("add_shader", r_add_shader),
-        ("add_uniform", r_add_uniform),
-        ("add_property", r_add_property),
-        ("get_property", r_get_property),
-        ("is_pixel_opaque", r_is_pixel_opaque),
-        ("is_fully_transparent", r_is_fully_transparent),
-        ("main_displayables_at_point", r_main_displayables_at_point),
-        ("__getattr__", r_getattr),
-        ("__setattr__", r_setattr),
-        ("__repr__", r_repr),
-    ]);
+    let render_class = native_type(
+        vm,
+        "Render",
+        "renpy.display.render",
+        r_new,
+        &[
+            ("__init__", r_init),
+            ("blit", r_blit),
+            ("subpixel_blit", r_subpixel_blit),
+            ("absolute_blit", r_absolute_blit),
+            ("get_size", r_get_size),
+            ("subsurface", r_subsurface),
+            ("depends_on", r_depends_on),
+            ("kill_cache", r_noop),
+            ("kill", r_kill),
+            ("add_focus", r_add_focus),
+            ("fill", r_fill),
+            ("canvas", r_canvas),
+            ("place", r_place),
+            ("zoom", r_zoom),
+            ("add_shader", r_add_shader),
+            ("add_uniform", r_add_uniform),
+            ("add_property", r_add_property),
+            ("get_property", r_get_property),
+            ("is_pixel_opaque", r_is_pixel_opaque),
+            ("is_fully_transparent", r_is_fully_transparent),
+            ("main_displayables_at_point", r_main_displayables_at_point),
+            ("__getattr__", r_getattr),
+            ("__setattr__", r_setattr),
+            ("__repr__", r_repr),
+        ],
+    );
     let nmf = vm.types.new_str("NO_MOUSE_FOCUS");
     vm.types.set_attr(&render_class, "NO_MOUSE_FOCUS", nmf);
-    let texture_class = native_type(vm, "Texture", "renpy.display.render", no_new, &[
-        ("get_size", t_get_size),
-        ("subsurface", t_subsurface),
-        ("__getattr__", t_getattr),
-    ]);
-    let matrix_class = native_type(vm, "Matrix", "renpy.display.matrix", m_new, &[
-        ("__getattr__", m_getattr),
-        ("__setattr__", m_setattr),
-        ("__mul__", m_mul),
-        ("__matmul__", m_mul),
-        ("__eq__", m_eq),
-        ("__getitem__", m_getitem),
-        ("transform", m_transform),
-        ("inverse", m_inverse),
-        ("is_unit_aligned", m_is_unit_aligned),
-        ("__repr__", m_repr),
-        ("__reduce__", m_reduce),
-    ]);
+    let texture_class = native_type(
+        vm,
+        "Texture",
+        "renpy.display.render",
+        no_new,
+        &[
+            ("get_size", t_get_size),
+            ("subsurface", t_subsurface),
+            ("__getattr__", t_getattr),
+        ],
+    );
+    let matrix_class = native_type(
+        vm,
+        "Matrix",
+        "renpy.display.matrix",
+        m_new,
+        &[
+            ("__getattr__", m_getattr),
+            ("__setattr__", m_setattr),
+            ("__mul__", m_mul),
+            ("__matmul__", m_mul),
+            ("__eq__", m_eq),
+            ("__getitem__", m_getitem),
+            ("transform", m_transform),
+            ("inverse", m_inverse),
+            ("is_unit_aligned", m_is_unit_aligned),
+            ("__repr__", m_repr),
+            ("__reduce__", m_reduce),
+        ],
+    );
     // Docstrings of renpy/display/matrix.pyx; 00matrixtransform.rpy
     // derives the TransformMatrix documentation from them.
     for (n, f, doc) in [
-        ("identity", sm_identity as crysirror_python::object::NativeFn, None),
+        (
+            "identity",
+            sm_identity as crysirror_python::object::NativeFn,
+            None,
+        ),
         ("offset", sm_offset, Some(MATRIX_DOC_OFFSET)),
         ("scale", sm_scale, Some(MATRIX_DOC_SCALE)),
         ("rotate", sm_rotate, Some(MATRIX_DOC_ROTATE)),
         ("perspective", sm_perspective, Some(MATRIX_DOC_PERSPECTIVE)),
-        ("screen_projection", sm_screen_projection, Some(MATRIX_DOC_SCREEN_PROJECTION)),
-        ("texture_projection", sm_texture_projection, Some(MATRIX_DOC_TEXTURE_PROJECTION)),
+        (
+            "screen_projection",
+            sm_screen_projection,
+            Some(MATRIX_DOC_SCREEN_PROJECTION),
+        ),
+        (
+            "texture_projection",
+            sm_texture_projection,
+            Some(MATRIX_DOC_TEXTURE_PROJECTION),
+        ),
     ] {
         if let Some(d) = doc {
             vm.types.set_builtin_doc(f, d);
@@ -1516,17 +2039,23 @@ pub fn install(vm: &mut Vm) {
         let s = py::staticmethod(vm, b);
         vm.types.set_attr(&matrix_class, n, s);
     }
-    let canvas_class = native_type(vm, "Canvas", "renpy.display.render", no_new, &[
-        ("rect", c_rect),
-        ("polygon", c_polygon),
-        ("circle", c_circle),
-        ("ellipse", c_ellipse),
-        ("arc", c_arc),
-        ("line", c_line),
-        ("lines", c_lines),
-        ("aaline", c_line),
-        ("aalines", c_lines),
-    ]);
+    let canvas_class = native_type(
+        vm,
+        "Canvas",
+        "renpy.display.render",
+        no_new,
+        &[
+            ("rect", c_rect),
+            ("polygon", c_polygon),
+            ("circle", c_circle),
+            ("ellipse", c_ellipse),
+            ("arc", c_arc),
+            ("line", c_line),
+            ("lines", c_lines),
+            ("aaline", c_line),
+            ("aalines", c_lines),
+        ],
+    );
     vm.ext_set(Rc::new(RefCell::new(RenderState {
         render_class,
         texture_class,

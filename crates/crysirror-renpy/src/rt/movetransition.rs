@@ -15,7 +15,17 @@ const MODULE: &str = "renpy.display.movetransition";
 fn position4(vm: &mut Vm, d: &Value) -> PyResult<Value> {
     let p = vm.call_method(d, "get_placement", Vec::new())?;
     let p = py::items(vm, &p)?;
-    let out: Vec<Value> = p.iter().take(4).map(|v| if py::is_none(v) { Value::Int(0) } else { v.clone() }).collect();
+    let out: Vec<Value> = p
+        .iter()
+        .take(4)
+        .map(|v| {
+            if py::is_none(v) {
+                Value::Int(0)
+            } else {
+                v.clone()
+            }
+        })
+        .collect();
     Ok(vm.types.new_tuple(out))
 }
 
@@ -25,7 +35,10 @@ fn offsets(vm: &mut Vm, d: &Value) -> PyResult<Vec<(std::rc::Rc<str>, Value)>> {
     }
     let p = vm.call_method(d, "get_placement", Vec::new())?;
     let p = py::items(vm, &p)?;
-    Ok(vec![("xoffset".into(), p[4].clone()), ("yoffset".into(), p[5].clone())])
+    Ok(vec![
+        ("xoffset".into(), p[4].clone()),
+        ("yoffset".into(), p[5].clone()),
+    ])
 }
 
 fn f_position(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -42,7 +55,12 @@ fn motion(vm: &mut Vm, name: &str) -> PyResult<Value> {
 }
 
 fn f_move_factory(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let (p1, p2, delay, d) = (args[0].clone(), args[1].clone(), args[2].clone(), args[3].clone());
+    let (p1, p2, delay, d) = (
+        args[0].clone(),
+        args[1].clone(),
+        args[2].clone(),
+        args[3].clone(),
+    );
     if ops::eq(vm, &p1, &p2)? {
         return Ok(d);
     }
@@ -53,24 +71,42 @@ fn f_move_factory(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn aorb(vm: &mut Vm, pos: &Value, pos1: &Value) -> PyResult<Value> {
     let a = py::items(vm, pos)?;
     let b = py::items(vm, pos1)?;
-    let out = a.into_iter().zip(b).map(|(a, b)| if py::is_none(&a) { b } else { a }).collect();
+    let out = a
+        .into_iter()
+        .zip(b)
+        .map(|(a, b)| if py::is_none(&a) { b } else { a })
+        .collect();
     Ok(vm.types.new_tuple(out))
 }
 
 fn f_move_in(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let pos = aorb(vm, &args[0], &args[1])?;
     let mv = motion(vm, "Move")?;
-    vm.call(&mv, vec![pos, args[1].clone(), args[2].clone(), args[3].clone()], kw.to_vec())
+    vm.call(
+        &mv,
+        vec![pos, args[1].clone(), args[2].clone(), args[3].clone()],
+        kw.to_vec(),
+    )
 }
 
 fn f_move_out(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let pos = aorb(vm, &args[0], &args[1])?;
     let mv = motion(vm, "Move")?;
-    vm.call(&mv, vec![args[1].clone(), pos, args[2].clone(), args[3].clone()], kw.to_vec())
+    vm.call(
+        &mv,
+        vec![args[1].clone(), pos, args[2].clone(), args[3].clone()],
+        kw.to_vec(),
+    )
 }
 
 fn f_zoom_in_out(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
-    let (start, end, pos, delay, d) = (args[0].clone(), args[1].clone(), args[2].clone(), args[3].clone(), args[4].clone());
+    let (start, end, pos, delay, d) = (
+        args[0].clone(),
+        args[1].clone(),
+        args[2].clone(),
+        args[3].clone(),
+        args[4].clone(),
+    );
     let p = py::items(vm, &pos)?;
     let fz = motion(vm, "FactorZoom")?;
     let mut k = kw.to_vec();
@@ -88,7 +124,16 @@ fn f_revolve_in_out(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let rv = motion(vm, "Revolve")?;
     let mut k = kw.to_vec();
     k.push(("pos".into(), args[2].clone()));
-    vm.call(&rv, vec![args[0].clone(), args[1].clone(), args[3].clone(), args[4].clone()], k)
+    vm.call(
+        &rv,
+        vec![
+            args[0].clone(),
+            args[1].clone(),
+            args[3].clone(),
+            args[4].clone(),
+        ],
+        k,
+    )
 }
 
 // MoveInterpolate --------------------------------------------------------------------------
@@ -96,10 +141,19 @@ fn f_revolve_in_out(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 fn mi_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     super::core::d_init(vm, &[this.clone()], &[])?;
-    for (i, n) in ["delay", "old", "new", "use_old", "time_warp"].iter().enumerate() {
+    for (i, n) in ["delay", "old", "new", "use_old", "time_warp"]
+        .iter()
+        .enumerate()
+    {
         py::set(vm, this, n, args.get(i + 1).cloned().unwrap_or(Value::None))?;
     }
-    for n in ["screen_width", "screen_height", "child_width", "child_height", "st"] {
+    for n in [
+        "screen_width",
+        "screen_height",
+        "child_width",
+        "child_height",
+        "st",
+    ] {
         py::set(vm, this, n, Value::Int(0))?;
     }
     Ok(Value::None)
@@ -114,13 +168,19 @@ fn mi_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let new = py::get(vm, this, "new")?;
     let old_r = render::render(vm, &old, w, h, st, at)?;
     let new_r = render::render(vm, &new, w, h, st, at)?;
-    let use_old = { let v = py::get_or_none(vm, this, "use_old")?; ops::truthy(vm, &v)? };
+    let use_old = {
+        let v = py::get_or_none(vm, this, "use_old")?;
+        ops::truthy(vm, &v)?
+    };
     let cr = if use_old { old_r } else { new_r };
     let (cw, ch) = super::layout::size(&cr);
     py::set(vm, this, "child_width", Value::Float(cw))?;
     py::set(vm, this, "child_height", Value::Float(ch))?;
     py::set(vm, this, "st", Value::Float(st))?;
-    let delay = { let v = py::get(vm, this, "delay")?; py::f64_of(vm, &v)? };
+    let delay = {
+        let v = py::get(vm, this, "delay")?;
+        py::f64_of(vm, &v)?
+    };
     if st < delay {
         render::redraw(vm, this, 0.);
     }
@@ -128,20 +188,61 @@ fn mi_render(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn child_placement(vm: &mut Vm, this: &Value, child: &Value) -> PyResult<[f64; 6]> {
-    let g = |vm: &mut Vm, n: &str| -> PyResult<f64> { let v = py::get_or_none(vm, this, n)?; if py::is_none(&v) { Ok(0.) } else { py::f64_of(vm, &v) } };
-    let (sw, sh, cw, ch) = (g(vm, "screen_width")?, g(vm, "screen_height")?, g(vm, "child_width")?, g(vm, "child_height")?);
+    let g = |vm: &mut Vm, n: &str| -> PyResult<f64> {
+        let v = py::get_or_none(vm, this, n)?;
+        if py::is_none(&v) {
+            Ok(0.)
+        } else {
+            py::f64_of(vm, &v)
+        }
+    };
+    let (sw, sh, cw, ch) = (
+        g(vm, "screen_width")?,
+        g(vm, "screen_height")?,
+        g(vm, "child_width")?,
+        g(vm, "child_height")?,
+    );
     let p = vm.call_method(child, "get_placement", Vec::new())?;
     let p = py::items(vm, &p)?;
-    let based = |vm: &mut Vm, v: &Value, base: f64| -> PyResult<f64> { if py::is_none(v) { Ok(0.) } else { compute_raw(vm, v, base) } };
-    let num = |vm: &mut Vm, v: &Value| -> PyResult<f64> { if py::is_none(v) { Ok(0.) } else { py::f64_of(vm, v) } };
-    Ok([based(vm, &p[0], sw)?, based(vm, &p[1], sh)?, based(vm, &p[2], cw)?, based(vm, &p[3], ch)?, num(vm, &p[4])?, num(vm, &p[5])?])
+    let based = |vm: &mut Vm, v: &Value, base: f64| -> PyResult<f64> {
+        if py::is_none(v) {
+            Ok(0.)
+        } else {
+            compute_raw(vm, v, base)
+        }
+    };
+    let num = |vm: &mut Vm, v: &Value| -> PyResult<f64> {
+        if py::is_none(v) {
+            Ok(0.)
+        } else {
+            py::f64_of(vm, v)
+        }
+    };
+    Ok([
+        based(vm, &p[0], sw)?,
+        based(vm, &p[1], sh)?,
+        based(vm, &p[2], cw)?,
+        based(vm, &p[3], ch)?,
+        num(vm, &p[4])?,
+        num(vm, &p[5])?,
+    ])
 }
 
 fn mi_get_placement(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    let st = { let v = py::get_or_none(vm, this, "st")?; py::f64_of(vm, &v).unwrap_or(0.) };
-    let delay = { let v = py::get(vm, this, "delay")?; py::f64_of(vm, &v)? };
-    let mut done = if st > delay || delay == 0. { 1. } else { st / delay };
+    let st = {
+        let v = py::get_or_none(vm, this, "st")?;
+        py::f64_of(vm, &v).unwrap_or(0.)
+    };
+    let delay = {
+        let v = py::get(vm, this, "delay")?;
+        py::f64_of(vm, &v)?
+    };
+    let mut done = if st > delay || delay == 0. {
+        1.
+    } else {
+        st / delay
+    };
     let tw = py::get_or_none(vm, this, "time_warp")?;
     if !py::is_none(&tw) {
         let r = vm.call(&tw, vec![Value::Float(done)], Vec::new())?;
@@ -154,12 +255,22 @@ fn mi_get_placement(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let abs = py::import_attr(vm, "renpy.display.core", "absolute")?;
     let mut out = Vec::new();
     for i in 0..6 {
-        out.push(vm.call(&abs, vec![Value::Float(a[i] + done * (b[i] - a[i]))], Vec::new())?);
+        out.push(vm.call(
+            &abs,
+            vec![Value::Float(a[i] + done * (b[i] - a[i]))],
+            Vec::new(),
+        )?);
     }
     let op = vm.call_method(&old, "get_placement", Vec::new())?;
     let np = vm.call_method(&new, "get_placement", Vec::new())?;
-    let os = py::items(vm, &op)?.get(6).cloned().unwrap_or(Value::Bool(false));
-    let ns = py::items(vm, &np)?.get(6).cloned().unwrap_or(Value::Bool(false));
+    let os = py::items(vm, &op)?
+        .get(6)
+        .cloned()
+        .unwrap_or(Value::Bool(false));
+    let ns = py::items(vm, &np)?
+        .get(6)
+        .cloned()
+        .unwrap_or(Value::Bool(false));
     out.push(Value::Bool(ops::truthy(vm, &os)? || ops::truthy(vm, &ns)?));
     Ok(vm.types.new_tuple(out))
 }
@@ -200,9 +311,20 @@ fn new_fixed_box(vm: &mut Vm, kw: Vec<(std::rc::Rc<str>, Value)>) -> PyResult<Va
     vm.call(&mb, Vec::new(), k)
 }
 
-fn move_interpolate(vm: &mut Vm, o: &Opts, old: Value, new: Value, use_old: bool, tw: &Value) -> PyResult<Value> {
+fn move_interpolate(
+    vm: &mut Vm,
+    o: &Opts,
+    old: Value,
+    new: Value,
+    use_old: bool,
+    tw: &Value,
+) -> PyResult<Value> {
     let c = py::import_attr(vm, MODULE, "MoveInterpolate")?;
-    vm.call(&c, vec![o.delay.clone(), old, new, Value::Bool(use_old), tw.clone()], Vec::new())
+    vm.call(
+        &c,
+        vec![o.delay.clone(), old, new, Value::Bool(use_old), tw.clone()],
+        Vec::new(),
+    )
 }
 
 fn wrap(vm: &mut Vm, sle: &Value) -> PyResult<Value> {
@@ -215,18 +337,34 @@ fn wrap(vm: &mut Vm, sle: &Value) -> PyResult<Value> {
 
 fn tag_of(vm: &mut Vm, sle: &Value) -> PyResult<Value> {
     let t = py::get_or_none(vm, sle, "tag")?;
-    if ops::truthy(vm, &t)? { Ok(t) } else { py::get(vm, sle, "displayable") }
+    if ops::truthy(vm, &t)? {
+        Ok(t)
+    } else {
+        py::get(vm, sle, "displayable")
+    }
 }
 
 fn merge(vm: &mut Vm, sle: &Value, d: Value, old_style: bool) -> PyResult<Value> {
     let rv = vm.call_method(sle, "copy", Vec::new())?;
-    py::set(vm, &rv, "show_time", if old_style { Value::None } else { Value::Int(0) })?;
+    py::set(
+        vm,
+        &rv,
+        "show_time",
+        if old_style {
+            Value::None
+        } else {
+            Value::Int(0)
+        },
+    )?;
     py::set(vm, &rv, "displayable", d)?;
     Ok(rv)
 }
 
 fn key_of(vm: &mut Vm, t: &Value) -> PyResult<String> {
-    Ok(match t.as_str() { Some(s) => format!("s:{s}"), None => format!("d:{}", t.id()) })
+    Ok(match t.as_str() {
+        Some(s) => format!("s:{s}"),
+        None => format!("d:{}", t.id()),
+    })
 }
 
 fn merge_slide(vm: &mut Vm, o: &Opts, old: &Value, new: &Value) -> PyResult<Value> {
@@ -259,7 +397,14 @@ fn merge_slide(vm: &mut Vm, o: &Opts, old: &Value, new: &Value) -> PyResult<Valu
             let ol = ops::getitem(vm, &old_layers, layer.clone())?;
             let d = if o.old_style.is_some() {
                 let sl = py::get_or_none(vm, &nl, "scene_list")?;
-                if is_multibox(vm, &nl)? && ops::contains(vm, &o.layers, &layer)? && !py::is_none(&sl) { merge_slide(vm, o, &ol, &nl)? } else { nl }
+                if is_multibox(vm, &nl)?
+                    && ops::contains(vm, &o.layers, &layer)?
+                    && !py::is_none(&sl)
+                {
+                    merge_slide(vm, o, &ol, &nl)?
+                } else {
+                    nl
+                }
             } else {
                 merge_slide(vm, o, &ol, &nl)?
             };
@@ -285,7 +430,8 @@ fn merge_slide(vm: &mut Vm, o: &Opts, old: &Value, new: &Value) -> PyResult<Valu
             new = nu;
             let layer = py::get_or_none(vm, &new, "layer_name")?;
             let sl = py::get_or_none(vm, &new, "scene_list")?;
-            if is_multibox(vm, &new)? && ops::contains(vm, &o.layers, &layer)? && !py::is_none(&sl) {
+            if is_multibox(vm, &new)? && ops::contains(vm, &o.layers, &layer)? && !py::is_none(&sl)
+            {
                 let d = merge_slide(vm, o, &old, &new)?;
                 let at = layout_attr(vm, "AdjustTimes")?;
                 let adjust = vm.call(&at, vec![d.clone(), Value::None, Value::None], Vec::new())?;
@@ -452,9 +598,14 @@ fn f_move_transition(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     };
     if py::config_bool(vm, "developer").unwrap_or(false) {
         for w in [&old_widget, &new_widget] {
-            if py::get_opt(vm, w, "scene_list")?.is_none() && py::get_opt(vm, w, "layers")?.is_none() {
+            if py::get_opt(vm, w, "scene_list")?.is_none()
+                && py::get_opt(vm, w, "layers")?.is_none()
+            {
                 let n = w.obj().map(|o| o.class_name()).unwrap_or_default();
-                return Err(py::error(vm, format!("MoveTransition can only be applied to one or all layers, not {n}.")));
+                return Err(py::error(
+                    vm,
+                    format!("MoveTransition can only be applied to one or all layers, not {n}."),
+                ));
             }
         }
     }
@@ -498,21 +649,39 @@ fn f_old_move_transition(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value>
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("position", f_position),
-        ("offsets", f_offsets),
-        ("MoveFactory", f_move_factory),
-        ("default_enter_factory", |_, a, _| Ok(a.get(2).cloned().unwrap_or(Value::None))),
-        ("default_leave_factory", |_, _, _| Ok(Value::None)),
-        ("MoveIn", f_move_in),
-        ("MoveOut", f_move_out),
-        ("ZoomInOut", f_zoom_in_out),
-        ("RevolveInOut", f_revolve_in_out),
-        ("OldMoveTransition", f_old_move_transition),
-        ("MoveTransition", f_move_transition),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("position", f_position),
+            ("offsets", f_offsets),
+            ("MoveFactory", f_move_factory),
+            ("default_enter_factory", |_, a, _| {
+                Ok(a.get(2).cloned().unwrap_or(Value::None))
+            }),
+            ("default_leave_factory", |_, _, _| Ok(Value::None)),
+            ("MoveIn", f_move_in),
+            ("MoveOut", f_move_out),
+            ("ZoomInOut", f_zoom_in_out),
+            ("RevolveInOut", f_revolve_in_out),
+            ("OldMoveTransition", f_old_move_transition),
+            ("MoveTransition", f_move_transition),
+        ],
+    );
     let d = Value::Obj(super::core::displayable_class(vm));
-    let c = py::class(vm, MODULE, "MoveInterpolate", &[d], &[("__init__", mi_init), ("render", mi_render), ("get_placement", mi_get_placement), ("visit", mi_visit)], &[])?;
+    let c = py::class(
+        vm,
+        MODULE,
+        "MoveInterpolate",
+        &[d],
+        &[
+            ("__init__", mi_init),
+            ("render", mi_render),
+            ("get_placement", mi_get_placement),
+            ("visit", mi_visit),
+        ],
+        &[],
+    )?;
     crysirror_python::modules::set(vm, &m, "MoveInterpolate", Value::Obj(c));
     Ok(m)
 }

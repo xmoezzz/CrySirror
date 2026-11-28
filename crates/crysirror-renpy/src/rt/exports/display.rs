@@ -53,7 +53,10 @@ fn image(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         return Err(py::error(vm, "Images may not be declared to be None."));
     }
     if !init_phase(vm)? {
-        return Err(py::error(vm, "Images may only be declared inside init blocks."));
+        return Err(py::error(
+            vm,
+            "Images may only be declared inside init blocks.",
+        ));
     }
     let name = name_tuple(vm, name)?;
     let d = super::super::easy::displayable(vm, d, &Value::None, false)?;
@@ -117,7 +120,12 @@ pub fn default_layer(vm: &mut Vm, layer: &Value, tag: &Value, expression: bool) 
 
 fn f_default_layer(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let e = kwb(vm, arg(args, kw, 2, "expression"), false)?;
-    default_layer(vm, &arg_or(args, kw, 0, "layer", Value::None), &arg_or(args, kw, 1, "tag", Value::None), e)
+    default_layer(
+        vm,
+        &arg_or(args, kw, 0, "layer", Value::None),
+        &arg_or(args, kw, 1, "tag", Value::None),
+        e,
+    )
 }
 
 fn can_show(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -128,7 +136,9 @@ fn can_show(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let layer = default_layer(vm, &arg_or(args, kw, 1, "layer", Value::None), &tag, false)?;
     let im = images(vm)?;
-    Ok(vm.call_method(&im, "apply_attributes", vec![layer, tag, name]).unwrap_or(Value::None))
+    Ok(vm
+        .call_method(&im, "apply_attributes", vec![layer, tag, name])
+        .unwrap_or(Value::None))
 }
 
 fn showing(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -185,14 +195,28 @@ fn clear_attributes(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 }
 
 /// `_find_image(layer, key, name, what)` -> (name, what).
-fn find_image(vm: &mut Vm, layer: &Value, key: &Value, name: Value, what: Value) -> PyResult<(Value, Value)> {
+fn find_image(
+    vm: &mut Vm,
+    layer: &Value,
+    key: &Value,
+    name: Value,
+    what: Value,
+) -> PyResult<(Value, Value)> {
     if !py::is_none(&what) {
-        let w = if what.as_str().is_some() { name_tuple(vm, &what)? } else { what };
+        let w = if what.as_str().is_some() {
+            name_tuple(vm, &what)?
+        } else {
+            what
+        };
         return Ok((name, w));
     }
     if py::config_bool(vm, "image_attributes")? {
         let im = images(vm)?;
-        let ni = vm.call_method(&im, "apply_attributes", vec![layer.clone(), key.clone(), name.clone()])?;
+        let ni = vm.call_method(
+            &im,
+            "apply_attributes",
+            vec![layer.clone(), key.clone(), name.clone()],
+        )?;
         if !py::is_none(&ni) {
             let mut n = vec![key.clone()];
             n.extend(py::items(vm, &ni)?.into_iter().skip(1));
@@ -221,12 +245,20 @@ fn f_find_image(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn image_reference(vm: &mut Vm, what: Value) -> PyResult<Value> {
     let c = py::import_attr(vm, "renpy.display.image", "ImageReference")?;
-    vm.call(&c, vec![what], vec![("style".into(), py::s(vm, "image_placement"))])
+    vm.call(
+        &c,
+        vec![what],
+        vec![("style".into(), py::s(vm, "image_placement"))],
+    )
 }
 
 fn apply_at_list(vm: &mut Vm, mut img: Value, at_list: &[Value]) -> PyResult<Value> {
     for i in at_list {
-        img = if is_transform(vm, i)? { vm.call(i, Vec::new(), vec![("child".into(), img)])? } else { vm.call(i, vec![img], Vec::new())? };
+        img = if is_transform(vm, i)? {
+            vm.call(i, Vec::new(), vec![("child".into(), img)])?
+        } else {
+            vm.call(i, vec![img], Vec::new())?
+        };
         vm.call_method(&img, "_unique", Vec::new())?;
     }
     Ok(img)
@@ -236,12 +268,26 @@ fn predict_show(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let mut name = arg_or(args, kw, 0, "name", Value::None);
     let tag = arg_or(args, kw, 2, "tag", Value::None);
     let what = arg_or(args, kw, 3, "what", Value::None);
-    let what = if py::is_none(&what) { arg_or(args, kw, 2, "what", Value::None) } else { what };
+    let what = if py::is_none(&what) {
+        arg_or(args, kw, 2, "what", Value::None)
+    } else {
+        what
+    };
     let what = py::kw(kw, "what").cloned().unwrap_or(what);
-    let at_list = py::kw(kw, "at_list").cloned().or_else(|| args.get(4).cloned()).unwrap_or(Value::None);
-    let layer = py::kw(kw, "layer").cloned().or_else(|| args.get(1).cloned()).unwrap_or(Value::None);
+    let at_list = py::kw(kw, "at_list")
+        .cloned()
+        .or_else(|| args.get(4).cloned())
+        .unwrap_or(Value::None);
+    let layer = py::kw(kw, "layer")
+        .cloned()
+        .or_else(|| args.get(1).cloned())
+        .unwrap_or(Value::None);
     let tag = py::kw(kw, "tag").cloned().unwrap_or(tag);
-    let key = if py::truthy(vm, &tag)? { tag } else { ops::getitem(vm, &name, Value::Int(0))? };
+    let key = if py::truthy(vm, &tag)? {
+        tag
+    } else {
+        ops::getitem(vm, &name, Value::Int(0))?
+    };
     let layer = default_layer(vm, &layer, &key, false)?;
     let img = if is_displayable(vm, &what)? {
         what
@@ -255,7 +301,11 @@ fn predict_show(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         }
         base
     };
-    let al = if py::is_none(&at_list) { Vec::new() } else { py::items(vm, &at_list)? };
+    let al = if py::is_none(&at_list) {
+        Vec::new()
+    } else {
+        py::items(vm, &at_list)?
+    };
     let img = apply_at_list(vm, img, &al)?;
     let im = images(vm)?;
     vm.call_method(&im, "predict_show", vec![layer, name, Value::Bool(true)])?;
@@ -299,7 +349,11 @@ pub(crate) fn show(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         zorder = Value::Int(0);
     }
     let s = sls(vm)?;
-    let key = if py::truthy(vm, &tag)? { tag.clone() } else { ops::getitem(vm, &name, Value::Int(0))? };
+    let key = if py::truthy(vm, &tag)? {
+        tag.clone()
+    } else {
+        ops::getitem(vm, &name, Value::Int(0))?
+    };
     let layer = default_layer(vm, &layer, &key, false)?;
     if py::config_bool(vm, "sticky_positions")? && !py::truthy(vm, &at_list)? {
         let al = py::get(vm, &s, "at_list")?;
@@ -342,7 +396,11 @@ pub(crate) fn show(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             base
         }
     };
-    let al = if py::truthy(vm, &at_list)? { py::items(vm, &at_list)? } else { Vec::new() };
+    let al = if py::truthy(vm, &at_list)? {
+        py::items(vm, &at_list)?
+    } else {
+        Vec::new()
+    };
     let img = apply_at_list(vm, img, &al)?;
     let p = py::import_attr(vm, "renpy.game", "persistent")?;
     if !py::is_none(&p) {
@@ -366,15 +424,25 @@ pub(crate) fn show(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if py::truthy(vm, &mh)? {
         vm.call(&mh, vec![name.clone(), layer.clone()], Vec::new())?;
     }
-    let behind = if py::is_none(&behind) { vm.types.new_list(Vec::new()) } else { behind };
+    let behind = if py::is_none(&behind) {
+        vm.types.new_list(Vec::new())
+    } else {
+        behind
+    };
     let al = vm.types.new_list(al);
-    py::method_kw(vm, &s, "add", vec![layer, img, key, zorder, behind], vec![
-        ("at_list".into(), al),
-        ("name".into(), name),
-        ("atl".into(), atl),
-        ("default_transform".into(), default_transform),
-        ("transient".into(), transient),
-    ])?;
+    py::method_kw(
+        vm,
+        &s,
+        "add",
+        vec![layer, img, key, zorder, behind],
+        vec![
+            ("at_list".into(), al),
+            ("name".into(), name),
+            ("atl".into(), atl),
+            ("default_transform".into(), default_transform),
+            ("transient".into(), transient),
+        ],
+    )?;
     Ok(Value::None)
 }
 
@@ -441,7 +509,13 @@ fn take_screenshot(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         scale = vm.types.new_tuple(vec![w, h]);
     }
     let i = iface(vm)?;
-    py::method_kw(vm, &i, "take_screenshot", vec![scale], vec![("background".into(), bg)])
+    py::method_kw(
+        vm,
+        &i,
+        "take_screenshot",
+        vec![scale],
+        vec![("background".into(), bg)],
+    )
 }
 
 fn screenshot(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -462,7 +536,15 @@ fn transition(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let dict = vm.types.dict.clone();
     if ops::isinstance(vm, &trans, &dict) {
         for (ly, t) in ops::mapping_items(vm, &trans)? {
-            transition(vm, &[t], &[("layer".into(), ly), ("always".into(), Value::Bool(always)), ("force".into(), force.clone())])?;
+            transition(
+                vm,
+                &[t],
+                &[
+                    ("layer".into(), ly),
+                    ("always".into(), Value::Bool(always)),
+                    ("force".into(), force.clone()),
+                ],
+            )?;
         }
         return Ok(Value::None);
     }
@@ -476,7 +558,13 @@ fn transition(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         trans = Value::None;
     }
     let i = iface(vm)?;
-    py::method_kw(vm, &i, "set_transition", vec![trans, layer], vec![("force".into(), force)])
+    py::method_kw(
+        vm,
+        &i,
+        "set_transition",
+        vec![trans, layer],
+        vec![("force".into(), force)],
+    )
 }
 
 fn get_transition(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -507,7 +595,10 @@ fn noop(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 fn image_size(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let im = super::super::easy::displayable(vm, &args[0], &Value::None, false)?;
     if !isinst(vm, &im, "renpy.display.im", "Image")? {
-        return Err(py::error(vm, "renpy.image_size expects it's argument to be an image."));
+        return Err(py::error(
+            vm,
+            "renpy.image_size expects it's argument to be an image.",
+        ));
     }
     let surf = vm.call_method(&im, "load", Vec::new())?;
     vm.call_method(&surf, "get_size", Vec::new())
@@ -535,7 +626,13 @@ fn show_layer_at(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let reset = arg_or(args, kw, 2, "reset", Value::Bool(true));
     let camera = arg_or(args, kw, 3, "camera", Value::Bool(false));
     let s = sls(vm)?;
-    py::method_kw(vm, &s, "set_layer_at_list", vec![layer, at], vec![("reset".into(), reset), ("camera".into(), camera)])
+    py::method_kw(
+        vm,
+        &s,
+        "set_layer_at_list",
+        vec![layer, at],
+        vec![("reset".into(), reset), ("camera".into(), camera)],
+    )
 }
 
 pub(crate) fn free_memory(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
@@ -552,7 +649,11 @@ pub(crate) fn free_memory(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn easy_displayable(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let none = kwb(vm, arg(args, kw, 1, "none"), false)?;
-    let name = if none { "displayable" } else { "displayable_or_none" };
+    let name = if none {
+        "displayable"
+    } else {
+        "displayable_or_none"
+    };
     let f = py::import_attr(vm, "renpy.easy", name)?;
     vm.call(&f, vec![args[0].clone()], Vec::new())
 }
@@ -592,7 +693,12 @@ pub(crate) fn shown_window(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 fn placement_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
     let p = py::items(vm, &args[1])?;
-    for (i, n) in ["xpos", "ypos", "xanchor", "yanchor", "xoffset", "yoffset", "subpixel"].iter().enumerate() {
+    for (i, n) in [
+        "xpos", "ypos", "xanchor", "yanchor", "xoffset", "yoffset", "subpixel",
+    ]
+    .iter()
+    .enumerate()
+    {
         py::set(vm, this, n, p.get(i).cloned().unwrap_or(Value::None))?;
     }
     Ok(Value::None)
@@ -645,7 +751,11 @@ fn is_pixel_opaque(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let st = py::f64_of(vm, &args[3])?;
     let at = py::f64_of(vm, &args[4])?;
     let r = super::super::render::render(vm, &d, w, h, st, at)?;
-    let o = vm.call_method(&r, "is_pixel_opaque", vec![args[5].clone(), args[6].clone()])?;
+    let o = vm.call_method(
+        &r,
+        "is_pixel_opaque",
+        vec![args[5].clone(), args[6].clone()],
+    )?;
     Ok(Value::Bool(py::truthy(vm, &o)?))
 }
 
@@ -689,7 +799,11 @@ fn get_mouse_pos(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 fn set_mouse_pos(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let dur = arg_or(args, kw, 2, "duration", Value::Int(0));
     let i = py::import_attr(vm, "renpy.display", "interface")?;
-    vm.call_method(&i, "set_mouse_pos", vec![args[0].clone(), args[1].clone(), dur])
+    vm.call_method(
+        &i,
+        "set_mouse_pos",
+        vec![args[0].clone(), args[1].clone(), dur],
+    )
 }
 
 fn cancel_gesture(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
@@ -716,7 +830,10 @@ fn add_layer(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         Ok(None)
     };
     let index = if !py::is_none(&above) && !py::is_none(&below) {
-        return Err(py::error(vm, "The above and below arguments to renpy.add_layer are mutually exclusive."));
+        return Err(py::error(
+            vm,
+            "The above and below arguments to renpy.add_layer are mutually exclusive.",
+        ));
     } else if !py::is_none(&above) {
         match find(vm, &above)? {
             Some(i) => i + 1,
@@ -734,7 +851,10 @@ fn add_layer(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             }
         }
     } else {
-        return Err(py::error(vm, "The renpy.add_layer function requires either the above or below argument."));
+        return Err(py::error(
+            vm,
+            "The renpy.add_layer function requires either the above or below argument.",
+        ));
     };
     vm.call_method(&layers, "insert", vec![Value::Int(index), layer.clone()])?;
     if menu_clear {
@@ -811,13 +931,21 @@ fn get_mouse_name(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         return Ok(py::s(vm, "default"));
     }
     let inter = arg_or(args, kw, 0, "interaction", Value::Bool(false));
-    py::method_kw(vm, &i, "get_mouse_name", Vec::new(), vec![("interaction".into(), inter)])
+    py::method_kw(
+        vm,
+        &i,
+        "get_mouse_name",
+        Vec::new(),
+        vec![("interaction".into(), inter)],
+    )
 }
 
 fn set_focus(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let layer = arg_or(args, kw, 2, "layer", py::s(vm, "screens"));
     let f = py::import(vm, "renpy.display.focus")?;
-    let t = vm.types.new_tuple(vec![args[0].clone(), args[1].clone(), layer]);
+    let t = vm
+        .types
+        .new_tuple(vec![args[0].clone(), args[1].clone(), layer]);
     py::set(vm, &f, "override", t)?;
     let i = py::import_attr(vm, "renpy.display", "interface")?;
     py::set(vm, &i, "last_event", Value::None)?;
@@ -848,10 +976,22 @@ fn render_to_surface(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let st = arg_or(args, kw, 3, "st", Value::Float(0.));
     let at = arg_or(args, kw, 4, "at", Value::None);
     if super::super::render::render_data(&d).is_none() {
-        let w = if py::is_none(&w) { py::config_f64(vm, "screen_width")? } else { py::f64_of(vm, &w)? };
-        let h = if py::is_none(&h) { py::config_f64(vm, "screen_height")? } else { py::f64_of(vm, &h)? };
+        let w = if py::is_none(&w) {
+            py::config_f64(vm, "screen_width")?
+        } else {
+            py::f64_of(vm, &w)?
+        };
+        let h = if py::is_none(&h) {
+            py::config_f64(vm, "screen_height")?
+        } else {
+            py::f64_of(vm, &h)?
+        };
         let st = py::f64_of(vm, &st)?;
-        let at = if py::is_none(&at) { st } else { py::f64_of(vm, &at)? };
+        let at = if py::is_none(&at) {
+            st
+        } else {
+            py::f64_of(vm, &at)?
+        };
         let dd = super::super::easy::displayable(vm, &d, &Value::None, false)?;
         d = super::super::render::render(vm, &dd, w, h, st, at)?;
     }
@@ -861,7 +1001,10 @@ fn render_to_surface(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
 
 fn render_to_file(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let _ = render_to_surface(vm, args, kw)?;
-    Err(py::error(vm, "renpy.render_to_file is not available: rendered surfaces cannot be written by this runtime."))
+    Err(py::error(
+        vm,
+        "renpy.render_to_file is not available: rendered surfaces cannot be written by this runtime.",
+    ))
 }
 
 pub fn functions() -> Vec<(&'static str, NativeFn)> {
@@ -945,18 +1088,44 @@ pub fn values(vm: &mut Vm, m: &ObjRef) -> PyResult<()> {
     let pos = mk(vm, "pos", placement_pos)?;
     let anchor = mk(vm, "anchor", placement_anchor)?;
     let offset = mk(vm, "offset", placement_offset)?;
-    let pl = py::class(vm, "renpy.exports", "placement", &[ro.clone()], &[("__init__", placement_init)], &[("pos", pos), ("anchor", anchor), ("offset", offset)])?;
+    let pl = py::class(
+        vm,
+        "renpy.exports",
+        "placement",
+        &[ro.clone()],
+        &[("__init__", placement_init)],
+        &[("pos", pos), ("anchor", anchor), ("offset", offset)],
+    )?;
     set(vm, "placement", Value::Obj(pl));
-    for (n, module, attr) in [("Render", "renpy.display.render", "Render"), ("render", "renpy.display.render", "render"), ("IgnoreEvent", "renpy.display.core", "IgnoreEvent"), ("redraw", "renpy.display.render", "redraw")] {
+    for (n, module, attr) in [
+        ("Render", "renpy.display.render", "Render"),
+        ("render", "renpy.display.render", "render"),
+        ("IgnoreEvent", "renpy.display.core", "IgnoreEvent"),
+        ("redraw", "renpy.display.render", "redraw"),
+    ] {
         let v = py::import_attr(vm, module, attr)?;
         set(vm, n, v);
     }
     let d = py::import_attr(vm, "renpy.display.displayable", "Displayable")?;
-    let dc = py::class(vm, "renpy.exports", "Displayable", &[d, ro.clone()], &[], &[])?;
+    let dc = py::class(
+        vm,
+        "renpy.exports",
+        "Displayable",
+        &[d, ro.clone()],
+        &[],
+        &[],
+    )?;
     set(vm, "Displayable", Value::Obj(dc));
     let c = py::import_attr(vm, "renpy.display.layout", "Container")?;
     let rl = py::import_attr(vm, "renpy.revertable", "RevertableList")?;
-    let cc = py::class(vm, "renpy.exports", "Container", &[c, ro], &[], &[("_list_type", rl)])?;
+    let cc = py::class(
+        vm,
+        "renpy.exports",
+        "Container",
+        &[c, ro],
+        &[],
+        &[("_list_type", rl)],
+    )?;
     set(vm, "Container", Value::Obj(cc));
     Ok(())
 }

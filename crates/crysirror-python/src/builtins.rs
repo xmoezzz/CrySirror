@@ -10,7 +10,7 @@ use crate::vm::{Kwargs, PyErr, PyResult, Vm};
 use crate::Dialect;
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// Interpreter-created classes beyond the core type graph.
@@ -28,6 +28,9 @@ pub struct Classes {
     pub match_: Option<ObjRef>,
     pub random: Option<ObjRef>,
     pub counter: Option<ObjRef>,
+    /// `weakref.ProxyType` and `weakref.CallableProxyType`.
+    pub proxy: Option<ObjRef>,
+    pub callable_proxy: Option<ObjRef>,
 }
 
 pub type Kw<'a> = &'a [(Rc<str>, Value)];
@@ -196,6 +199,7 @@ pub fn install(vm: &mut Vm) {
     add(vm, "__import__", crate::import::b_import);
     add(vm, "__build_class__", build_class);
     add(vm, "open", b_open);
+    add(vm, "file", b_open);
     add(vm, "input", b_input);
     add(vm, "raw_input", b_input);
     add(vm, "breakpoint", b_noop);
@@ -388,10 +392,14 @@ pub fn type_new(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         base_kind: kind,
         builtin: false,
         no_dict: slots && false,
+        finalizer: Cell::new(false),
     };
     let cls = new_obj(meta, Some(d), Payload::Type(td));
     let m = crate::types::c3_mro(&cls, &bases).map_err(|e| vm.type_error(e))?;
     crate::types::set_mro(&cls, m);
+    if let Some(td) = cls.type_data() {
+        td.finalizer.set(ops::lookup_type(&cls, "__del__").is_some());
+    }
     // __set_name__ hooks.
     let entries = cls.dict.as_ref().unwrap().borrow().items();
     for (k, v) in entries {
@@ -679,6 +687,55 @@ pub fn print_write(vm: &mut Vm, dest: Option<&Value>, s: &str, _softspace: bool)
             Ok(())
         }
     }
+}
+
+/// The file a Python 2 `print` statement writes to.
+fn print_target(vm: &Vm, dest: Option<&Value>) -> Option<Value> {
+    match dest {
+        Some(d) if !d.is_none() => Some(d.clone()),
+        _ => crate::modules::sys::stdout(vm).filter(|o| !is_default_stdout(vm, o)),
+    }
+}
+
+fn softspace(vm: &mut Vm, dest: Option<&Value>) -> PyResult<bool> {
+    match print_target(vm, dest) {
+        Some(f) => match ops::getattr_opt(vm, &f, "softspace")? {
+            Some(v) => ops::truthy(vm, &v),
+            None => Ok(false),
+        },
+        None => Ok(vm.stdout_softspace),
+    }
+}
+
+/// Sets the file's `softspace`; files that refuse the attribute keep none.
+pub fn set_softspace(vm: &mut Vm, dest: Option<&Value>, on: bool) -> PyResult<()> {
+    match print_target(vm, dest) {
+        Some(f) => {
+            if let Err(e) = ops::setattr(vm, &f, &vm.types.new_str("softspace"), Value::Bool(on)) {
+                if !vm.is_exc(&e, "AttributeError") && !vm.is_exc(&e, "TypeError") {
+                    return Err(e);
+                }
+            }
+            Ok(())
+        }
+        None => {
+            vm.stdout_softspace = on;
+            Ok(())
+        }
+    }
+}
+
+/// `PRINT_ITEM`: a space first when the file's softspace is set; the
+/// softspace is set afterwards unless the item is a string ending in
+/// whitespace other than a space.
+pub fn print_item(vm: &mut Vm, dest: Option<&Value>, v: &Value) -> PyResult<()> {
+    if softspace(vm, dest)? {
+        print_write(vm, dest, " ", false)?;
+    }
+    let s = ops::str(vm, v)?;
+    print_write(vm, dest, &s, true)?;
+    let ends_ws = v.as_str().is_some() && s.chars().last().is_some_and(|c| c.is_whitespace() && c != ' ');
+    set_softspace(vm, dest, !ends_ws)
 }
 
 fn is_default_stdout(vm: &Vm, o: &Value) -> bool {

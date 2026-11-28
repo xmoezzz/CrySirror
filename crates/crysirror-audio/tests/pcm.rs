@@ -140,3 +140,24 @@ fn prepared_channel_applies_start_rate_loop_gain_pan_and_scoped_stop() {
     assert!(audio.take_output().iter().flatten().all(|v| *v == 0.));
     assert!(weak.upgrade().is_none());
 }
+
+#[test]
+fn channel_spatial_control_updates_pcm_without_reopening_transport() {
+    let mut audio = ChannelAudio::default();
+    let pcm = PcmAudio::new(48000, vec![[0.25; 2]; 1000]).unwrap();
+    audio.submit(1, AudioRequest::PlayPcm {
+        channel: 2,
+        source: pcm,
+        parameters: AudioParameters { spatial_position: Some([1., 0., -1.]), ..Default::default() },
+    }).unwrap();
+    audio.render(2).unwrap();
+    let spatial = audio.take_output()[47];
+    assert!(spatial[1] > spatial[0] * 1.25, "{spatial:?}");
+    let before = audio.playback_info(1, 2).unwrap().unwrap().position_frames;
+
+    audio.submit(1, AudioRequest::SetChannelSpatial { channel: 2, position: None }).unwrap();
+    audio.render(2).unwrap();
+    let stereo = audio.take_output()[47];
+    assert!((stereo[0] - stereo[1]).abs() < 1e-6, "{stereo:?}");
+    assert_eq!(audio.playback_info(1, 2).unwrap().unwrap().position_frames, before + 96);
+}

@@ -42,3 +42,50 @@ def add_attribute(obj, name, value):
 
 
 __all__ = ["PY2", "open", "basestring", "str", "pystr", "range", "round", "bord", "bchr", "tobytes", "chr", "unicode"]
+
+
+def _py2_text(b):
+    if not isinstance(b, bytes):
+        return b
+    try:
+        return b.decode("utf-8")
+    except UnicodeDecodeError:
+        return b.decode("latin-1")
+
+
+class Py2File(object):
+    """A game file as Python 2 code sees it. The Python 2 dialect has one
+    text type, so the byte strings Ren'Py 6/7 returns are decoded: UTF-8
+    when valid, otherwise Latin-1 (one character per byte)."""
+
+    def __init__(self, f):
+        self._f = f
+
+    def read(self, n=-1):
+        return _py2_text(self._f.read(n))
+
+    def readline(self, n=-1):
+        return _py2_text(self._f.readline(n))
+
+    def readlines(self, hint=-1):
+        return [_py2_text(l) for l in self._f.readlines(hint)]
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = self._f.readline()
+        if not line:
+            raise StopIteration
+        return _py2_text(line)
+
+    next = __next__
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self._f.close()
+
+    def __getattr__(self, name):
+        return getattr(self._f, name)

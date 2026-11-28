@@ -10,8 +10,7 @@
 //! `renpy.display.core.Displayable`, `SceneLists` and `SceneListEntry`;
 //! those names are re-exported here.
 use super::{
-    events,
-    link,
+    events, link,
     py::{self, *},
 };
 use crysirror_python::{ObjRef, PyErr, PyResult, Value, Vm, builtins::Kw, ops};
@@ -66,7 +65,9 @@ fn isinst(vm: &mut Vm, v: &Value, module: &str, cls: &str) -> PyResult<bool> {
 /// Whether `e` is an instance of the exception class named `name`.
 fn exc_is(e: &PyErr, name: &str) -> bool {
     let PyErr::Exc(o) = e else { return false };
-    ops::mro(&o.class()).iter().any(|c| matches!(&c.payload, crysirror_python::Payload::Type(t) if &**t.name.borrow() == name))
+    ops::mro(&o.class()).iter().any(
+        |c| matches!(&c.payload, crysirror_python::Payload::Type(t) if &**t.name.borrow() == name),
+    )
 }
 
 fn truthy_of(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> PyResult<Value>) -> PyResult<bool> {
@@ -148,7 +149,9 @@ fn abs_wrapped(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let f = py::get(vm, &ft, &name)?;
     let rv = vm.call(&f, args[1..].to_vec(), Vec::new())?;
     if let Some(o) = rv.obj() {
-        if matches!(o.payload, crysirror_python::Payload::Float(_)) && Rc::ptr_eq(&o.class(), &vm.types.float) {
+        if matches!(o.payload, crysirror_python::Payload::Float(_))
+            && Rc::ptr_eq(&o.class(), &vm.types.float)
+        {
             let x = py::f64_of(vm, &rv)?;
             return new_absolute(vm, x);
         }
@@ -170,7 +173,14 @@ fn abs_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn abs_divmod(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (a, b) = (&args[0], &args[1]);
-    let q = ops::binary_op(vm, a, b, crysirror_python::ast::BinOp::FloorDiv, false, false)?;
+    let q = ops::binary_op(
+        vm,
+        a,
+        b,
+        crysirror_python::ast::BinOp::FloorDiv,
+        false,
+        false,
+    )?;
     let r = ops::binary_op(vm, a, b, crysirror_python::ast::BinOp::Mod, false, false)?;
     Ok(vm.types.new_tuple(vec![q, r]))
 }
@@ -194,16 +204,24 @@ pub fn compute_raw(vm: &mut Vm, value: &Value, room: f64) -> PyResult<Value> {
         Value::Float(f) => return Ok(Value::Float(f * room)),
         _ => {}
     }
-    if value.obj().is_some_and(|o| matches!(o.payload, crysirror_python::Payload::Int(_))) {
+    if value
+        .obj()
+        .is_some_and(|o| matches!(o.payload, crysirror_python::Payload::Int(_)))
+    {
         return Ok(value.clone());
     }
-    if value.obj().is_some_and(|o| matches!(o.payload, crysirror_python::Payload::Float(_))) {
+    if value
+        .obj()
+        .is_some_and(|o| matches!(o.payload, crysirror_python::Payload::Float(_)))
+    {
         let f = py::f64_of(vm, value)?;
         return Ok(Value::Float(f * room));
     }
     let r = ops::repr(vm, value)?;
     let t = ops::type_name(vm, value);
-    Err(vm.type_error(format!("Value {r} of type {t} not recognized as a position.")))
+    Err(vm.type_error(format!(
+        "Value {r} of type {t} not recognized as a position."
+    )))
 }
 
 fn abs_compute_raw(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -219,7 +237,28 @@ fn abs_compute(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 const ABS_WRAPPED: &[&str] = &[
-    "__abs__", "__add__", "__ceil__", "__floordiv__", "__mod__", "__mul__", "__neg__", "__pos__", "__pow__", "__radd__", "__rfloordiv__", "__rmod__", "__rmul__", "__round__", "__rpow__", "__rsub__", "__rtruediv__", "__sub__", "__truediv__", "__div__", "__rdiv__", "conjugate",
+    "__abs__",
+    "__add__",
+    "__ceil__",
+    "__floordiv__",
+    "__mod__",
+    "__mul__",
+    "__neg__",
+    "__pos__",
+    "__pow__",
+    "__radd__",
+    "__rfloordiv__",
+    "__rmod__",
+    "__rmul__",
+    "__round__",
+    "__rpow__",
+    "__rsub__",
+    "__rtruediv__",
+    "__sub__",
+    "__truediv__",
+    "__div__",
+    "__rdiv__",
+    "conjugate",
 ];
 
 fn make_absolute(vm: &mut Vm) -> PyResult<Value> {
@@ -229,7 +268,8 @@ fn make_absolute(vm: &mut Vm) -> PyResult<Value> {
     let cp = vm.types.new_builtin("compute", abs_compute);
     let cp = py::staticmethod(vm, cp);
     let slots = vm.types.new_tuple(Vec::new());
-    let mut attrs: Vec<(&str, Value)> = vec![("__slots__", slots), ("compute_raw", cr), ("compute", cp)];
+    let mut attrs: Vec<(&str, Value)> =
+        vec![("__slots__", slots), ("compute_raw", cr), ("compute", cp)];
     let mut wrapped = Vec::new();
     for n in ABS_WRAPPED {
         if py::get_opt(vm, &ft, n)?.is_some() {
@@ -240,7 +280,18 @@ fn make_absolute(vm: &mut Vm) -> PyResult<Value> {
     for (n, v) in &wrapped {
         attrs.push((n, v.clone()));
     }
-    let c = py::class(vm, MODULE, "absolute", &[ft], &[("__repr__", abs_repr), ("__divmod__", abs_divmod), ("__rdivmod__", abs_rdivmod)], &attrs)?;
+    let c = py::class(
+        vm,
+        MODULE,
+        "absolute",
+        &[ft],
+        &[
+            ("__repr__", abs_repr),
+            ("__divmod__", abs_divmod),
+            ("__rdivmod__", abs_rdivmod),
+        ],
+        &attrs,
+    )?;
     Ok(Value::Obj(c))
 }
 
@@ -284,7 +335,11 @@ fn mm_perform(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let (ex, ey) = (g(vm, "end_x")?, g(vm, "end_y")?);
     let d = draw(vm)?;
     if elapsed >= duration {
-        vm.call_method(&d, "set_mouse_pos", vec![Value::Int(ex as i64), Value::Int(ey as i64)])?;
+        vm.call_method(
+            &d,
+            "set_mouse_pos",
+            vec![Value::Int(ex as i64), Value::Int(ey as i64)],
+        )?;
         return Ok(Value::Bool(false));
     }
     let done = elapsed / duration;
@@ -332,15 +387,30 @@ fn d_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     // with GL2 (7.4+) see the GL2 model renderer, earlier ones the GL
     // renderer they were written for.
     let gl2 = super::state::rt(vm).profile.at_least(7, 4);
-    py::dict_set(vm, &info, "renderer", py::s(vm, if gl2 { "gl2" } else { "gl" }))?;
+    py::dict_set(
+        vm,
+        &info,
+        "renderer",
+        py::s(vm, if gl2 { "gl2" } else { "gl" }),
+    )?;
     py::dict_set(vm, &info, "resizable", Value::Bool(false))?;
     py::dict_set(vm, &info, "additive", Value::Bool(true))?;
     py::dict_set(vm, &info, "models", Value::Bool(gl2))?;
     py::dict_set(vm, &info, "crysirror", Value::Bool(true))?;
+    if !gl2 {
+        // gldraw.pyx with shader support and framebuffer objects.
+        py::dict_set(vm, &info, "environ", py::s(vm, "shader"))?;
+        py::dict_set(vm, &info, "rtt", py::s(vm, "fbo"))?;
+    }
+    let c = super::host(vm).borrow().canvas;
+    let mws = vm.types.new_tuple(vec![Value::Int(c[0].max(256) as i64), Value::Int(c[1].max(256) as i64)]);
+    py::dict_set(vm, &info, "max_window_size", mws)?;
     py::set(vm, this, "info", info)?;
     let sw = py::config_f64(vm, "screen_width")?;
     let sh = py::config_f64(vm, "screen_height")?;
-    let size = vm.types.new_tuple(vec![Value::Int(sw as i64), Value::Int(sh as i64)]);
+    let size = vm
+        .types
+        .new_tuple(vec![Value::Int(sw as i64), Value::Int(sh as i64)]);
     py::set(vm, this, "virtual_size", size.clone())?;
     py::set(vm, this, "physical_size", size.clone())?;
     py::set(vm, this, "drawable_size", size)?;
@@ -366,6 +436,12 @@ fn d_draw_screen(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let first = draw_state(vm).borrow().next_id;
     let fit = events::input_scale(vm);
     let (ops, _, errors) = super::backend::build(&root, first, &lookup, fit);
+    if let Some(r) = super::backend::text_input_rect(&root.borrow()) {
+        let rect = vm.types.new_tuple(r.iter().map(|v| Value::Int(v.round() as i64)).collect());
+        if let Ok(i) = py::import_attr(vm, "renpy.display", "interface") {
+            py::set(vm, &i, "text_rect", rect)?;
+        }
+    }
     for e in errors {
         link::diagnostic(vm, e);
     }
@@ -388,7 +464,9 @@ fn d_mouse_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 fn d_get_mouse_pos(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let (x, y) = events::input(vm).borrow().pos;
     let (vx, vy) = events::input_scale(vm).to_virtual(x as f64, y as f64);
-    Ok(vm.types.new_tuple(vec![Value::Int(vx as i64), Value::Int(vy as i64)]))
+    Ok(vm
+        .types
+        .new_tuple(vec![Value::Int(vx as i64), Value::Int(vy as i64)]))
 }
 
 fn d_set_mouse_pos(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -414,11 +492,16 @@ fn d_get_physical_size(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 /// Screenshots need the composed host frame; the host has no synchronous
 /// readback here, so screenshot surfaces are unavailable.
 fn d_screenshot(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
-    Err(py::error(vm, "Screenshots of the composed frame are not available from the CrySirror host."))
+    Err(py::error(
+        vm,
+        "Screenshots of the composed frame are not available from the CrySirror host.",
+    ))
 }
 
 fn d_is_pixel_opaque(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let Some(r) = super::render::render_data(&args[1]) else { return Ok(Value::Bool(false)) };
+    let Some(r) = super::render::render_data(&args[1]) else {
+        return Ok(Value::Bool(false));
+    };
     let x = py::f64_of(vm, &args[2])?;
     let y = py::f64_of(vm, &args[3])?;
     Ok(Value::Bool(super::backend::pixel_opaque(vm, &r, x, y)?))
@@ -445,24 +528,95 @@ fn dict(vm: &Vm) -> Value {
 
 fn i_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    for n in ["screenshot", "screenshot_surface", "pushed_event", "timeout_time", "last_event", "current_context", "roll_forward", "interact_time", "old_root_transform", "window_caption", "mouse_move", "text_editing", "text_rect", "old_text_rect", "cursor_cache", "old_mouse", "prediction_coroutine", "surftree", "bgscreenshot_surface"] {
+    for n in [
+        "screenshot",
+        "screenshot_surface",
+        "pushed_event",
+        "timeout_time",
+        "last_event",
+        "current_context",
+        "roll_forward",
+        "interact_time",
+        "old_root_transform",
+        "window_caption",
+        "mouse_move",
+        "text_editing",
+        "text_rect",
+        "old_text_rect",
+        "cursor_cache",
+        "old_mouse",
+        "prediction_coroutine",
+        "surftree",
+        "bgscreenshot_surface",
+    ] {
         st(vm, this, n, Value::None)?;
     }
-    for n in ["old_scene", "transition", "layer_properties", "ongoing_transition", "instantiated_transition", "transition_time", "transition_from", "transition_delay"] {
+    for n in [
+        "old_scene",
+        "transition",
+        "layer_properties",
+        "ongoing_transition",
+        "instantiated_transition",
+        "transition_time",
+        "transition_from",
+        "transition_delay",
+    ] {
         st(vm, this, n, dict(vm))?;
     }
-    for n in ["suppress_transition", "quick_quit", "force_redraw", "fullscreen", "in_quit_event", "shown_window", "ignore_touch", "clear_screenshot", "audio_paused", "display_reset", "profile_once", "safe_mode", "bgscreenshot_needed", "started", "fullscreen_video", "force_prediction", "trans_pause", "suppress_overlay", "suppress_underlay", "did_autosave", "did_persistent", "minimized"] {
+    for n in [
+        "suppress_transition",
+        "quick_quit",
+        "force_redraw",
+        "fullscreen",
+        "in_quit_event",
+        "shown_window",
+        "ignore_touch",
+        "clear_screenshot",
+        "audio_paused",
+        "display_reset",
+        "profile_once",
+        "safe_mode",
+        "bgscreenshot_needed",
+        "started",
+        "fullscreen_video",
+        "force_prediction",
+        "trans_pause",
+        "suppress_overlay",
+        "suppress_underlay",
+        "did_autosave",
+        "did_persistent",
+        "minimized",
+    ] {
         st(vm, this, n, Value::Bool(false))?;
     }
-    for n in ["mouse_focused", "keyboard_focused", "show_mouse", "restart_interaction", "start_interact", "first_frame"] {
+    for n in [
+        "mouse_focused",
+        "keyboard_focused",
+        "show_mouse",
+        "restart_interaction",
+        "start_interact",
+        "first_frame",
+    ] {
         st(vm, this, n, Value::Bool(true))?;
     }
-    for n in ["ticks", "quit_time", "event_time", "input_event_time", "interaction_counter", "mod"] {
+    for n in [
+        "ticks",
+        "quit_time",
+        "event_time",
+        "input_event_time",
+        "interaction_counter",
+        "mod",
+    ] {
         st(vm, this, n, Value::Int(0))?;
     }
     st(vm, this, "mouse", py::s(vm, "default"))?;
     st(vm, this, "preloads", vm.types.new_list(Vec::new()))?;
-    st(vm, this, "transition_info_stack", vm.types.new_list(Vec::new()))?;
+    st(
+        vm,
+        this,
+        "transition_info_stack",
+        vm.types.new_list(Vec::new()),
+    )?;
     st(vm, this, "frame_times", vm.types.new_list(Vec::new()))?;
     st(vm, this, "invoke_queue", vm.types.new_list(Vec::new()))?;
     let now = get_time(vm);
@@ -484,7 +638,17 @@ fn i_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         if ops::contains(vm, &clip, &layer)? {
             let r = ops::getitem(vm, &clip, layer.clone())?;
             let r = py::items(vm, &r)?;
-            for (k, v) in [("xpos", r[0].clone()), ("xanchor", Value::Int(0)), ("ypos", r[1].clone()), ("yanchor", Value::Int(0)), ("xmaximum", r[2].clone()), ("ymaximum", r[3].clone()), ("xminimum", r[2].clone()), ("yminimum", r[3].clone()), ("clipping", Value::Bool(true))] {
+            for (k, v) in [
+                ("xpos", r[0].clone()),
+                ("xanchor", Value::Int(0)),
+                ("ypos", r[1].clone()),
+                ("yanchor", Value::Int(0)),
+                ("xmaximum", r[2].clone()),
+                ("ymaximum", r[3].clone()),
+                ("xminimum", r[2].clone()),
+                ("yminimum", r[3].clone()),
+                ("clipping", Value::Bool(true)),
+            ] {
                 py::dict_set(vm, &d, k, v)?;
             }
         }
@@ -496,7 +660,8 @@ fn i_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     py::set(vm, &game, "interface", this.clone())?;
     let disp = py::import(vm, "renpy.display")?;
     py::set(vm, &disp, "interface", this.clone())?;
-    let touch = call(vm, "renpy.exports", "variant", vec![py::s(vm, "touch")]).unwrap_or(Value::Bool(false));
+    let touch = call(vm, "renpy.exports", "variant", vec![py::s(vm, "touch")])
+        .unwrap_or(Value::Bool(false));
     st(vm, this, "touch", touch.clone())?;
     let tk = py::config(vm, "touch_keyboard").unwrap_or(Value::Bool(false));
     st(vm, this, "touch_keyboard", tk)?;
@@ -522,7 +687,12 @@ fn i_start(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     st(vm, this, "started", Value::Bool(true))?;
     vm.call_method(this, "set_mode", Vec::new())?;
     call0(vm, "renpy.text.font", "load_fonts")?;
-    call(vm, "pygame_sdl2.time", "set_timer", vec![Value::Int(events::PERIODIC), Value::Int(PERIODIC_INTERVAL)])?;
+    call(
+        vm,
+        "pygame_sdl2.time",
+        "set_timer",
+        vec![Value::Int(events::PERIODIC), Value::Int(PERIODIC_INTERVAL)],
+    )?;
     // Hardware cursors (`config.mouse`) are drawn by the host pointer; the
     // cursor cache stays empty and `mouse_displayable` still renders.
     call_all(vm, "display_start_callbacks")?;
@@ -531,7 +701,13 @@ fn i_start(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn i_post_init(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let this = &args[0];
-    py::method_kw(vm, this, "set_window_caption", Vec::new(), vec![("force".into(), Value::Bool(true))])?;
+    py::method_kw(
+        vm,
+        this,
+        "set_window_caption",
+        Vec::new(),
+        vec![("force".into(), Value::Bool(true))],
+    )?;
     let prefs = py::import_attr(vm, "renpy.game", "preferences")?;
     if gb(vm, &prefs, "fullscreen")? {
         py::set(vm, &prefs, "maximized", Value::Bool(false))?;
@@ -603,7 +779,12 @@ fn i_draw_screen(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     r?;
     let sw = py::config(vm, "screen_width")?;
     let sh = py::config(vm, "screen_height")?;
-    let rs = call(vm, "renpy.display.render", "render_screen", vec![root, sw, sh])?;
+    let rs = call(
+        vm,
+        "renpy.display.render",
+        "render_screen",
+        vec![root, sw, sh],
+    )?;
     if do_draw {
         let d = draw(vm)?;
         vm.call_method(&d, "draw_screen", vec![rs.clone()])?;
@@ -682,12 +863,18 @@ fn i_do_with(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     vm.call_method(this, "set_transition", vec![trans])?;
     let odw = py::config_bool(vm, "overlay_during_with")?;
-    py::method_kw(vm, this, "interact", Vec::new(), vec![
-        ("trans_pause".into(), Value::Bool(true)),
-        ("suppress_overlay".into(), Value::Bool(!odw)),
-        ("mouse".into(), py::s(vm, "with")),
-        ("clear".into(), clear),
-    ])
+    py::method_kw(
+        vm,
+        this,
+        "interact",
+        Vec::new(),
+        vec![
+            ("trans_pause".into(), Value::Bool(true)),
+            ("suppress_overlay".into(), Value::Bool(!odw)),
+            ("mouse".into(), py::s(vm, "with")),
+            ("clear".into(), clear),
+        ],
+    )
 }
 
 fn i_with_none(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
@@ -733,7 +920,12 @@ fn side_image_reset(vm: &mut Vm) -> PyResult<()> {
 }
 
 fn pop_layer(vm: &mut Vm, this: &Value, layer: &Value) -> PyResult<()> {
-    for n in ["ongoing_transition", "instantiated_transition", "transition_time", "transition_from"] {
+    for n in [
+        "ongoing_transition",
+        "instantiated_transition",
+        "transition_time",
+        "transition_from",
+    ] {
         let d = g(vm, this, n)?;
         vm.call_method(&d, "pop", vec![layer.clone(), Value::None])?;
     }
@@ -752,10 +944,18 @@ fn i_end_transitions(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         }
         let tt = g(vm, this, "transition_time")?;
         let start = vm.call_method(&tt, "get", vec![l.clone(), Value::Float(ft)])?;
-        let start = if py::truthy(vm, &start)? { py::f64_of(vm, &start)? } else { 0. };
+        let start = if py::truthy(vm, &start)? {
+            py::f64_of(vm, &start)?
+        } else {
+            0.
+        };
         let td = g(vm, this, "transition_delay")?;
         let delay = vm.call_method(&td, "get", vec![l.clone(), Value::None])?;
-        let delay = if py::truthy(vm, &delay)? { py::f64_of(vm, &delay)? } else { 0. };
+        let delay = if py::truthy(vm, &delay)? {
+            py::f64_of(vm, &delay)?
+        } else {
+            0.
+        };
         if ft - start >= delay {
             pop_layer(vm, this, &l)?;
         }
@@ -777,7 +977,11 @@ fn i_get_ongoing_transition(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Val
     let ft = py::f64_of(vm, &ft)?;
     let tt = g(vm, this, "transition_time")?;
     let start = vm.call_method(&tt, "get", vec![layer, Value::Float(ft)])?;
-    let start = if py::truthy(vm, &start)? { py::f64_of(vm, &start)? } else { ft };
+    let start = if py::truthy(vm, &start)? {
+        py::f64_of(vm, &start)?
+    } else {
+        ft
+    };
     let delay = py::get_opt(vm, &t, "delay")?.unwrap_or(Value::Int(0));
     let delay = py::f64_of(vm, &delay)?;
     if ft - start < delay {
@@ -825,7 +1029,11 @@ fn i_event_peek(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let q = events::input(vm);
     let ev = {
         let mut q = q.borrow_mut();
-        if q.queue.is_empty() { None } else { Some(q.queue.remove(0)) }
+        if q.queue.is_empty() {
+            None
+        } else {
+            Some(q.queue.remove(0))
+        }
     };
     match ev {
         Some(e) => {
@@ -918,7 +1126,11 @@ fn i_quit_event(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     }
     st(vm, this, "quit_time", Value::Float(now))?;
     if let Ok(f) = py::import_attr(vm, "renpy.exports", "movie_stop") {
-        vm.call(&f, Vec::new(), vec![("only_fullscreen".into(), Value::Bool(true))])?;
+        vm.call(
+            &f,
+            Vec::new(),
+            vec![("only_fullscreen".into(), Value::Bool(true))],
+        )?;
     }
     store_set(vm, "mouse_visible", Value::Bool(true))?;
     st(vm, this, "in_quit_event", Value::Bool(true))?;
@@ -964,7 +1176,11 @@ fn i_get_mouse_name(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     if interaction && py::is_none(&kind) {
         kind = g(vm, this, "mouse")?;
     }
-    let mut kind = if py::is_none(&kind) { "default".to_owned() } else { py::string(vm, &kind)? };
+    let mut kind = if py::is_none(&kind) {
+        "default".to_owned()
+    } else {
+        py::string(vm, &kind)?
+    };
     if events::input(vm).borrow().mouse_buttons[1] {
         kind = format!("pressed_{kind}");
     }
@@ -1007,7 +1223,12 @@ fn i_check_suspend(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn i_enter_context(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    for n in ["ongoing_transition", "instantiated_transition", "transition_from", "transition_time"] {
+    for n in [
+        "ongoing_transition",
+        "instantiated_transition",
+        "transition_from",
+        "transition_time",
+    ] {
         let d = g(vm, &args[0], n)?;
         vm.call_method(&d, "clear", Vec::new())?;
     }
@@ -1032,7 +1253,9 @@ fn i_text_event_in_queue(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> 
         return Ok(Value::Bool(false));
     }
     let t = ev_type(vm, &ev)?;
-    Ok(Value::Bool(t == events::TEXTINPUT || t == events::TEXTEDITING))
+    Ok(Value::Bool(
+        t == events::TEXTINPUT || t == events::TEXTEDITING,
+    ))
 }
 
 fn i_update_text_rect(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
@@ -1047,11 +1270,16 @@ fn i_update_text_rect(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
         events::input(vm).borrow_mut().text_input = false;
     } else {
         let r = py::items(vm, &tr)?;
-        let mut a = [0i32; 4];
+        let mut a = [0f64; 4];
         for (i, v) in r.iter().take(4).enumerate() {
-            a[i] = py::int(vm, v)? as i32;
+            a[i] = py::f64_of(vm, v)?;
         }
-        link::set_text_rect(vm, Some(a));
+        // `untranslate_point`: virtual screen -> window.
+        let fit = events::input_scale(vm);
+        let (x0, y0) = fit.to_canvas(a[0], a[1]);
+        let (x1, y1) = fit.to_canvas(a[0] + a[2], a[1] + a[3]);
+        let rect = [x0, y0, x1 - x0, y1 - y0].map(|v| v.round() as i32);
+        link::set_text_rect(vm, Some(rect));
         events::input(vm).borrow_mut().text_input = true;
     }
     st(vm, this, "old_text_rect", tr)?;
@@ -1081,11 +1309,14 @@ fn i_timeout(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let et = g(vm, this, "event_time")?;
     let et = py::f64_of(vm, &et)?;
     let tt = g(vm, this, "timeout_time")?;
-    let v = if py::truthy(vm, &tt)? { (et + offset).min(py::f64_of(vm, &tt)?) } else { et + offset };
+    let v = if py::truthy(vm, &tt)? {
+        (et + offset).min(py::f64_of(vm, &tt)?)
+    } else {
+        et + offset
+    };
     st(vm, this, "timeout_time", Value::Float(v))?;
     Ok(Value::None)
 }
-
 
 fn kwb(vm: &mut Vm, kw: &[(Rc<str>, Value)], n: &str, d: bool) -> PyResult<bool> {
     match py::kw(kw, n) {
@@ -1101,7 +1332,11 @@ fn kwv(kw: &[(Rc<str>, Value)], n: &str, d: Value) -> Value {
 fn i_interact(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let this = &args[0];
     let mut kw: Vec<(Rc<str>, Value)> = kw.to_vec();
-    let mut take = |n: &str| kw.iter().position(|(k, _)| &**k == n).map(|i| kw.remove(i).1);
+    let mut take = |n: &str| {
+        kw.iter()
+            .position(|(k, _)| &**k == n)
+            .map(|i| kw.remove(i).1)
+    };
     let clear = take("clear").unwrap_or(Value::Bool(true));
     let suppress_window = take("suppress_window").unwrap_or(Value::Bool(false));
     let trans_pause = take("trans_pause").unwrap_or(Value::Bool(false));
@@ -1117,7 +1352,10 @@ fn i_interact(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     st(vm, this, "trans_pause", trans_pause.clone())?;
     let ctx = context(vm)?;
     if gb(vm, &ctx, "interacting")? {
-        return Err(py::error(vm, "Cannot start an interaction in the middle of an interaction, without creating a new context."));
+        return Err(py::error(
+            vm,
+            "Cannot start an interaction in the middle of an interaction, without creating a new context.",
+        ));
     }
     st(vm, &ctx, "interacting", Value::Bool(true))?;
     if !py::truthy(vm, &suppress_window)? {
@@ -1135,7 +1373,10 @@ fn i_interact(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             let c = py::int(vm, &c)? + 1;
             st(vm, this, "interaction_counter", Value::Int(c))?;
             if c == 100 && py::config_bool(vm, "developer")? {
-                return Err(py::error(vm, "renpy.restart_interaction() was called 100 times without processing any input."));
+                return Err(py::error(
+                    vm,
+                    "renpy.restart_interaction() was called 100 times without processing any input.",
+                ));
             }
             let mut k: Vec<(Rc<str>, Value)> = kw.clone();
             k.push(("preloads".into(), preloads.clone()));
@@ -1203,7 +1444,9 @@ fn idle_frame(vm: &mut Vm, this: &Value, can_block: bool, expensive: bool) -> Py
                 let r = vm.call_method(&co, "send", vec![Value::Bool(expensive)]);
                 let result = match r {
                     Ok(v) => v,
-                    Err(e) if exc_is(&e, "ValueError") || exc_is(&e, "StopIteration") => Value::None,
+                    Err(e) if exc_is(&e, "ValueError") || exc_is(&e, "StopIteration") => {
+                        Value::None
+                    }
                     Err(e) => return Err(e),
                 };
                 if py::is_none(&result) {
@@ -1244,17 +1487,32 @@ struct Core {
     suppress_transition: bool,
 }
 
-fn instantiate_transition(vm: &mut Vm, c: &Core, layer: &Value, old_d: Value, new_d: Value) -> PyResult<Value> {
+fn instantiate_transition(
+    vm: &mut Vm,
+    c: &Core,
+    layer: &Value,
+    old_d: Value,
+    new_d: Value,
+) -> PyResult<Value> {
     let it = g(vm, &c.this, "instantiated_transition")?;
     let old_trans = vm.call_method(&it, "get", vec![layer.clone(), Value::None])?;
     let ot = g(vm, &c.this, "ongoing_transition")?;
     let t = ops::getitem(vm, &ot, layer.clone())?;
-    let trans = vm.call(&t, Vec::new(), vec![("old_widget".into(), old_d), ("new_widget".into(), new_d)])?;
+    let trans = vm.call(
+        &t,
+        Vec::new(),
+        vec![("old_widget".into(), old_d), ("new_widget".into(), new_d)],
+    )?;
     if !super::core::is_displayable(vm, &trans) {
         let r = ops::repr(vm, &trans)?;
-        return Err(py::error(vm, format!("Expected transition to return a displayable, not a {r}")));
+        return Err(py::error(
+            vm,
+            format!("Expected transition to return a displayable, not a {r}"),
+        ));
     }
-    if isinst(vm, &trans, "renpy.display.transform", "Transform")? && isinst(vm, &old_trans, "renpy.display.transform", "Transform")? {
+    if isinst(vm, &trans, "renpy.display.transform", "Transform")?
+        && isinst(vm, &old_trans, "renpy.display.transform", "Transform")?
+    {
         vm.call_method(&trans, "take_state", vec![old_trans.clone()])?;
         vm.call_method(&trans, "take_execution_state", vec![old_trans])?;
     }
@@ -1288,7 +1546,12 @@ fn add_layer(vm: &mut Vm, c: &Core, where_: &Value, layer: &Value) -> PyResult<(
 fn take_layer_displayable(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let data = py::items(vm, &args[0])?;
     let ld = args[1].clone();
-    let c = Core { this: data[0].clone(), scene: data[1].clone(), focus_roots: data[3].clone(), suppress_transition: py::truthy(vm, &data[4])? };
+    let c = Core {
+        this: data[0].clone(),
+        scene: data[1].clone(),
+        focus_roots: data[3].clone(),
+        suppress_transition: py::truthy(vm, &data[4])?,
+    };
     let layer = py::get(vm, &ld, "layer")?;
     if ops::contains(vm, &c.scene, &layer)? {
         py::set(vm, &ld, "layers", data[2].clone())?;
@@ -1309,7 +1572,14 @@ fn new_box(vm: &mut Vm) -> PyResult<Value> {
     Ok(b)
 }
 
-fn add_layers_to_root(vm: &mut Vm, c: &Core, root: &Value, d: Value, st_: Value, at: Value) -> PyResult<()> {
+fn add_layers_to_root(
+    vm: &mut Vm,
+    c: &Core,
+    root: &Value,
+    d: Value,
+    st_: Value,
+    at: Value,
+) -> PyResult<()> {
     let lt = py::config(vm, "layer_transforms")?;
     let at_list = vm.call_method(&lt, "get", vec![Value::None, vm.types.new_list(Vec::new())])?;
     let at_list = py::items(vm, &at_list)?;
@@ -1322,7 +1592,11 @@ fn add_layers_to_root(vm: &mut Vm, c: &Core, root: &Value, d: Value, st_: Value,
     vm.call_method(&rv, "add", vec![d, st_, at])?;
     let mut new_t = Value::None;
     for a in at_list {
-        rv = if isinst(vm, &a, "renpy.display.motion", "Transform")? { vm.call(&a, Vec::new(), vec![("child".into(), rv)])? } else { vm.call(&a, vec![rv], Vec::new())? };
+        rv = if isinst(vm, &a, "renpy.display.motion", "Transform")? {
+            vm.call(&a, Vec::new(), vec![("child".into(), rv)])?
+        } else {
+            vm.call(&a, vec![rv], Vec::new())?
+        };
         vm.call_method(&rv, "_unique", Vec::new())?;
         if isinst(vm, &rv, "renpy.display.transform", "Transform")? {
             new_t = rv.clone();
@@ -1351,9 +1625,19 @@ fn interact_core(vm: &mut Vm, this: &Value, kw: &[(Rc<str>, Value)]) -> PyResult
     call0(vm, "renpy.translation", "check_language")?;
     suppress_overlay = suppress_overlay || truthy_of(vm, |vm| store(vm, "suppress_overlay"))?;
     st(vm, this, "suppress_overlay", Value::Bool(suppress_overlay))?;
-    st(vm, this, "suppress_underlay", Value::Bool(suppress_underlay))?;
+    st(
+        vm,
+        this,
+        "suppress_underlay",
+        Value::Bool(suppress_underlay),
+    )?;
     st(vm, this, "trans_pause", Value::Bool(trans_pause))?;
-    call(vm, "renpy.display.screen", "show_overlay_screens", vec![Value::Bool(suppress_overlay)])?;
+    call(
+        vm,
+        "renpy.display.screen",
+        "show_overlay_screens",
+        vec![Value::Bool(suppress_overlay)],
+    )?;
     call0(vm, "renpy.display.screen", "prepare_screens")?;
     st(vm, this, "roll_forward", roll_forward.clone())?;
     st(vm, this, "show_mouse", Value::Bool(show_mouse))?;
@@ -1386,7 +1670,11 @@ fn interact_core(vm: &mut Vm, this: &Value, kw: &[(Rc<str>, Value)]) -> PyResult
     if trans_pause {
         let ot = g(vm, this, "ongoing_transition")?;
         let old_scene = g(vm, this, "old_scene")?;
-        if !py::truthy(vm, &ot)? || !ops::contains(vm, &ot, &Value::None)? || suppress_transition || !py::truthy(vm, &old_scene)? {
+        if !py::truthy(vm, &ot)?
+            || !ops::contains(vm, &ot, &Value::None)?
+            || suppress_transition
+            || !py::truthy(vm, &old_scene)?
+        {
             return Ok((false, Value::None));
         }
     }
@@ -1406,7 +1694,11 @@ fn interact_core(vm: &mut Vm, this: &Value, kw: &[(Rc<str>, Value)]) -> PyResult
     vm.call_method(&sg, "clear", Vec::new())?;
     let us = py::import_attr(vm, "renpy.display.screen", "updated_screens")?;
     vm.call_method(&us, "clear", Vec::new())?;
-    let types = vm.types.new_tuple(vec![Value::Int(events::PERIODIC), Value::Int(events::TIMEEVENT), Value::Int(events::REDRAW)]);
+    let types = vm.types.new_tuple(vec![
+        Value::Int(events::PERIODIC),
+        Value::Int(events::TIMEEVENT),
+        Value::Int(events::REDRAW),
+    ]);
     call(vm, "pygame_sdl2.event", "clear", vec![types])?;
     vm.call_method(this, "post_time_event", Vec::new())?;
     let scene_lists = scene_lists(vm)?;
@@ -1437,12 +1729,25 @@ fn interact_core(vm: &mut Vm, this: &Value, kw: &[(Rc<str>, Value)]) -> PyResult
     }
     if !py::is_none(&pause) {
         let pbc = py::import_attr(vm, "renpy.display.behavior", "PauseBehavior")?;
-        let pb = vm.call(&pbc, vec![pause.clone()], vec![("modal".into(), pause_modal.clone())])?;
-        vm.call_method(&root_widget, "add", vec![pb.clone(), pause_start.clone(), pause_start.clone()])?;
+        let pb = vm.call(
+            &pbc,
+            vec![pause.clone()],
+            vec![("modal".into(), pause_modal.clone())],
+        )?;
+        vm.call_method(
+            &root_widget,
+            "add",
+            vec![pb.clone(), pause_start.clone(), pause_start.clone()],
+        )?;
         ops::list_append(vm, &focus_roots, pb)?;
     }
     let layers_root = new_box(vm)?;
-    let core = Core { this: this.clone(), scene: scene.clone(), focus_roots: focus_roots.clone(), suppress_transition };
+    let core = Core {
+        this: this.clone(),
+        scene: scene.clone(),
+        focus_roots: focus_roots.clone(),
+        suppress_transition,
+    };
     for layer in config_items(vm, "bottom_layers")? {
         add_layer(vm, &core, &root_widget, &layer)?;
     }
@@ -1465,15 +1770,33 @@ fn interact_core(vm: &mut Vm, this: &Value, kw: &[(Rc<str>, Value)]) -> PyResult
         let trans = instantiate_transition(vm, &core, &Value::None, old_root, layers_root.clone())?;
         let tt = g(vm, this, "transition_time")?;
         let ttime = vm.call_method(&tt, "get", vec![Value::None, Value::None])?;
-        add_layers_to_root(vm, &core, &root_widget, trans.clone(), ttime.clone(), ttime.clone())?;
+        add_layers_to_root(
+            vm,
+            &core,
+            &root_widget,
+            trans.clone(),
+            ttime.clone(),
+            ttime.clone(),
+        )?;
         if py::is_none(&ttime) && isinst(vm, &trans, "renpy.display.transform", "Transform")? {
             vm.call_method(&trans, "update_state", Vec::new())?;
         }
         if trans_pause {
             let sbc = py::import_attr(vm, "renpy.display.behavior", "SayBehavior")?;
             let dp = store(vm, "_dismiss_pause")?;
-            let du = if py::truthy(vm, &dp)? { "dismiss" } else { "dismiss_hard_pause" };
-            let sb = vm.call(&sbc, Vec::new(), vec![("dismiss".into(), vm.types.new_list(Vec::new())), ("dismiss_unfocused".into(), py::s(vm, du))])?;
+            let du = if py::truthy(vm, &dp)? {
+                "dismiss"
+            } else {
+                "dismiss_hard_pause"
+            };
+            let sb = vm.call(
+                &sbc,
+                Vec::new(),
+                vec![
+                    ("dismiss".into(), vm.types.new_list(Vec::new())),
+                    ("dismiss_unfocused".into(), py::s(vm, du)),
+                ],
+            )?;
             vm.call_method(&root_widget, "add", vec![sb.clone()])?;
             ops::list_append(vm, &focus_roots, sb)?;
             let pbc = py::import_attr(vm, "renpy.display.behavior", "PauseBehavior")?;
@@ -1483,7 +1806,14 @@ fn interact_core(vm: &mut Vm, this: &Value, kw: &[(Rc<str>, Value)]) -> PyResult
             ops::list_append(vm, &focus_roots, pb)?;
         }
     } else {
-        add_layers_to_root(vm, &core, &root_widget, layers_root.clone(), Value::None, Value::None)?;
+        add_layers_to_root(
+            vm,
+            &core,
+            &root_widget,
+            layers_root.clone(),
+            Value::None,
+            Value::None,
+        )?;
     }
     for layer in config_items(vm, "top_layers")? {
         add_layer(vm, &core, &root_widget, &layer)?;
@@ -1497,11 +1827,20 @@ fn interact_core(vm: &mut Vm, this: &Value, kw: &[(Rc<str>, Value)]) -> PyResult
                 mouse_displayable = vm.call(&mouse_displayable, Vec::new(), Vec::new())?;
             }
             if !py::is_none(&mouse_displayable) {
-                vm.call_method(&root_widget, "add", vec![mouse_displayable.clone(), Value::Int(0), Value::Int(0)])?;
+                vm.call_method(
+                    &root_widget,
+                    "add",
+                    vec![mouse_displayable.clone(), Value::Int(0), Value::Int(0)],
+                )?;
             }
         }
     }
-    let pc = call(vm, "renpy.display.predict", "prediction_coroutine", vec![root_widget.clone()])?;
+    let pc = call(
+        vm,
+        "renpy.display.predict",
+        "prediction_coroutine",
+        vec![root_widget.clone()],
+    )?;
     vm.call_method(&pc, "send", vec![Value::None])?;
     st(vm, this, "prediction_coroutine", pc)?;
     let adj = py::import_attr(vm, "renpy.display.behavior", "adj_registered")?;
@@ -1509,11 +1848,27 @@ fn interact_core(vm: &mut Vm, this: &Value, kw: &[(Rc<str>, Value)]) -> PyResult
     call0(vm, "renpy.display.video", "early_interact")?;
     let layer_transitions = vm.types.new_dict();
 
-    let r = interact_loop(vm, this, &core, &root_widget, &layers_root, &layer_transitions, &scene_lists, &mouse_displayable, trans_pause, suppress_transition, &mut end_time);
+    let r = interact_loop(
+        vm,
+        this,
+        &core,
+        &root_widget,
+        &layers_root,
+        &layer_transitions,
+        &scene_lists,
+        &mouse_displayable,
+        trans_pause,
+        suppress_transition,
+        &mut end_time,
+    );
 
     // finally:
     let lt_final = py::get_or_none(vm, this, "_layer_transitions")?;
-    let lt = if py::is_none(&lt_final) { layer_transitions } else { lt_final };
+    let lt = if py::is_none(&lt_final) {
+        layer_transitions
+    } else {
+        lt_final
+    };
     let delays = vm.types.new_dict();
     for (k, v) in ops::mapping_items(vm, &lt)? {
         let d = py::get_opt(vm, &v, "delay")?.unwrap_or(Value::Int(0));
@@ -1525,12 +1880,22 @@ fn interact_core(vm: &mut Vm, this: &Value, kw: &[(Rc<str>, Value)]) -> PyResult
         vm.call_method(&scene_lists, "clear", vec![i])?;
     }
     for t in [events::TIMEEVENT, events::REDRAW] {
-        call(vm, "pygame_sdl2.time", "set_timer", vec![Value::Int(t), Value::Int(0)])?;
+        call(
+            vm,
+            "pygame_sdl2.time",
+            "set_timer",
+            vec![Value::Int(t), Value::Int(0)],
+        )?;
     }
     let ctx = context(vm)?;
     let rt = g(vm, &ctx, "runtime")?;
     let rt = py::f64_of(vm, &rt).unwrap_or(0.);
-    st(vm, &ctx, "runtime", Value::Float(rt + end_time - start_time))?;
+    st(
+        vm,
+        &ctx,
+        "runtime",
+        Value::Float(rt + end_time - start_time),
+    )?;
     st(vm, this, "restart_interaction", Value::Bool(true))?;
     match r {
         Err(e) if exc_is(&e, "EndInteraction") => {
@@ -1543,12 +1908,32 @@ fn interact_core(vm: &mut Vm, this: &Value, kw: &[(Rc<str>, Value)]) -> PyResult
 }
 
 #[allow(clippy::too_many_arguments)]
-fn interact_loop(vm: &mut Vm, this: &Value, core: &Core, root_widget: &Value, layers_root: &Value, layer_transitions: &Value, scene_lists: &Value, mouse_displayable: &Value, trans_pause: bool, suppress_transition: bool, end_time: &mut f64) -> PyResult<(bool, Value)> {
-    let data = vm.types.new_tuple(vec![this.clone(), core.scene.clone(), layer_transitions.clone(), core.focus_roots.clone(), Value::Bool(suppress_transition)]);
+fn interact_loop(
+    vm: &mut Vm,
+    this: &Value,
+    core: &Core,
+    root_widget: &Value,
+    layers_root: &Value,
+    layer_transitions: &Value,
+    scene_lists: &Value,
+    mouse_displayable: &Value,
+    trans_pause: bool,
+    suppress_transition: bool,
+    end_time: &mut f64,
+) -> PyResult<(bool, Value)> {
+    let data = vm.types.new_tuple(vec![
+        this.clone(),
+        core.scene.clone(),
+        layer_transitions.clone(),
+        core.focus_roots.clone(),
+        Value::Bool(suppress_transition),
+    ]);
     let tld = py::closure(vm, "take_layer_displayable", take_layer_displayable, data);
     st(vm, this, "take_layer_displayable", tld)?;
     call0(vm, "renpy.display.behavior", "input_pre_per_interact")?;
-    let cb = py::builtin(vm, "per_interact", |vm, a, _| vm.call_method(&a[0], "per_interact", Vec::new()));
+    let cb = py::builtin(vm, "per_interact", |vm, a, _| {
+        vm.call_method(&a[0], "per_interact", Vec::new())
+    });
     vm.call_method(root_widget, "visit_all", vec![cb])?;
     call0(vm, "renpy.display.behavior", "input_post_per_interact")?;
     st(vm, this, "take_layer_displayable", Value::None)?;
@@ -1582,7 +1967,12 @@ fn interact_loop(vm: &mut Vm, this: &Value, core: &Core, root_widget: &Value, la
     let draw_v = draw(vm)?;
     let prefs = py::import_attr(vm, "renpy.game", "preferences")?;
     loop {
-        call(vm, "renpy.execution", "not_infinite_loop", vec![Value::Int(10)])?;
+        call(
+            vm,
+            "renpy.execution",
+            "not_infinite_loop",
+            vec![Value::Int(10)],
+        )?;
         for f in config_items(vm, "needs_redraw_callbacks")? {
             let r = vm.call(&f, Vec::new(), Vec::new())?;
             if py::truthy(vm, &r)? {
@@ -1598,7 +1988,15 @@ fn interact_loop(vm: &mut Vm, this: &Value, core: &Core, root_widget: &Value, la
             let r = call(vm, "pygame_sdl2.event", "peek", vec![all])?;
             py::truthy(vm, &r)?
         };
-        let sr = vm.call_method(&draw_v, "should_redraw", vec![Value::Bool(needs_redraw), Value::Bool(first_pass), Value::Bool(can_block)])?;
+        let sr = vm.call_method(
+            &draw_v,
+            "should_redraw",
+            vec![
+                Value::Bool(needs_redraw),
+                Value::Bool(first_pass),
+                Value::Bool(can_block),
+            ],
+        )?;
         if gb(vm, this, "force_redraw")? || ((first_pass || !peek_any) && py::truthy(vm, &sr)?) {
             st(vm, this, "force_redraw", Value::Bool(false))?;
             call0(vm, "renpy.display.render", "process_redraws")?;
@@ -1609,13 +2007,26 @@ fn interact_loop(vm: &mut Vm, this: &Value, core: &Core, root_widget: &Value, la
             super::render::rs(vm).borrow_mut().frame_time = now;
             call0(vm, "renpy.audio.audio", "advance_time")?;
             let fsv_t = py::truthy(vm, &fsv)?;
-            vm.call_method(this, "draw_screen", vec![root_widget.clone(), fsv.clone(), Value::Bool(!fsv_t || video_frame_drawn)])?;
+            vm.call_method(
+                this,
+                "draw_screen",
+                vec![
+                    root_widget.clone(),
+                    fsv.clone(),
+                    Value::Bool(!fsv_t || video_frame_drawn),
+                ],
+            )?;
             if first_pass {
                 let it = g(vm, this, "interact_time")?;
                 if !py::truthy(vm, &it)? {
                     let fd = g(vm, this, "frame_duration")?;
                     let fd = py::f64_of(vm, &fd)?;
-                    st(vm, this, "interact_time", Value::Float(now.max(get_time(vm) - fd)))?;
+                    st(
+                        vm,
+                        this,
+                        "interact_time",
+                        Value::Float(now.max(get_time(vm) - fd)),
+                    )?;
                 }
                 let it = g(vm, this, "interact_time")?;
                 vm.call_method(scene_lists, "set_times", vec![it.clone()])?;
@@ -1644,7 +2055,12 @@ fn interact_loop(vm: &mut Vm, this: &Value, core: &Core, root_widget: &Value, la
             }
             needs_redraw = false;
             first_pass = false;
-            call(vm, "pygame_sdl2.time", "set_timer", vec![Value::Int(events::REDRAW), Value::Int(0)])?;
+            call(
+                vm,
+                "pygame_sdl2.time",
+                "set_timer",
+                vec![Value::Int(events::REDRAW), Value::Int(0)],
+            )?;
             let r = vm.types.new_list(vec![Value::Int(events::REDRAW)]);
             call(vm, "pygame_sdl2.event", "clear", vec![r])?;
             old_redraw_time = None;
@@ -1702,31 +2118,64 @@ fn interact_loop(vm: &mut Vm, this: &Value, core: &Core, root_widget: &Value, la
                     if left <= 0. {
                         let re = g(vm, this, "redraw_event")?;
                         events::input(vm).borrow_mut().queue.push(re);
-                        call(vm, "pygame_sdl2.time", "set_timer", vec![Value::Int(events::REDRAW), Value::Int(0)])?;
+                        call(
+                            vm,
+                            "pygame_sdl2.time",
+                            "set_timer",
+                            vec![Value::Int(events::REDRAW), Value::Int(0)],
+                        )?;
                     } else {
                         let ms = ((left * 1000.) as i64).max(1);
-                        call(vm, "pygame_sdl2.time", "set_timer", vec![Value::Int(events::REDRAW), Value::Int(ms)])?;
+                        call(
+                            vm,
+                            "pygame_sdl2.time",
+                            "set_timer",
+                            vec![Value::Int(events::REDRAW), Value::Int(ms)],
+                        )?;
                     }
                     old_redraw_time = Some(rt);
                 }
             }
             _ => {
-                call(vm, "pygame_sdl2.time", "set_timer", vec![Value::Int(events::REDRAW), Value::Int(0)])?;
+                call(
+                    vm,
+                    "pygame_sdl2.time",
+                    "set_timer",
+                    vec![Value::Int(events::REDRAW), Value::Int(0)],
+                )?;
             }
         }
         let tt = g(vm, this, "timeout_time")?;
         if !py::truthy(vm, &tt)? {
-            call(vm, "pygame_sdl2.time", "set_timer", vec![Value::Int(events::TIMEEVENT), Value::Int(0)])?;
+            call(
+                vm,
+                "pygame_sdl2.time",
+                "set_timer",
+                vec![Value::Int(events::TIMEEVENT), Value::Int(0)],
+            )?;
         } else {
             let tt = py::f64_of(vm, &tt)?;
             let left = (tt - get_time(vm)).min(3600.);
             timeout_in = left;
             if left <= 0. {
                 st(vm, this, "timeout_time", Value::None)?;
-                call(vm, "pygame_sdl2.time", "set_timer", vec![Value::Int(events::TIMEEVENT), Value::Int(0)])?;
+                call(
+                    vm,
+                    "pygame_sdl2.time",
+                    "set_timer",
+                    vec![Value::Int(events::TIMEEVENT), Value::Int(0)],
+                )?;
                 vm.call_method(this, "post_time_event", Vec::new())?;
             } else if Some(tt) != old_timeout_time {
-                call(vm, "pygame_sdl2.time", "set_timer", vec![Value::Int(events::TIMEEVENT), Value::Int((left * 1000. + 1.) as i64)])?;
+                call(
+                    vm,
+                    "pygame_sdl2.time",
+                    "set_timer",
+                    vec![
+                        Value::Int(events::TIMEEVENT),
+                        Value::Int((left * 1000. + 1.) as i64),
+                    ],
+                )?;
                 old_timeout_time = Some(tt);
             }
         }
@@ -1802,7 +2251,11 @@ fn interact_loop(vm: &mut Vm, this: &Value, core: &Core, root_widget: &Value, la
         }
         if ty == events::TEXTEDITING {
             let t = py::get_or_none(vm, &ev, "text")?;
-            let te = if py::truthy(vm, &t)? { ev.clone() } else { Value::None };
+            let te = if py::truthy(vm, &t)? {
+                ev.clone()
+            } else {
+                Value::None
+            };
             st(vm, this, "text_editing", te)?;
         } else if ty == events::TEXTINPUT {
             st(vm, this, "text_editing", Value::None)?;
@@ -1818,7 +2271,10 @@ fn interact_loop(vm: &mut Vm, this: &Value, core: &Core, root_widget: &Value, la
         if ty == events::WINDOWMOVED {
             continue;
         }
-        if gb(vm, this, "ignore_touch")? && ty == events::MOUSEBUTTONUP && matches!(py::get_or_none(vm, &ev, "button")?, Value::Int(1)) {
+        if gb(vm, this, "ignore_touch")?
+            && ty == events::MOUSEBUTTONUP
+            && matches!(py::get_or_none(vm, &ev, "button")?, Value::Int(1))
+        {
             st(vm, this, "ignore_touch", Value::Bool(false))?;
             continue;
         }
@@ -1849,7 +2305,12 @@ fn interact_loop(vm: &mut Vm, this: &Value, core: &Core, root_widget: &Value, la
         let p = vm.call_method(&draw_v, "mouse_event", vec![ev.clone()])?;
         let p = py::items(vm, &p)?;
         let (mut x, mut y) = (p[0].clone(), p[1].clone());
-        let er = call(vm, "renpy.display.emulator", "emulator", vec![ev.clone(), x.clone(), y.clone()])?;
+        let er = call(
+            vm,
+            "renpy.display.emulator",
+            "emulator",
+            vec![ev.clone(), x.clone(), y.clone()],
+        )?;
         let er = py::items(vm, &er)?;
         let ev = er[0].clone();
         if py::is_none(&ev) {
@@ -1882,7 +2343,11 @@ fn interact_loop(vm: &mut Vm, this: &Value, core: &Core, root_widget: &Value, la
             }
             let mut rv = super::focus::mouse_handler(vm, &ev, xf, yf, true)?;
             if py::is_none(&rv) {
-                rv = vm.call_method(root_widget, "event", vec![ev.clone(), x.clone(), y.clone(), Value::Int(0)])?;
+                rv = vm.call_method(
+                    root_widget,
+                    "event",
+                    vec![ev.clone(), x.clone(), y.clone(), Value::Int(0)],
+                )?;
             }
             if py::is_none(&rv) {
                 rv = call(vm, "renpy.display.focus", "key_handler", vec![ev.clone()])?;
@@ -1892,10 +2357,23 @@ fn interact_loop(vm: &mut Vm, this: &Value, core: &Core, root_widget: &Value, la
             }
             let ot = g(vm, this, "ongoing_transition")?;
             let rt = vm.call_method(&ot, "get", vec![Value::None, Value::None])?;
-            if py::truthy(vm, &rt)? && !suppress_transition && !trans_pause && py::config_bool(vm, "dismiss_blocking_transitions")? {
+            if py::truthy(vm, &rt)?
+                && !suppress_transition
+                && !trans_pause
+                && py::config_bool(vm, "dismiss_blocking_transitions")?
+            {
                 let dp = store(vm, "_dismiss_pause")?;
-                let dismiss = if py::truthy(vm, &dp)? { "dismiss" } else { "dismiss_hard_pause" };
-                let me = call(vm, "renpy.display.behavior", "map_event", vec![ev.clone(), py::s(vm, dismiss)])?;
+                let dismiss = if py::truthy(vm, &dp)? {
+                    "dismiss"
+                } else {
+                    "dismiss_hard_pause"
+                };
+                let me = call(
+                    vm,
+                    "renpy.display.behavior",
+                    "map_event",
+                    vec![ev.clone(), py::s(vm, dismiss)],
+                )?;
                 if py::truthy(vm, &me)? {
                     let t = g(vm, this, "transition")?;
                     vm.call_method(&t, "pop", vec![Value::None, Value::None])?;
@@ -1935,19 +2413,32 @@ fn r_noop(_: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("init_time", f_init_time),
-        ("get_time", f_get_time),
-        ("get_size", f_get_size),
-        ("displayable_by_tag", f_displayable_by_tag),
-        ("get_safe_mode", f_get_safe_mode),
-    ]);
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("init_time", f_init_time),
+            ("get_time", f_get_time),
+            ("get_size", f_get_size),
+            ("displayable_by_tag", f_displayable_by_tag),
+            ("get_safe_mode", f_get_safe_mode),
+        ],
+    );
     let set = |vm: &mut Vm, n: &str, v: Value| crysirror_python::modules::set(vm, &m, n, v);
-    for (n, v) in [("TIMEEVENT", events::TIMEEVENT), ("PERIODIC", events::PERIODIC), ("REDRAW", events::REDRAW), ("EVENTNAME", events::EVENTNAME), ("PERIODIC_INTERVAL", PERIODIC_INTERVAL)] {
+    for (n, v) in [
+        ("TIMEEVENT", events::TIMEEVENT),
+        ("PERIODIC", events::PERIODIC),
+        ("REDRAW", events::REDRAW),
+        ("EVENTNAME", events::EVENTNAME),
+        ("PERIODIC_INTERVAL", PERIODIC_INTERVAL),
+    ] {
         set(vm, n, Value::Int(v));
     }
     let all = vm.types.new_set(Default::default());
-    for e in events::standard_events().into_iter().chain([events::PERIODIC, events::EVENTNAME]) {
+    for e in events::standard_events()
+        .into_iter()
+        .chain([events::PERIODIC, events::EVENTNAME])
+    {
         ops::set_add(vm, &all, Value::Int(e))?;
     }
     set(vm, "ALL_EVENTS", all.clone());
@@ -1970,98 +2461,132 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let exc = Value::Obj(vm.types.exc("Exception"));
     let ie = py::class(vm, MODULE, "IgnoreEvent", &[exc.clone()], &[], &[])?;
     set(vm, "IgnoreEvent", Value::Obj(ie));
-    let ei = py::class(vm, MODULE, "EndInteraction", &[exc], &[("__init__", end_interaction_init)], &[])?;
+    let ei = py::class(
+        vm,
+        MODULE,
+        "EndInteraction",
+        &[exc],
+        &[("__init__", end_interaction_init)],
+        &[],
+    )?;
     set(vm, "EndInteraction", Value::Obj(ei));
     let a = make_absolute(vm)?;
     set(vm, "absolute", a);
     let obj = Value::Obj(vm.types.object.clone());
-    let mm = py::class(vm, MODULE, "MouseMove", &[obj.clone()], &[("__init__", mm_init), ("perform", mm_perform)], &[])?;
+    let mm = py::class(
+        vm,
+        MODULE,
+        "MouseMove",
+        &[obj.clone()],
+        &[("__init__", mm_init), ("perform", mm_perform)],
+        &[],
+    )?;
     set(vm, "MouseMove", Value::Obj(mm));
-    let renderer = py::class(vm, MODULE, "Renderer", &[obj.clone()], &[
-        ("get_texture_size", d_get_texture_size),
-        ("update", d_false),
-        ("init", d_init),
-        ("quit", d_none),
-        ("resize", d_none),
-        ("can_block", d_true),
-        ("should_redraw", d_should_redraw),
-        ("mutated_surface", d_none),
-        ("load_texture", d_none),
-        ("ready_one_texture", d_false),
-        ("kill_textures", d_none),
-        ("draw_screen", d_draw_screen),
-        ("is_pixel_opaque", d_is_pixel_opaque),
-        ("translate_point", d_translate_point),
-        ("untranslate_point", d_translate_point),
-        ("mouse_event", d_mouse_event),
-        ("get_mouse_pos", d_get_mouse_pos),
-        ("set_mouse_pos", d_set_mouse_pos),
-        ("screenshot", d_screenshot),
-        ("event_peek_sleep", d_none),
-        ("get_physical_size", d_get_physical_size),
-    ], &[])?;
+    let renderer = py::class(
+        vm,
+        MODULE,
+        "Renderer",
+        &[obj.clone()],
+        &[
+            ("get_texture_size", d_get_texture_size),
+            ("update", d_false),
+            ("init", d_init),
+            ("quit", d_none),
+            ("resize", d_none),
+            ("can_block", d_true),
+            ("should_redraw", d_should_redraw),
+            ("mutated_surface", d_none),
+            ("load_texture", d_none),
+            ("ready_one_texture", d_false),
+            ("kill_textures", d_none),
+            ("draw_screen", d_draw_screen),
+            ("is_pixel_opaque", d_is_pixel_opaque),
+            ("translate_point", d_translate_point),
+            ("untranslate_point", d_translate_point),
+            ("mouse_event", d_mouse_event),
+            ("get_mouse_pos", d_get_mouse_pos),
+            ("set_mouse_pos", d_set_mouse_pos),
+            ("screenshot", d_screenshot),
+            ("event_peek_sleep", d_none),
+            ("get_physical_size", d_get_physical_size),
+        ],
+        &[],
+    )?;
     let renderer = Value::Obj(renderer);
     set(vm, "Renderer", renderer.clone());
     let cd = py::class(vm, MODULE, "CrySirrorDraw", &[renderer], &[], &[])?;
     set(vm, "CrySirrorDraw", Value::Obj(cd));
-    let iface = py::class(vm, MODULE, "Interface", &[obj], &[
-        ("__init__", i_init),
-        ("start", i_start),
-        ("post_init", i_post_init),
-        ("after_first_frame", r_noop),
-        ("set_icon", r_noop),
-        ("set_window_caption", i_set_window_caption),
-        ("iconify", r_noop),
-        ("kill_textures", i_kill_textures),
-        ("kill_surfaces", r_noop),
-        ("before_resize", i_kill_textures),
-        ("set_mode", i_set_mode),
-        ("draw_screen", i_draw_screen),
-        ("take_screenshot", i_take_screenshot),
-        ("check_background_screenshot", r_noop),
-        ("get_screenshot", i_get_screenshot),
-        ("lose_screenshot", i_lose_screenshot),
-        ("save_screenshot", i_save_screenshot),
-        ("screenshot_to_bytes", i_get_screenshot),
-        ("show_window", i_show_window),
-        ("do_with", i_do_with),
-        ("with_none", i_with_none),
-        ("end_transitions", i_end_transitions),
-        ("get_ongoing_transition", i_get_ongoing_transition),
-        ("set_transition", i_set_transition),
-        ("event_peek", i_event_peek),
-        ("event_poll", i_event_poll),
-        ("event_wait", i_event_wait),
-        ("compute_overlay", i_compute_overlay),
-        ("compute_scene", i_compute_scene),
-        ("quit_event", i_quit_event),
-        ("set_mouse", i_set_mouse),
-        ("hide_mouse", i_hide_mouse),
-        ("is_mouse_visible", i_is_mouse_visible),
-        ("get_mouse_name", i_get_mouse_name),
-        ("update_mouse", i_update_mouse),
-        ("set_mouse_pos", i_set_mouse_pos),
-        ("drawn_since", i_drawn_since),
-        ("mobile_save", r_noop),
-        ("mobile_unlink", r_noop),
-        ("check_android_start", r_noop),
-        ("check_suspend", i_check_suspend),
-        ("enter_context", i_enter_context),
-        ("post_time_event", i_post_time_event),
-        ("after_longpress", i_after_longpress),
-        ("text_event_in_queue", i_text_event_in_queue),
-        ("update_text_rect", i_update_text_rect),
-        ("maximum_framerate", i_maximum_framerate),
-        ("interact", i_interact),
-        ("consider_gc", r_noop),
-        ("idle_frame", i_idle_frame),
-        ("timeout", i_timeout),
-        ("finish_pending", r_noop),
-        ("exec_js_cmd", r_noop),
-    ], &[("take_layer_displayable", Value::None)])?;
+    let iface = py::class(
+        vm,
+        MODULE,
+        "Interface",
+        &[obj],
+        &[
+            ("__init__", i_init),
+            ("start", i_start),
+            ("post_init", i_post_init),
+            ("after_first_frame", r_noop),
+            ("set_icon", r_noop),
+            ("set_window_caption", i_set_window_caption),
+            ("iconify", r_noop),
+            ("kill_textures", i_kill_textures),
+            ("kill_surfaces", r_noop),
+            ("before_resize", i_kill_textures),
+            ("set_mode", i_set_mode),
+            ("draw_screen", i_draw_screen),
+            ("take_screenshot", i_take_screenshot),
+            ("check_background_screenshot", r_noop),
+            ("get_screenshot", i_get_screenshot),
+            ("lose_screenshot", i_lose_screenshot),
+            ("save_screenshot", i_save_screenshot),
+            ("screenshot_to_bytes", i_get_screenshot),
+            ("show_window", i_show_window),
+            ("do_with", i_do_with),
+            ("with_none", i_with_none),
+            ("end_transitions", i_end_transitions),
+            ("get_ongoing_transition", i_get_ongoing_transition),
+            ("set_transition", i_set_transition),
+            ("event_peek", i_event_peek),
+            ("event_poll", i_event_poll),
+            ("event_wait", i_event_wait),
+            ("compute_overlay", i_compute_overlay),
+            ("compute_scene", i_compute_scene),
+            ("quit_event", i_quit_event),
+            ("set_mouse", i_set_mouse),
+            ("hide_mouse", i_hide_mouse),
+            ("is_mouse_visible", i_is_mouse_visible),
+            ("get_mouse_name", i_get_mouse_name),
+            ("update_mouse", i_update_mouse),
+            ("set_mouse_pos", i_set_mouse_pos),
+            ("drawn_since", i_drawn_since),
+            ("mobile_save", r_noop),
+            ("mobile_unlink", r_noop),
+            ("check_android_start", r_noop),
+            ("check_suspend", i_check_suspend),
+            ("enter_context", i_enter_context),
+            ("post_time_event", i_post_time_event),
+            ("after_longpress", i_after_longpress),
+            ("text_event_in_queue", i_text_event_in_queue),
+            ("update_text_rect", i_update_text_rect),
+            ("maximum_framerate", i_maximum_framerate),
+            ("interact", i_interact),
+            ("consider_gc", r_noop),
+            ("idle_frame", i_idle_frame),
+            ("timeout", i_timeout),
+            ("finish_pending", r_noop),
+            ("exec_js_cmd", r_noop),
+        ],
+        &[("take_layer_displayable", Value::None)],
+    )?;
     set(vm, "Interface", Value::Obj(iface));
     // Pre-8.0 locations of displayable and scene-list classes.
-    for (n, module) in [("Displayable", "renpy.display.displayable"), ("DisplayableArguments", "renpy.display.displayable"), ("place", "renpy.display.displayable"), ("SceneLists", "renpy.display.scenelists"), ("SceneListEntry", "renpy.display.scenelists")] {
+    for (n, module) in [
+        ("Displayable", "renpy.display.displayable"),
+        ("DisplayableArguments", "renpy.display.displayable"),
+        ("place", "renpy.display.displayable"),
+        ("SceneLists", "renpy.display.scenelists"),
+        ("SceneListEntry", "renpy.display.scenelists"),
+    ] {
         if let Ok(v) = py::import_attr(vm, module, n) {
             set(vm, n, v);
         }

@@ -555,7 +555,7 @@ fn measure(m: &mut MaidStatus, model: &Maid) {
         5. * (model.value("MuneS") as f32 / 100.),
     );
 }
-fn mirror(model: &Maid) -> BodyMirror {
+pub(super) fn mirror(model: &Maid) -> BodyMirror {
     let mut body = BodyMirror::default();
     for (&name, prop) in model.prop_names.iter().zip(&model.props) {
         body.props.insert(name.into(), (prop.kind, prop.value));

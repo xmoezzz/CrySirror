@@ -91,7 +91,7 @@ enum Value {
 }
 
 /// IEEE half to single precision.
-fn half(h: u16) -> f32 {
+pub(crate) fn half(h: u16) -> f32 {
     let (sign, exp, man) = (u32::from(h >> 15), u32::from(h >> 10) & 0x1f, u32::from(h) & 0x3ff);
     let bits = match (exp, man) {
         (0, 0) => sign << 31,
@@ -189,6 +189,21 @@ fn range_record(r: u128) -> ([f32; 3], [f32; 3]) {
     let header = ((r >> 107) & 0x1f_ffff) as u32;
     let s0 = f32::from_bits((header >> 13) << 23 | (header & 0x1fff) << 10);
     ([s0, small_float(r, 21, 21), small_float(r, 42, 22)], [small_float(r, 64, 22), small_float(r, 86, 21), small_float(r, 107, 21)])
+}
+
+/// Bit zero of the ANIM flags is copied to the playing state's looping
+/// bit by `sub_2DCB18` and checked by the original seam validator.
+pub(crate) fn looping(p: &Loaded, payload: usize) -> Result<bool> {
+    Ok(p.u32(payload + 4)? & 1 != 0)
+}
+
+/// sub_2EAD8C multiplies the authored final sample index by its seconds
+/// per frame; a closing duplicate key does not extend the period.
+pub(crate) fn duration(p: &Loaded, payload: usize) -> Result<f32> {
+    let data = p.ptr(payload + 8)?;
+    let seconds = p.f32(data + 0x28)? * p.f32(data + 0x2c)?;
+    ensure!(seconds.is_finite() && seconds >= 0., "invalid ND animation duration");
+    Ok(seconds)
 }
 
 /// The `JOINT_HIERARCHY` hash an `ANIM` payload's clip animates.

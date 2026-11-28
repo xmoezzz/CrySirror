@@ -23,6 +23,13 @@ pub(super) struct Actors {
     group_offset: [f32; 3],
     group_rotation: [f32;3],
     last: Option<u64>,
+    guest_man: Option<GuestMan>,
+    native_men: Vec<retail::native_save::NativeMan>,
+}
+
+struct GuestMan {
+    resume: Option<(usize, Maid)>,
+    player_name: String,
 }
 
 pub(super) struct Motion {
@@ -84,6 +91,34 @@ impl Motion {
 }
 
 impl Actors {
+    pub(super) fn native_men(&self) -> &[retail::native_save::NativeMan] {
+        &self.native_men
+    }
+
+    pub(super) fn restore_native_roster(
+        script: &AdvKag,
+        men: Vec<retail::native_save::NativeMan>,
+    ) -> Result<Self> {
+        let mut actors = Self::default();
+        actors.characters.resize_with(9, || Maid::new(false));
+        for (stock, man) in men.iter().enumerate() {
+            let index = 3 + stock;
+            actors.characters[index] = man.model.clone();
+            if let Some(slot) = man.active_slot() {
+                actors.slots.insert((true, slot), index);
+            }
+        }
+        let slots = script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?
+            .runtime.host().state.active_maids.clone();
+        for (slot, id) in slots.into_iter().enumerate() {
+            if let Some(id) = id {
+                actors.activate_stock(script, id, slot, Some(false))?;
+            }
+        }
+        actors.native_men = men;
+        Ok(actors)
+    }
+
     pub fn photo_blink(&mut self, enabled: bool) -> Result<()> {
         self.actor(false, 0)
             .context("missing portrait subject")?
@@ -243,8 +278,100 @@ impl Actors {
             self.characters[i].visible = false;
         }
     }
+    pub(super) fn voice_source(&self, man: bool, slot: usize) -> Option<[f32; 3]> {
+        let actor = self.characters.get(*self.slots.get(&(man, slot))?)?;
+        if !actor.visible {
+            return None;
+        }
+        let (position, rotation) = self.group_frame();
+        Some((glam::Vec3::from_array(position)
+            + crate::chara::unity_euler(rotation) * glam::Vec3::from_array(actor.position)).to_array())
+    }
+
     pub(super) fn actor(&mut self, man: bool, slot: usize) -> Option<&mut Maid> {
         self.characters.get_mut(*self.slots.get(&(man, slot))?)
+    }
+
+    /// KasizukiManager caches the player's appearance while using slot zero
+    /// to present the currently selected guest.
+    pub fn display_guest_man(
+        &mut self,
+        script: &AdvKag,
+        files: &GameFiles,
+        assets: &mut Assets,
+        op: &mut Opener,
+        player_model: Option<&Maid>,
+        preset: Option<&str>,
+        now: u64,
+    ) -> Result<()> {
+        if self.guest_man.is_none() {
+            let vm = script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+            self.guest_man = Some(GuestMan {
+                resume: self.slots.get(&(true, 0)).map(|&index| (index, self.characters[index].clone())),
+                player_name: vm.runtime.host().state.player.player_name.clone(),
+            });
+        }
+        let name = if let Some(preset) = preset {
+            self.activate(script, files, assets, op, true, 0, preset, true)?;
+            self.actor(true, 0).context("guest man slot")?.name_first.clone()
+        } else {
+            let guest = self.guest_man.as_ref().context("guest player appearance")?;
+            let mut model = match player_model.or_else(|| guest.resume.as_ref().map(|(_, model)| model)) {
+                Some(model) => model.clone(),
+                None => {
+                    let mut model = retail::retail_maid(true);
+                    model.set_up_model(files, op.storage.as_ref(), "_I_man.menu")?;
+                    model
+                }
+            };
+            model.visible = true;
+            model.name_last.clone_from(&guest.player_name);
+            let name = guest.player_name.clone();
+            let index = guest.resume.as_ref().map_or(3, |(index, _)| *index);
+            if self.characters.len() <= index {
+                self.characters.resize_with(index + 1, || Maid::new(false));
+            }
+            if let Some(old) = self.slots.insert((true, 0), index) {
+                self.characters[old].visible = false;
+                self.tracking.remove(old);
+                self.despawn.extend(self.view.remove_actor(old));
+            }
+            self.characters[index] = model;
+            name
+        };
+        self.actor(true, 0).context("guest man slot")?.chinko_visible = false;
+        self.apply(
+            AdvUi::Motion {
+                man: true,
+                slot: 0,
+                file: "man_porse01.anm".into(),
+                looping: true,
+                blend_s: 0.,
+                queue: false,
+            },
+            script,
+            files,
+            assets,
+            op,
+            now,
+        )?;
+        let mut vm = script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+        vm.runtime.host_mut().state.player.player_name = name;
+        Ok(())
+    }
+
+    pub fn end_guest_man(&mut self, script: &AdvKag) -> Result<()> {
+        let Some(guest) = self.guest_man.take() else {
+            return Ok(());
+        };
+        self.hide_slot(true, 0);
+        if let Some((index, model)) = guest.resume {
+            self.characters[index] = model;
+            self.slots.insert((true, 0), index);
+        }
+        let mut vm = script.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+        vm.runtime.host_mut().state.player.player_name = guest.player_name;
+        Ok(())
     }
     fn activate(
         &mut self,
@@ -706,6 +833,15 @@ impl Actors {
         }
         Ok(())
     }
+    pub fn set_player_opacity(&mut self, opacity: f32) {
+        for man in self.characters.iter_mut().filter(|m| m.man && m.man_alpha != opacity) {
+            man.man_alpha = opacity;
+            for slot in man.slots.values_mut() {
+                slot.dirty = true;
+            }
+        }
+    }
+
     pub fn sync(
         &mut self,
         host: &mut dyn HostServices,
@@ -743,7 +879,7 @@ impl Actors {
         }
         for m in self.characters.iter_mut().filter(|m| m.visible) {
             if !m.face.blink_disabled || !m.face.name2.is_empty() {
-                m.morphs = m.face.update(dt, now as f32 / 1000., None, &m.blend_sets);
+                m.morphs = m.face.update(dt, now as f32 / 1000., m.performance_audio, &m.blend_sets);
             }
         }
         let mut cmds = self

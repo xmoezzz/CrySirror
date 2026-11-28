@@ -132,6 +132,21 @@ pub(super) struct Editor {
     help_closing: Option<u64>,
 }
 impl Editor {
+    pub(super) fn player_model(&self) -> Option<&Maid> {
+        self.man.as_ref()
+    }
+
+    pub(super) fn set_player_opacity(&mut self, opacity: f32) {
+        if let Some(man) = &mut self.man
+            && man.man_alpha != opacity
+        {
+            man.man_alpha = opacity;
+            for slot in man.slots.values_mut() {
+                slot.dirty = true;
+            }
+        }
+    }
+
     pub fn enter(
         &mut self,
         op: &mut Opener,

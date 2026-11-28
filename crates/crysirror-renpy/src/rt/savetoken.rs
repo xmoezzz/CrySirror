@@ -56,7 +56,10 @@ pub fn decode_line(line: &str) -> (String, Vec<u8>, Option<Vec<u8>>) {
     if line.is_empty() || line.starts_with('#') {
         return none;
     }
-    let parts: Vec<&str> = line.splitn(3, char::is_whitespace).filter(|p| !p.is_empty()).collect();
+    let parts: Vec<&str> = line
+        .splitn(3, char::is_whitespace)
+        .filter(|p| !p.is_empty())
+        .collect();
     let dec = |s: &str| B64.decode(s.trim()).ok();
     match parts.as_slice() {
         [k, a] => match dec(a) {
@@ -76,7 +79,10 @@ fn digest(data: &[u8]) -> [u8; 20] {
 }
 
 fn verifying_der(sk: &SigningKey) -> Option<Vec<u8>> {
-    sk.verifying_key().to_public_key_der().ok().map(|d| d.as_bytes().to_vec())
+    sk.verifying_key()
+        .to_public_key_der()
+        .ok()
+        .map(|d| d.as_bytes().to_vec())
 }
 
 fn signing_from_der(der: &[u8]) -> Option<SigningKey> {
@@ -90,8 +96,12 @@ pub fn sign_data(vm: &mut Vm, data: &[u8]) -> String {
     let h = digest(data);
     let mut rv = String::new();
     for sk in &t.signing {
-        let Some(vk) = verifying_der(sk) else { continue };
-        let Ok(sig): Result<Signature, _> = sk.sign_prehash(&h) else { continue };
+        let Some(vk) = verifying_der(sk) else {
+            continue;
+        };
+        let Ok(sig): Result<Signature, _> = sk.sign_prehash(&h) else {
+            continue;
+        };
         rv.push_str(&encode_line("signature", &vk, Some(&sig.to_bytes())));
     }
     rv
@@ -110,7 +120,12 @@ pub fn verify_data(vm: &mut Vm, data: &[u8], signatures: &str, check_verifying: 
         if check_verifying && !t.verifying.contains(&key) {
             continue;
         }
-        let (Ok(vk), Ok(sig)) = (VerifyingKey::from_public_key_der(&key), Signature::from_slice(&sig)) else { continue };
+        let (Ok(vk), Ok(sig)) = (
+            VerifyingKey::from_public_key_der(&key),
+            Signature::from_slice(&sig),
+        ) else {
+            continue;
+        };
         if vk.verify_prehash(&h, &sig).is_ok() {
             return true;
         }
@@ -119,10 +134,13 @@ pub fn verify_data(vm: &mut Vm, data: &[u8], signatures: &str, check_verifying: 
 }
 
 fn keys_from_signatures(signatures: &str) -> Vec<Vec<u8>> {
-    signatures.lines().filter_map(|l| {
-        let (k, key, _) = decode_line(l);
-        (k == "signature").then_some(key)
-    }).collect()
+    signatures
+        .lines()
+        .filter_map(|l| {
+            let (k, key, _) = decode_line(l);
+            (k == "signature").then_some(key)
+        })
+        .collect()
 }
 
 fn store(vm: &Vm) -> Rc<SaveStore> {
@@ -157,15 +175,22 @@ pub fn check_load(vm: &mut Vm, log: &[u8], signatures: &str) -> PyResult<bool> {
         return Ok(false);
     }
     let known = tokens(vm).borrow().verifying.clone();
-    let new_keys: Vec<Vec<u8>> = keys_from_signatures(signatures).into_iter().filter(|k| !known.contains(k)).collect();
+    let new_keys: Vec<Vec<u8>> = keys_from_signatures(signatures)
+        .into_iter()
+        .filter(|k| !known.contains(k))
+        .collect();
     if !new_keys.is_empty() && ask(vm, "TRUST_TOKEN")? {
         let s = store(vm);
         let name = format!("{TOKEN_DIR}/security_keys.txt");
-        let mut text = s.read(&name).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+        let mut text = s
+            .read(&name)
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default();
         for k in &new_keys {
             text.push_str(&encode_line("verifying-key", k, None));
         }
-        s.write(&name, text.as_bytes()).map_err(|e| py::error(vm, e))?;
+        s.write(&name, text.as_bytes())
+            .map_err(|e| py::error(vm, e))?;
         tokens(vm).borrow_mut().verifying.extend(new_keys);
     }
     if signatures.is_empty() {
@@ -213,7 +238,10 @@ fn init_tokens(vm: &mut Vm) -> PyResult<()> {
     if s.read(&keys).is_none() {
         create_token(vm, &keys).map_err(|e| py::error(vm, e))?;
     }
-    let text = s.read(&keys).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+    let text = s
+        .read(&keys)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
     {
         let mut t = t.borrow_mut();
         t.active = true;
@@ -241,15 +269,28 @@ fn init_tokens(vm: &mut Vm) -> PyResult<()> {
             if VerifyingKey::from_public_key_der(&raw).is_ok() {
                 t.borrow_mut().verifying.push(raw);
             } else if let Some(sk) = signing_from_der(&raw) {
-                let vk = verifying_der(&sk).map(|v| B64.encode(v)).unwrap_or_default();
-                return Err(py::error(vm, format!("In config.save_token_keys, the signing key '{ks}' was provided, but the verifying key '{vk}' is required.")));
+                let vk = verifying_der(&sk)
+                    .map(|v| B64.encode(v))
+                    .unwrap_or_default();
+                return Err(py::error(
+                    vm,
+                    format!(
+                        "In config.save_token_keys, the signing key '{ks}' was provided, but the verifying key '{vk}' is required."
+                    ),
+                ));
             } else {
-                return Err(py::error(vm, format!("In config.save_token_keys, the key '{ks}' is not a valid key.")));
+                return Err(py::error(
+                    vm,
+                    format!("In config.save_token_keys, the key '{ks}' is not a valid key."),
+                ));
             }
         }
     }
     let up = format!("{TOKEN_DIR}/upgraded.txt");
-    let upgraded = s.read(&up).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+    let upgraded = s
+        .read(&up)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
     let sd = py::string(vm, &save_directory)?;
     if !upgraded.lines().any(|l| l == sd) {
         t.borrow_mut().should_upgrade = true;
@@ -275,23 +316,34 @@ pub fn upgrade_all_savefiles(vm: &mut Vm) -> PyResult<()> {
             continue;
         }
         let Some(bytes) = s.read(&f) else { continue };
-        let Ok(entries) = savestore::zip_read(&bytes) else { continue };
+        let Ok(entries) = savestore::zip_read(&bytes) else {
+            continue;
+        };
         if entries.iter().any(|e| e.name == "signatures") {
             continue;
         }
-        let Some(log) = entries.iter().find(|e| e.name == "log") else { continue };
+        let Some(log) = entries.iter().find(|e| e.name == "log") else {
+            continue;
+        };
         let sig = sign_data(vm, &log.data);
-        let mut parts: Vec<(&str, &[u8])> = entries.iter().map(|e| (e.name.as_str(), e.data.as_slice())).collect();
+        let mut parts: Vec<(&str, &[u8])> = entries
+            .iter()
+            .map(|e| (e.name.as_str(), e.data.as_slice()))
+            .collect();
         parts.push(("signatures", sig.as_bytes()));
         let z = savestore::zip_write(&parts, savestore::dos_time(s.mtime(&f).unwrap_or(0.0)));
         let _ = s.write(&f, &z);
     }
     let up = format!("{TOKEN_DIR}/upgraded.txt");
-    let mut text = s.read(&up).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+    let mut text = s
+        .read(&up)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
     let sd = py::config(vm, "save_directory")?;
     text.push_str(&py::string(vm, &sd)?);
     text.push('\n');
-    s.write(&up, text.as_bytes()).map_err(|e| py::error(vm, e))?;
+    s.write(&up, text.as_bytes())
+        .map_err(|e| py::error(vm, e))?;
     Ok(())
 }
 
@@ -349,7 +401,10 @@ fn f_decode_line(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 
 fn f_get_keys_from_signatures(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let s = py::string(vm, &args[0])?;
-    let v = keys_from_signatures(&s).into_iter().map(|k| vm.types.new_bytes(k)).collect();
+    let v = keys_from_signatures(&s)
+        .into_iter()
+        .map(|k| vm.types.new_bytes(k))
+        .collect();
     Ok(vm.types.new_list(v))
 }
 
@@ -373,8 +428,16 @@ fn f_upgrade_all_savefiles(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
 
 fn f_get_save_token_keys(vm: &mut Vm, _: &[Value], _: Kw) -> PyResult<Value> {
     let t = tokens(vm);
-    let keys: Vec<String> = t.borrow().signing.iter().filter_map(verifying_der).map(|v| B64.encode(v)).collect();
-    Ok(vm.types.new_list(keys.iter().map(|k| vm.types.new_str(k)).collect()))
+    let keys: Vec<String> = t
+        .borrow()
+        .signing
+        .iter()
+        .filter_map(verifying_der)
+        .map(|v| B64.encode(v))
+        .collect();
+    Ok(vm
+        .types
+        .new_list(keys.iter().map(|k| vm.types.new_str(k)).collect()))
 }
 
 pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
@@ -410,7 +473,10 @@ mod tests {
     #[test]
     fn key_lines_round_trip() {
         let (k, a, b) = decode_line(&encode_line("signature", b"abc", Some(b"de")));
-        assert_eq!((k.as_str(), a.as_slice(), b.as_deref()), ("signature", &b"abc"[..], Some(&b"de"[..])));
+        assert_eq!(
+            (k.as_str(), a.as_slice(), b.as_deref()),
+            ("signature", &b"abc"[..], Some(&b"de"[..]))
+        );
         let sk = random_key().unwrap();
         let der = p256::SecretKey::from(&sk).to_sec1_der().unwrap();
         let back = signing_from_der(&der).unwrap();

@@ -280,5 +280,24 @@ _screenshot_pattern = None
 import sys
 import os
 
+import _crysirror_renpy
+_version = _crysirror_renpy.version()
+
+# `name_only` is a defaultstore alias of `adv` in these release ranges; other
+# releases define it in common code.
+if ((6, 14) <= _version < (6, 99, 2, 399)
+        or (7, 6, 2, 23090503) <= _version < (7, 7, 2, 24061201)
+        or (8, 1, 2, 23090503) <= _version < (8, 2, 2, 24061201)):
+    name_only = adv
+
+if _version >= (8, 4):
+    GLTFModel = _optional("renpy.gl2.assimp", "GLTFModel")
+
+if _version >= (8, 6):
+    RawTexture = renpy.display.im.UnoptimizedTexture
+    _predict_shader = set()
+
+del _version, _crysirror_renpy
+
 globals()["renpy"] = renpy.exports
 del _optional

@@ -87,6 +87,35 @@ pub(super) struct Catalog {
     bodies_2011: BTreeMap<(u8, u8), character_body::Definition2011>,
 }
 impl Catalog {
+    pub(super) fn read_v1_voice_definitions(
+        storage: &dyn crysirror_core::service::ClientStorage,
+        capacity: usize,
+    ) -> Result<Self> {
+        let path = crate::script_path("defChara")?;
+        let reader = storage.open_read(&path)?;
+        let script =
+            crate::Script::new(crysirror_resource::read_all(reader.as_ref(), 8 << 20)?, 1)?;
+        let mut catalog = Self::new(capacity);
+        let mut pc = script.pc;
+        for _ in 0..script.remaining {
+            let (header, raw, end) = crate::branch::envelope(&script.bytes, pc)?;
+            if header == 0x0100_0030 {
+                catalog.define(Definition::parse(
+                    raw.context("missing character definition")?,
+                )?)?;
+            }
+            pc = end;
+        }
+        ensure!(
+            pc == script.bytes.len(),
+            "invalid ExHibit character-definition extent"
+        );
+        Ok(catalog)
+    }
+
+    pub(super) fn has_definition(&self, id: u8) -> bool {
+        self.definitions.contains_key(&id)
+    }
     pub fn new(capacity: usize) -> Self {
         Self {
             capacity,
@@ -153,6 +182,10 @@ impl Catalog {
     /// The 0x288a0 unpositioned, non-skip path only. The character has not
     /// entered a scene or acquired pan, lip-sync or loop-ducking state.
     pub fn unpositioned_voice_gain(&self, id: u8, regs: &Registers) -> Result<Option<[u32; 2]>> {
+        // sc00 reserves the first three unvoiced characters before def.rld.
+        if id < 3 && !self.has_definition(id) {
+            return Ok(None);
+        }
         let actor = self
             .definitions
             .get(&id)

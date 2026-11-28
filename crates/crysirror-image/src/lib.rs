@@ -31,6 +31,7 @@ pub use png::{encode_png_uncompressed, png_uncompressed_len};
 pub mod alpha_clip;
 pub mod layer_ex;
 pub mod resample_byte256;
+pub mod resample_byte255;
 /// Longest decoded image edge. Original sprite sheets exceed 8192 (Little
 /// Busters! `EF_RPW_RP08.g00` is 1200x12000); `MAX_DECODED_BYTES` bounds memory
 /// and the renderer validates uploads against the actual device limit.
@@ -101,6 +102,7 @@ pub mod nine_patch;
 pub mod coverage_bitmap;
 pub mod coverage_blur;
 pub mod fixed_mix;
+pub mod fixed_raster;
 pub mod fixed_affine;
 pub mod byte_raster;
 pub mod row_blit;
@@ -376,6 +378,7 @@ pub mod avg32;
 pub mod g00;
 pub mod gdi_region;
 pub mod alpha_cells;
+pub mod bmfont;
 pub mod layer_stack;
 pub mod channel_matte;
 /// Shared MPL PDT10/PDT11 image codec; native cut/pattern metadata stays in adapters.

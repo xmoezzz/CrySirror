@@ -23,7 +23,12 @@ fn line_init(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let f = norm(vm, &f)?;
     let f = py::s(vm, &f);
     py::set(vm, this, "filename", f)?;
-    py::set(vm, this, "number", py::arg_or(args, kw, 2, "number", Value::Int(0)))?;
+    py::set(
+        vm,
+        this,
+        "number",
+        py::arg_or(args, kw, 2, "number", Value::Int(0)),
+    )?;
     let start = py::arg_or(args, kw, 3, "start", Value::Int(0));
     for n in ["start", "end", "end_delim"] {
         py::set(vm, this, n, start.clone())?;
@@ -38,7 +43,12 @@ fn line_repr(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
     let f = py::get(vm, &args[0], "filename")?;
     let n = py::get(vm, &args[0], "number")?;
     let t = py::get(vm, &args[0], "text")?;
-    let s = format!("<Line {}:{} {}>", py::string(vm, &f)?, ops::str(vm, &n)?, ops::repr(vm, &t)?);
+    let s = format!(
+        "<Line {}:{} {}>",
+        py::string(vm, &f)?,
+        ops::str(vm, &n)?,
+        ops::repr(vm, &t)?
+    );
     Ok(py::s(vm, &s))
 }
 
@@ -73,10 +83,14 @@ fn ensure_loaded(vm: &mut Vm, filename: &str) -> PyResult<()> {
     ops::set_add(vm, &files, key)?;
     let src = filename.strip_suffix('c').unwrap_or(filename);
     let rel = src.strip_prefix("game/").unwrap_or(src);
-    let Some(data) = state::rt(vm).files.read(rel) else { return Ok(()) };
+    let Some(data) = state::rt(vm).files.read(rel) else {
+        return Ok(());
+    };
     let text = String::from_utf8_lossy(&data).into_owned();
     let fname: Rc<str> = filename.into();
-    let Ok(logical) = crate::lexer::list_logical_lines(&fname, &text, 1) else { return Ok(()) };
+    let Ok(logical) = crate::lexer::list_logical_lines(&fname, &text, 1) else {
+        return Ok(());
+    };
     let chars: Vec<char> = text.chars().collect();
     let starts = line_starts(&chars);
     let phys_end = |n: usize| -> (usize, usize) {
@@ -94,7 +108,9 @@ fn ensure_loaded(vm: &mut Vm, filename: &str) -> PyResult<()> {
     for (i, (number, _)) in logical.iter().enumerate() {
         let n = *number as usize;
         let start = starts.get(n - 1).copied().unwrap_or(chars.len());
-        let next = logical.get(i + 1).map_or(starts.len(), |(m, _)| *m as usize - 1);
+        let next = logical
+            .get(i + 1)
+            .map_or(starts.len(), |(m, _)| *m as usize - 1);
         let mut last = next.max(n);
         while last > n {
             let s = starts.get(last - 1).copied().unwrap_or(chars.len());
@@ -106,7 +122,11 @@ fn ensure_loaded(vm: &mut Vm, filename: &str) -> PyResult<()> {
         }
         let (end, end_delim) = phys_end(last);
         let fv = py::s(vm, filename);
-        let l = vm.call(&cls, vec![fv.clone(), Value::Int(n as i64), Value::Int(start as i64)], Vec::new())?;
+        let l = vm.call(
+            &cls,
+            vec![fv.clone(), Value::Int(n as i64), Value::Int(start as i64)],
+            Vec::new(),
+        )?;
         py::set(vm, &l, "end", Value::Int(end as i64))?;
         py::set(vm, &l, "end_delim", Value::Int(end_delim as i64))?;
         let t: String = chars[start..end].iter().collect();
@@ -162,7 +182,12 @@ fn f_adjust_line_locations(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value
         let mut ln = py::int(vm, &p[1])?;
         if fname == f && from <= ln {
             ln += lo;
-            for (a, d) in [("number", lo), ("start", co), ("end", co), ("end_delim", co)] {
+            for (a, d) in [
+                ("number", lo),
+                ("start", co),
+                ("end", co),
+                ("end_delim", co),
+            ] {
                 let v = py::get(vm, &line, a)?;
                 let v = py::int(vm, &v)?;
                 py::set(vm, &line, a, Value::Int(v + d))?;
@@ -183,7 +208,10 @@ fn nodes_on(vm: &mut Vm, filename: &str, line: Option<u32>) -> PyResult<Vec<crat
     for i in 0..s.arena.len() {
         let id = i;
         let n = s.arena.get(id);
-        if &*n.filename == filename && line.is_none_or(|l| n.linenumber == l) && n.rollback != crate::ast::Rollback::Never {
+        if &*n.filename == filename
+            && line.is_none_or(|l| n.linenumber == l)
+            && n.rollback != crate::ast::Rollback::Never
+        {
             v.push(id);
         }
     }
@@ -212,7 +240,11 @@ fn f_nodes_on_line_at_or_after(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<V
     let l = py::int(vm, &args[1])? as u32;
     let all = nodes_on(vm, &f, None)?;
     let r = state::rt(vm);
-    let first = all.iter().map(|id| r.script.borrow().arena.get(*id).linenumber).filter(|n| *n >= l).min();
+    let first = all
+        .iter()
+        .map(|id| r.script.borrow().arena.get(*id).linenumber)
+        .filter(|n| *n >= l)
+        .min();
     match first {
         Some(m) => {
             let ids = nodes_on(vm, &f, Some(m))?;
@@ -270,8 +302,14 @@ fn f_can_add_before(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 fn read_only(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
-    let f = args.iter().find_map(|a| a.as_str().filter(|s| s.contains(".rpy")).map(str::to_owned)).unwrap_or_else(|| "the script".into());
-    Err(py::error(vm, format!("Script files are read-only in this runtime; {f} cannot be edited.")))
+    let f = args
+        .iter()
+        .find_map(|a| a.as_str().filter(|s| s.contains(".rpy")).map(str::to_owned))
+        .unwrap_or_else(|| "the script".into());
+    Err(py::error(
+        vm,
+        format!("Script files are read-only in this runtime; {f} cannot be edited."),
+    ))
 }
 
 /// `adjust_ast_linenumbers(filename, linenumber, offset)`.
@@ -291,22 +329,33 @@ fn f_adjust_ast_linenumbers(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Valu
 }
 
 fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
-    let m = crysirror_python::modules::module_with(vm, MODULE, &[
-        ("ensure_loaded", f_ensure_loaded),
-        ("get_line_text", f_get_line_text),
-        ("get_full_text", f_get_full_text),
-        ("adjust_line_locations", f_adjust_line_locations),
-        ("insert_line_before", read_only),
-        ("remove_line", read_only),
-        ("nodes_on_line", f_nodes_on_line),
-        ("nodes_on_line_at_or_after", f_nodes_on_line_at_or_after),
-        ("first_and_last_nodes", f_first_and_last_nodes),
-        ("adjust_ast_linenumbers", f_adjust_ast_linenumbers),
-        ("add_to_ast_before", read_only),
-        ("can_add_before", f_can_add_before),
-        ("remove_from_ast", read_only),
-    ]);
-    let line = py::class(vm, MODULE, "Line", &[], &[("__init__", line_init), ("__repr__", line_repr)], &[])?;
+    let m = crysirror_python::modules::module_with(
+        vm,
+        MODULE,
+        &[
+            ("ensure_loaded", f_ensure_loaded),
+            ("get_line_text", f_get_line_text),
+            ("get_full_text", f_get_full_text),
+            ("adjust_line_locations", f_adjust_line_locations),
+            ("insert_line_before", read_only),
+            ("remove_line", read_only),
+            ("nodes_on_line", f_nodes_on_line),
+            ("nodes_on_line_at_or_after", f_nodes_on_line_at_or_after),
+            ("first_and_last_nodes", f_first_and_last_nodes),
+            ("adjust_ast_linenumbers", f_adjust_ast_linenumbers),
+            ("add_to_ast_before", read_only),
+            ("can_add_before", f_can_add_before),
+            ("remove_from_ast", read_only),
+        ],
+    );
+    let line = py::class(
+        vm,
+        MODULE,
+        "Line",
+        &[],
+        &[("__init__", line_init), ("__repr__", line_repr)],
+        &[],
+    )?;
     crysirror_python::modules::set(vm, &m, "Line", Value::Obj(line));
     crysirror_python::modules::set(vm, &m, "lines", vm.types.new_dict());
     crysirror_python::modules::set(vm, &m, "files", vm.types.new_set(Default::default()));

@@ -94,14 +94,20 @@ pub struct ParseCx {
     warpers: HashSet<String>,
     pending: RefCell<Vec<Pending>>,
     errors: RefCell<Vec<ParseError>>,
+    release: (u32, u32),
 }
 
 impl ParseCx {
     pub fn new(vm: &mut Vm) -> ParseCx {
         let defs = defs(vm).borrow().clone();
         let names = defs.keys().cloned().collect();
-        let registry = super::state::try_rt(vm).map(|r| r.registry.borrow().clone()).unwrap_or_default();
-        let mut warpers: HashSet<String> = crate::atl::BUILTIN_WARPERS.iter().map(|s| s.to_string()).collect();
+        let registry = super::state::try_rt(vm)
+            .map(|r| r.registry.borrow().clone())
+            .unwrap_or_default();
+        let mut warpers: HashSet<String> = crate::atl::BUILTIN_WARPERS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         if let Ok(w) = py::import_attr(vm, "renpy.atl", "warpers") {
             if let Ok(keys) = py::items(vm, &w) {
                 for k in keys {
@@ -111,7 +117,17 @@ impl ParseCx {
                 }
             }
         }
-        ParseCx { defs, names, registry, warpers, pending: RefCell::default(), errors: RefCell::default() }
+        let release = super::state::try_rt(vm)
+            .map_or((8, 6), |r| (r.profile.version[0], r.profile.version[1]));
+        ParseCx {
+            defs,
+            names,
+            registry,
+            warpers,
+            pending: RefCell::default(),
+            errors: RefCell::default(),
+            release,
+        }
     }
 
     fn sub_block(&self, arena: &mut Arena, l: &Lexer) -> PResult<Vec<NodeId>> {
@@ -142,11 +158,21 @@ impl crate::atl::ParseContext for ParseCx {
 }
 
 impl ScriptContext for ParseCx {
+    fn release(&self) -> (u32, u32) {
+        self.release
+    }
+
     fn user_statement_names(&self) -> Vec<Vec<String>> {
         self.names.clone()
     }
 
-    fn parse_user_statement(&self, arena: &mut Arena, name: &[String], l: &mut Lexer, loc: &(Rc<str>, u32)) -> PResult<Vec<NodeId>> {
+    fn parse_user_statement(
+        &self,
+        arena: &mut Arena,
+        name: &[String],
+        l: &mut Lexer,
+        loc: &(Rc<str>, u32),
+    ) -> PResult<Vec<NodeId>> {
         let Some(def) = self.defs.get(name) else {
             return l.error(format!("unregistered statement {}", name.join(" ")));
         };
@@ -161,7 +187,9 @@ impl ScriptContext for ParseCx {
                 l.expect_block(&stmt)?;
                 code_block = Some(self.sub_block(arena, l)?);
             }
-            BlockKind::ScriptPossible if l.has_block() => code_block = Some(self.sub_block(arena, l)?),
+            BlockKind::ScriptPossible if l.has_block() => {
+                code_block = Some(self.sub_block(arena, l)?)
+            }
             BlockKind::Atl => {
                 l.expect_block(&stmt)?;
                 atl = Some(self.sub_atl(l)?);
@@ -183,14 +211,24 @@ impl ScriptContext for ParseCx {
                 atl,
             },
         );
-        self.pending.borrow_mut().push(Pending { id, name: name.to_vec(), lexer: l.clone() });
+        self.pending.borrow_mut().push(Pending {
+            id,
+            name: name.to_vec(),
+            lexer: l.clone(),
+        });
         l.advance();
         let mut rv = vec![id];
         if def.post {
             rv.push(arena.add(loc, NodeKind::PostUserStatement { parent: id }));
         }
         if def.init && !l.init {
-            rv = vec![arena.add(loc, NodeKind::Init { block: rv, priority: init_priority })];
+            rv = vec![arena.add(
+                loc,
+                NodeKind::Init {
+                    block: rv,
+                    priority: init_priority,
+                },
+            )];
         }
         Ok(rv)
     }
@@ -220,7 +258,10 @@ pub fn record_errors(vm: &mut Vm, errors: Vec<ParseError>) -> PyResult<()> {
 /// Runs the Rust parser over the script arena from Python (subparses of
 /// creator-defined statements, `renpy.parser.parse_block`). Statements
 /// queued meanwhile are parsed before returning.
-pub fn parse_with(vm: &mut Vm, f: impl FnOnce(&mut Parser) -> PResult<Vec<NodeId>>) -> PyResult<Vec<NodeId>> {
+pub fn parse_with(
+    vm: &mut Vm,
+    f: impl FnOnce(&mut Parser) -> PResult<Vec<NodeId>>,
+) -> PyResult<Vec<NodeId>> {
     let r = rt(vm);
     let cx = ParseCx::new(vm);
     let (result, errors) = {
@@ -257,7 +298,9 @@ fn entry_get(vm: &mut Vm, e: &Value, key: &str) -> PyResult<Value> {
 }
 
 fn is_parse_error(vm: &mut Vm, e: &crysirror_python::PyErr) -> bool {
-    let crysirror_python::PyErr::Exc(o) = e else { return false };
+    let crysirror_python::PyErr::Exc(o) = e else {
+        return false;
+    };
     match py::import_attr(vm, "renpy.lexer", "ParseError") {
         Ok(Value::Obj(c)) => ops::isinstance(vm, &Value::Obj(o.clone()), &c),
         _ => false,
@@ -268,7 +311,9 @@ fn is_parse_error(vm: &mut Vm, e: &crysirror_python::PyErr) -> bool {
 pub fn run_pending(vm: &mut Vm) -> PyResult<()> {
     let q = queue(vm);
     loop {
-        let Some(p) = q.borrow_mut().pop_front() else { return Ok(()) };
+        let Some(p) = q.borrow_mut().pop_front() else {
+            return Ok(());
+        };
         let name = name_tuple(vm, &p.name);
         let e = entry(vm, &name)?;
         let parse = entry_get(vm, &e, "parse")?;
@@ -280,7 +325,9 @@ pub fn run_pending(vm: &mut Vm) -> PyResult<()> {
             match vm.call(&parse, vec![l], Vec::new()) {
                 Ok(v) => v,
                 Err(err) if is_parse_error(vm, &err) => {
-                    let crysirror_python::PyErr::Exc(o) = &err else { unreachable!() };
+                    let crysirror_python::PyErr::Exc(o) = &err else {
+                        unreachable!()
+                    };
                     let msg = py::get(vm, &Value::Obj(o.clone()), "message")?;
                     let list = py::import_attr(vm, "renpy.parser", "parse_errors")?;
                     vm.call_method(&list, "append", vec![msg])?;
@@ -302,11 +349,20 @@ pub fn run_pending(vm: &mut Vm) -> PyResult<()> {
             blocks.push(ids);
         }
         let label = call_method(vm, "label", &parsed, Vec::new(), &[])?;
-        let label = if py::is_none(&label) { None } else { Some(py::string(vm, &label)?) };
+        let label = if py::is_none(&label) {
+            None
+        } else {
+            Some(py::string(vm, &label)?)
+        };
         let r = rt(vm);
         let mut script = r.script.borrow_mut();
         let node = script.arena.get_mut(p.id);
-        if let NodeKind::UserStatement { parsed: slot, subparses: sp, .. } = &mut node.kind {
+        if let NodeKind::UserStatement {
+            parsed: slot,
+            subparses: sp,
+            ..
+        } = &mut node.kind
+        {
             *slot = Some(parsed);
             *sp = blocks;
         }
@@ -320,19 +376,43 @@ pub fn run_pending(vm: &mut Vm) -> PyResult<()> {
 // Module functions.
 
 const REGISTER_ARGS: &[&str] = &[
-    "name", "parse", "lint", "execute", "predict", "next", "scry", "block", "init", "translatable", "execute_init", "init_priority", "label", "warp",
-    "translation_strings", "force_begin_rollback", "post_execute", "post_label", "predict_all", "predict_next", "execute_default", "reachable",
+    "name",
+    "parse",
+    "lint",
+    "execute",
+    "predict",
+    "next",
+    "scry",
+    "block",
+    "init",
+    "translatable",
+    "execute_init",
+    "init_priority",
+    "label",
+    "warp",
+    "translation_strings",
+    "force_begin_rollback",
+    "post_execute",
+    "post_label",
+    "predict_all",
+    "predict_next",
+    "execute_default",
+    "reachable",
 ];
 
 fn f_register(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     let mut vals: HashMap<&str, Value> = HashMap::new();
     for (i, a) in args.iter().enumerate() {
-        let Some(n) = REGISTER_ARGS.get(i) else { return Err(vm.type_error("register() takes at most 22 positional arguments")) };
+        let Some(n) = REGISTER_ARGS.get(i) else {
+            return Err(vm.type_error("register() takes at most 22 positional arguments"));
+        };
         vals.insert(n, a.clone());
     }
     for (k, v) in kw {
         let Some(n) = REGISTER_ARGS.iter().find(|n| **n == &**k) else {
-            return Err(vm.type_error(format!("register() got an unexpected keyword argument '{k}'")));
+            return Err(vm.type_error(format!(
+                "register() got an unexpected keyword argument '{k}'"
+            )));
         };
         vals.insert(n, v.clone());
     }
@@ -352,8 +432,21 @@ fn f_register(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
     }
     let d = py::dict(vm);
     for n in [
-        "parse", "lint", "execute", "execute_init", "predict", "next", "scry", "label", "warp", "translation_strings", "post_execute", "post_label",
-        "predict_next", "execute_default", "reachable",
+        "parse",
+        "lint",
+        "execute",
+        "execute_init",
+        "predict",
+        "next",
+        "scry",
+        "label",
+        "warp",
+        "translation_strings",
+        "post_execute",
+        "post_label",
+        "predict_next",
+        "execute_default",
+        "reachable",
     ] {
         py::dict_set(vm, &d, n, get(n))?;
     }
@@ -375,7 +468,10 @@ fn f_register(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
             Some("possible") => BlockKind::Possible,
             _ => {
                 let r = ops::repr(vm, v)?;
-                return Err(py::error(vm, format!("Unknown \"block\" argument value: {r}")));
+                return Err(py::error(
+                    vm,
+                    format!("Unknown \"block\" argument value: {r}"),
+                ));
             }
         },
     };
@@ -384,7 +480,13 @@ fn f_register(vm: &mut Vm, args: &[Value], kw: Kw) -> PyResult<Value> {
         None => 0,
     };
     let post = !py::is_none(&get("post_execute")) || !py::is_none(&get("post_label"));
-    let def = UserDef { block, init: flag(vm, "init", false)?, init_priority, post, translatable: flag(vm, "translatable", false)? };
+    let def = UserDef {
+        block,
+        init: flag(vm, "init", false)?,
+        init_priority,
+        post,
+        translatable: flag(vm, "translatable", false)?,
+    };
     defs(vm).borrow_mut().insert(parts, def);
     Ok(Value::None)
 }
@@ -405,7 +507,12 @@ fn match_name(names: &[Vec<String>], l: &mut Lexer) -> Option<Vec<String>> {
                 false
             }
         });
-        if ok && best.as_ref().map(|(b, _)| n.len() > b.len()).unwrap_or(true) {
+        if ok
+            && best
+                .as_ref()
+                .map(|(b, _)| n.len() > b.len())
+                .unwrap_or(true)
+        {
             best = Some((n.clone(), l.checkpoint()));
         }
     }
@@ -428,13 +535,25 @@ pub fn parse(vm: &mut Vm, node: &Value, line: &str, subblock: &Value) -> PyResul
     let filename: Rc<str> = py::string(vm, &f)?.into();
     let n = py::get(vm, node, "linenumber")?;
     let number = py::int(vm, &n)? as u32;
-    let block = if py::is_none(subblock) { Vec::new() } else { rlexer::block_from(vm, subblock)? };
-    let g = GroupedLine { filename: filename.clone(), number, indent: 0, text: line.chars().collect::<Vec<_>>().into(), block: Rc::new(block) };
+    let block = if py::is_none(subblock) {
+        Vec::new()
+    } else {
+        rlexer::block_from(vm, subblock)?
+    };
+    let g = GroupedLine {
+        filename: filename.clone(),
+        number,
+        indent: 0,
+        text: line.chars().collect::<Vec<_>>().into(),
+        block: Rc::new(block),
+    };
     let mut l = Lexer::new(Rc::new(vec![g]), false);
     l.advance();
     let names: Vec<Vec<String>> = defs(vm).borrow().keys().cloned().collect();
     let Some(name) = match_name(&names, &mut l) else {
-        let e = l.error::<()>("Could not find user-defined statement at runtime.").unwrap_err();
+        let e = l
+            .error::<()>("Could not find user-defined statement at runtime.")
+            .unwrap_err();
         return Err(rlexer::parse_error(vm, &e));
     };
     let nt = name_tuple(vm, &name);
@@ -455,7 +574,13 @@ fn f_parse(vm: &mut Vm, args: &[Value], _: Kw) -> PyResult<Value> {
 }
 
 /// `call(method, parsed, *args, **kwargs)`.
-pub fn call_method(vm: &mut Vm, method: &str, parsed: &Value, args: Vec<Value>, kw: Kw) -> PyResult<Value> {
+pub fn call_method(
+    vm: &mut Vm,
+    method: &str,
+    parsed: &Value,
+    args: Vec<Value>,
+    kw: Kw,
+) -> PyResult<Value> {
     let p = py::items(vm, parsed)?;
     let e = entry(vm, &p[0])?;
     let m = entry_get(vm, &e, method)?;
@@ -492,7 +617,13 @@ pub fn init_module(vm: &mut Vm) -> PyResult<ObjRef> {
     let m = crysirror_python::modules::module_with(
         vm,
         MODULE,
-        &[("register", f_register), ("parse", f_parse), ("call", f_call), ("get", f_get), ("get_name", f_get_name)],
+        &[
+            ("register", f_register),
+            ("parse", f_parse),
+            ("call", f_call),
+            ("get", f_get),
+            ("get_name", f_get_name),
+        ],
     );
     crysirror_python::modules::set(vm, &m, "registry", py::dict(vm));
     Ok(m)
